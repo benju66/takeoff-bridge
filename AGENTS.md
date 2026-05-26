@@ -1,5 +1,11 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# AI Agent Roles & Guardrails
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+## System Orchestration Architecture
+* **User Role**: System Architect, Visionary, and Final Reviewer.
+* **Agent Role**: Complete execution engine, code writer, and implementation specialist.
+
+## Core Operational Boundaries
+* **No Speculative Changes**: Do not invent, alter, or guess estimation formulas or Procore financial data models.
+* **No AI Autonomy Over Financials**: Missing data mappings must trigger the interactive user-override interface.
+* **Validation Protocols**: The agent must verify that multi-quantity row indexing matches the targeted unit metrics before writing output files.
+* **Review Framework**: Operate under a strict Review-Driven Development loop. Code revisions must be verified against current architecture models before local file state changes are saved.

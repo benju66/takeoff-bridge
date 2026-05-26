@@ -1,0 +1,16 @@
+# Antigravity AI Engine Rules
+
+# Type Safety & Architecture
+- Enforce strict, explicit TypeScript compilation typing across all files. No implicit `any` escapes.
+- Isolate server file-processing logic from interactive client UI presentation elements.
+- Utilize the Next.js App Router layer layout conventions (`/src/app`, `/src/components`, `/src/lib`).
+
+# UI Grid Component Execution
+- Optimize data grids to emulate standard Excel spreadsheet behaviors.
+- Implement explicit keyboard event handlers (`ArrowUp`, `ArrowDown`, `Enter`) for fast data entry fields.
+- Wrap inline style rules cleanly using unified TailwindCSS utilities.
+
+# Code Integrity & Output Guidelines
+- Provide functional, production-ready code outputs. Never use code blocks containing placeholders or `// TODO` tags.
+- Retain all established type interfaces, utility helper functions, and schema definitions during code refactoring cycles.
+- Keep structural methods brief, direct, and readable. Avoid overly dense formatting blocks.
