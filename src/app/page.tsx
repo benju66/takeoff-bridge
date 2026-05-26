@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Papa from "papaparse";
 import { parseTogalCSV } from "@/lib/parser";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
@@ -11,6 +11,19 @@ import { generateExcelPayload, generateProcoreBudget } from "@/lib/exporter";
 export default function Home() {
   const [rows, setRows] = useState<ProcessedTakeoffRow[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const saved = localStorage.getItem("takeoff_user_registry");
+    if (saved) {
+      try {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setUserRegistry(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse userRegistry from localStorage", e);
+      }
+    }
+  }, []);
 
   const downloadCSVFile = (content: string, filename: string) => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
@@ -42,7 +55,7 @@ export default function Home() {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = parseTogalCSV(results.data as TogalRowPayload[]);
+        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry);
         setRows(parsed);
       },
     });
@@ -70,7 +83,7 @@ export default function Home() {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = parseTogalCSV(results.data as TogalRowPayload[]);
+        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry);
         setRows(parsed);
       },
     });
@@ -80,8 +93,18 @@ export default function Home() {
     const updated = [...rows];
     const trimmedCode = newCode.trim();
     const targetItem = ESTIMATE_ITEMS_MASTER[trimmedCode];
+    const classification = updated[index].classification;
     
     updated[index].itemId = newCode;
+
+    // Save the classification-to-itemId string pair directly to userRegistry state and localStorage
+    const updatedRegistry = {
+      ...userRegistry,
+      [classification]: trimmedCode,
+    };
+    setUserRegistry(updatedRegistry);
+    localStorage.setItem("takeoff_user_registry", JSON.stringify(updatedRegistry));
+
     if (targetItem) {
       updated[index].description = targetItem.description;
       updated[index].procoreParentCode = targetItem.procoreParentCode;
@@ -99,6 +122,27 @@ export default function Home() {
       updated[index].matchedQty = qty;
       updated[index].total = qty * targetItem.defaultUnitPrice;
       updated[index].isMapped = true;
+
+      // Automatically reconcile all other rows with this same classification in the grid
+      for (let i = 0; i < updated.length; i++) {
+        if (i !== index && updated[i].classification === classification) {
+          updated[i].itemId = trimmedCode;
+          updated[i].description = targetItem.description;
+          updated[i].procoreParentCode = targetItem.procoreParentCode;
+          updated[i].unitPrice = targetItem.defaultUnitPrice;
+          updated[i].uom = targetItem.targetUom;
+          updated[i].costType = targetItem.costType;
+
+          const m = updated[i].rawQuantities.find(
+            (mq) => mq.uom?.trim().toUpperCase() === targetUom.toUpperCase()
+          ) || updated[i].rawQuantities[0];
+
+          const q = m?.qty || 0;
+          updated[i].matchedQty = q;
+          updated[i].total = q * targetItem.defaultUnitPrice;
+          updated[i].isMapped = true;
+        }
+      }
     } else {
       // Clear mapped data to avoid stale information and enforce interactive user override rules
       updated[index].description = "UNMAPPED - RECONCILE CODE";

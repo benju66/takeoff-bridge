@@ -22,23 +22,36 @@ function parseCleanFloat(val: unknown): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-export function parseTogalCSV(rawRows: TogalRowPayload[]): ProcessedTakeoffRow[] {
+export function parseTogalCSV(
+  rawRows: TogalRowPayload[],
+  userRegistry: Record<string, string> = {}
+): ProcessedTakeoffRow[] {
   return rawRows.map((row, index) => {
     const rawClassification = getCaseInsensitiveProp(row, "Classification");
     const classification = typeof rawClassification === "string" ? rawClassification.trim() : String(rawClassification || "").trim();
     if (!classification) return null;
 
-    // Direct match first
-    let itemId = INITIAL_MAPPING_REGISTRY[classification] || "";
+    // Direct match first: userRegistry override has priority over INITIAL_MAPPING_REGISTRY constant
+    let itemId = userRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
     
     // Fallback: trimmed, case-insensitive mapping lookup to be highly robust
     if (!itemId) {
       const normalizedClassification = classification.toLowerCase();
-      const matchedKey = Object.keys(INITIAL_MAPPING_REGISTRY).find(
+      
+      // Attempt to match row classifications against userRegistry overrides first
+      const userMatchedKey = Object.keys(userRegistry).find(
         (key) => key.trim().toLowerCase() === normalizedClassification
       );
-      if (matchedKey) {
-        itemId = INITIAL_MAPPING_REGISTRY[matchedKey];
+      if (userMatchedKey) {
+        itemId = userRegistry[userMatchedKey];
+      } else {
+        // Fallback to INITIAL_MAPPING_REGISTRY constants
+        const initialMatchedKey = Object.keys(INITIAL_MAPPING_REGISTRY).find(
+          (key) => key.trim().toLowerCase() === normalizedClassification
+        );
+        if (initialMatchedKey) {
+          itemId = INITIAL_MAPPING_REGISTRY[initialMatchedKey];
+        }
       }
     }
 
