@@ -147,7 +147,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   // --- Division 05 (Metals) ---
   "05-0000.001": {
     itemId: "05-0000.001",
-    procoreParentCode: "5-50000.000",
+    procoreParentCode: "5-51200.000",
     description: "Metals - Structural Steel Columns",
     targetUom: "LF",
     defaultUnitPrice: 85.00,
@@ -155,7 +155,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "05-0000.002": {
     itemId: "05-0000.002",
-    procoreParentCode: "5-50000.000",
+    procoreParentCode: "5-51200.000",
     description: "Metals - Structural Steel Beams",
     targetUom: "LF",
     defaultUnitPrice: 95.00,
@@ -163,7 +163,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "05-0000.003": {
     itemId: "05-0000.003",
-    procoreParentCode: "5-50000.000",
+    procoreParentCode: "5-51200.000",
     description: "Metals - Galvanized Metal Decking",
     targetUom: "SF",
     defaultUnitPrice: 6.50,
@@ -171,7 +171,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "05-0000.004": {
     itemId: "05-0000.004",
-    procoreParentCode: "5-50000.000",
+    procoreParentCode: "5-51200.000",
     description: "Metals - Steel Roof Joists & Bridging",
     targetUom: "LF",
     defaultUnitPrice: 40.00,
@@ -179,7 +179,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "05-0000.005": {
     itemId: "05-0000.005",
-    procoreParentCode: "5-50000.000",
+    procoreParentCode: "5-55000.000",
     description: "Metals - Decorative Metal Handrails",
     targetUom: "LF",
     defaultUnitPrice: 110.00,
@@ -189,7 +189,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   // --- Division 07 (Thermal & Moisture Protection) ---
   "07-0000.001": {
     itemId: "07-0000.001",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-72100.000",
     description: "Thermal - Rigid Foam Cavity Insulation",
     targetUom: "SF",
     defaultUnitPrice: 3.50,
@@ -197,7 +197,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "07-0000.002": {
     itemId: "07-0000.002",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-72100.000",
     description: "Thermal - Fiberglass Batt Insulation",
     targetUom: "SF",
     defaultUnitPrice: 1.80,
@@ -205,7 +205,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "07-0000.003": {
     itemId: "07-0000.003",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-72100.000",
     description: "Thermal - Spray Polyurethane Foam Insulation",
     targetUom: "SF",
     defaultUnitPrice: 4.75,
@@ -213,7 +213,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "07-0000.004": {
     itemId: "07-0000.004",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-75000.000",
     description: "Moisture - TPO Roofing Membrane System",
     targetUom: "SF",
     defaultUnitPrice: 12.50,
@@ -221,7 +221,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "07-0000.005": {
     itemId: "07-0000.005",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-71000.000",
     description: "Moisture - Polyethylene Vapor Barrier Under Slab",
     targetUom: "SF",
     defaultUnitPrice: 0.95,
@@ -229,7 +229,7 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
   },
   "07-0000.006": {
     itemId: "07-0000.006",
-    procoreParentCode: "7-70000.000",
+    procoreParentCode: "7-79200.000",
     description: "Moisture - Joint Sealants & Exterior Caulking",
     targetUom: "LF",
     defaultUnitPrice: 2.50,

@@ -7,6 +7,7 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, TogalRowPayload } from "@/types";
 import { Upload, Layers, AlertTriangle, CheckCircle2, TrendingUp, DollarSign, FileDown } from "lucide-react";
 import { generateExcelPayload, generateProcoreBudget } from "@/lib/exporter";
+import { getFuzzySuggestions } from "@/lib/similarity";
 
 export default function Home() {
   const [rows, setRows] = useState<ProcessedTakeoffRow[]>([]);
@@ -175,7 +176,10 @@ export default function Home() {
   const totalRows = rows.length;
   const mappedCount = rows.filter((r) => r.isMapped).length;
   const unmappedCount = totalRows - mappedCount;
-  const totalEstimatedCost = rows.reduce((sum, r) => sum + r.total, 0);
+  const subtotal = rows.reduce((sum, r) => sum + r.total, 0);
+  const generalLiability = subtotal * 0.01;
+  const fee = subtotal * 0.05;
+  const totalEstimatedCost = subtotal + generalLiability + fee;
 
   return (
     <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100 font-mono p-8 selection:bg-blue-600/30 selection:text-blue-200">
@@ -242,7 +246,7 @@ export default function Home() {
       ) : (
         <div className="space-y-8 animate-fade-in">
           {/* KPI Dashboard Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
             <div className="bg-neutral-900/60 border border-neutral-800/80 p-5 rounded-xl shadow-lg relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <Layers size={40} className="text-blue-400" />
@@ -268,7 +272,7 @@ export default function Home() {
               <p className="text-neutral-400 text-xs uppercase tracking-wider font-semibold">Unmapped Items</p>
               <h2 className={`text-2xl font-black mt-2 ${unmappedCount > 0 ? "text-amber-500" : "text-neutral-400"}`}>{unmappedCount}</h2>
               <div className="text-[10px] text-neutral-500 mt-1">
-                {unmappedCount > 0 ? "Requires manual suffix override" : "All matches reconciled"}
+                {unmappedCount > 0 ? "Requires manual override" : "All reconciled"}
               </div>
             </div>
 
@@ -276,12 +280,45 @@ export default function Home() {
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <DollarSign size={40} className="text-blue-400" />
               </div>
-              <p className="text-neutral-400 text-xs uppercase tracking-wider font-semibold">Estimated Cost</p>
-              <h2 className="text-2xl font-black text-emerald-400 mt-2">
+              <p className="text-neutral-400 text-xs uppercase tracking-wider font-semibold">Subtotal</p>
+              <h2 className="text-2xl font-black text-emerald-450 mt-2">
+                ${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+              <div className="text-[10px] text-neutral-500 mt-1">Raw takeoff sum</div>
+            </div>
+
+            <div className="bg-neutral-900/60 border border-neutral-800/80 p-5 rounded-xl shadow-lg relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <TrendingUp size={40} className="text-blue-400" />
+              </div>
+              <p className="text-neutral-400 text-xs uppercase tracking-wider font-semibold">GL Insurance (1%)</p>
+              <h2 className="text-2xl font-black text-blue-400 mt-2">
+                ${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+              <div className="text-[10px] text-neutral-500 mt-1">General Liability</div>
+            </div>
+
+            <div className="bg-neutral-900/60 border border-neutral-800/80 p-5 rounded-xl shadow-lg relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <TrendingUp size={40} className="text-indigo-400" />
+              </div>
+              <p className="text-neutral-400 text-xs uppercase tracking-wider font-semibold">Fee (5%)</p>
+              <h2 className="text-2xl font-black text-indigo-400 mt-2">
+                ${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+              <div className="text-[10px] text-neutral-500 mt-1">Contractor markup</div>
+            </div>
+
+            <div className="bg-gradient-to-br from-neutral-900 to-neutral-950 border border-blue-900/40 p-5 rounded-xl shadow-lg relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-20">
+                <DollarSign size={40} className="text-emerald-400 animate-pulse" />
+              </div>
+              <p className="text-neutral-300 text-xs uppercase tracking-wider font-bold">Total Est. Cost</p>
+              <h2 className="text-2xl font-black text-emerald-450 mt-2">
                 ${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </h2>
-              <div className="text-[10px] text-neutral-500 mt-1 flex items-center gap-1">
-                <TrendingUp size={10} className="text-emerald-400" /> Based on unit price sheets
+              <div className="text-[10px] text-neutral-400 mt-1 flex items-center gap-1 font-semibold">
+                <CheckCircle2 size={10} className="text-emerald-450" /> Subtotal + GL + Fee
               </div>
             </div>
           </div>
@@ -321,21 +358,41 @@ export default function Home() {
                     >
                       <td className="p-4 font-bold text-neutral-300">{row.classification}</td>
                       <td className="p-3">
-                        <div className="relative flex items-center w-full">
-                          <input
-                            id={`code-input-${index}`}
-                            type="text"
-                            list="estimate-items-options"
-                            className={`bg-neutral-900 border rounded px-3 py-1.5 w-36 text-neutral-100 outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
-                              row.isMapped 
-                                ? "border-neutral-800 focus:border-blue-500 focus:ring-blue-500" 
-                                : "border-amber-900/60 focus:border-amber-500 focus:ring-amber-500 bg-amber-950/20"
-                            }`}
-                            value={row.itemId}
-                            onChange={(e) => updateItemCode(index, e.target.value)}
-                            onKeyDown={(e) => handleKeyDown(e, index)}
-                            placeholder="Assign suffix..."
-                          />
+                        <div className="flex flex-col gap-2 w-full">
+                          <div className="relative flex items-center w-full">
+                            <input
+                              id={`code-input-${index}`}
+                              type="text"
+                              list="estimate-items-options"
+                              className={`bg-neutral-900 border rounded px-3 py-1.5 w-36 text-neutral-100 outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
+                                row.isMapped 
+                                  ? "border-neutral-800 focus:border-blue-500 focus:ring-blue-500" 
+                                  : "border-amber-900/60 focus:border-amber-500 focus:ring-amber-500 bg-amber-950/20"
+                              }`}
+                              value={row.itemId}
+                              onChange={(e) => updateItemCode(index, e.target.value)}
+                              onKeyDown={(e) => handleKeyDown(e, index)}
+                              placeholder="Assign suffix..."
+                            />
+                          </div>
+                          {!row.isMapped && (
+                            <div className="flex flex-col gap-1 mt-1">
+                              <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Suggestions:</span>
+                              <div className="flex flex-wrap gap-1.5">
+                                {getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER).map((sugg) => (
+                                  <button
+                                    key={sugg.itemId}
+                                    type="button"
+                                    onClick={() => updateItemCode(index, sugg.itemId)}
+                                    title={sugg.description}
+                                    className="bg-neutral-900 hover:bg-amber-950/40 text-amber-500/90 hover:text-amber-400 border border-neutral-850 hover:border-amber-800/80 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm"
+                                  >
+                                    {sugg.itemId}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="p-4 font-semibold text-neutral-400">{row.procoreParentCode || "—"}</td>
