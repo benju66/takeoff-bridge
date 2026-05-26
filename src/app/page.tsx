@@ -195,13 +195,15 @@ export default function Home() {
             <>
               <button 
                 onClick={handleExportExcel}
-                className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 border border-neutral-800 hover:border-neutral-700 text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg cursor-pointer"
+                disabled={unmappedCount > 0}
+                className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 border border-neutral-800 hover:border-neutral-700 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} /> Export Excel Payload
               </button>
               <button 
                 onClick={handleExportProcore}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg shadow-emerald-950/20 cursor-pointer"
+                disabled={unmappedCount > 0}
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-950/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} /> Export Procore Budget
               </button>
@@ -323,6 +325,7 @@ export default function Home() {
                           <input
                             id={`code-input-${index}`}
                             type="text"
+                            list="estimate-items-options"
                             className={`bg-neutral-900 border rounded px-3 py-1.5 w-36 text-neutral-100 outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
                               row.isMapped 
                                 ? "border-neutral-800 focus:border-blue-500 focus:ring-blue-500" 
@@ -355,6 +358,13 @@ export default function Home() {
           </div>
         </div>
       )}
+      <datalist id="estimate-items-options">
+        {Object.keys(ESTIMATE_ITEMS_MASTER).map((key) => (
+          <option key={key} value={key}>
+            {ESTIMATE_ITEMS_MASTER[key].description}
+          </option>
+        ))}
+      </datalist>
     </div>
   );
 }
