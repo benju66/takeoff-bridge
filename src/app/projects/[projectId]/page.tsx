@@ -80,6 +80,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const fee = subtotal * 0.05;
   const totalEstimatedCost = subtotal + generalLiability + fee;
 
+  // Multi-Family Unit Assembly Metrics Layer
+  const squareFootage: number = project ? project.squareFootage : 0;
+  const unitCount: number = project ? project.unitCount : 0;
+
+  const costPerSf: number = squareFootage > 0 ? totalEstimatedCost / squareFootage : 0;
+  const costPerUnit: number = unitCount > 0 ? totalEstimatedCost / unitCount : 0;
+
   // Auto-persist estimate state when dynamic items or calculations change
   useEffect(() => {
     if (!isLoaded || !projectId) return;
@@ -499,7 +506,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       ) : (
         <div className="space-y-8 animate-fade-in">
           {/* KPI Dashboard Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-4">
             <div className="bg-neutral-900/60 border border-neutral-800/80 p-5 rounded-xl shadow-lg relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <Layers size={40} className="text-blue-400" />
@@ -572,6 +579,40 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </h2>
               <div className="text-[10px] text-neutral-400 mt-1 flex items-center gap-1 font-semibold">
                 <CheckCircle2 size={10} className="text-emerald-450" /> Subtotal + GL + Fee
+              </div>
+            </div>
+
+            {/* Card A: Cost Per Square Foot (Terminal Theme) */}
+            <div className="bg-zinc-950 border border-emerald-900/50 p-5 rounded-xl shadow-lg relative overflow-hidden group font-mono">
+              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                <span className="text-emerald-500 text-3xl font-black">{`_`}</span>
+              </div>
+              <p className="text-emerald-500/80 text-[10px] uppercase tracking-wider font-bold flex items-center gap-1">
+                <span className="animate-pulse text-emerald-400">●</span> sys.est::sf_cost
+              </p>
+              <p className="text-neutral-400 text-xs mt-1 uppercase tracking-wider font-semibold">Cost Per SF</p>
+              <h2 className="text-2xl font-black text-emerald-400 mt-2 font-mono">
+                ${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+              <div className="text-[9px] text-emerald-600 mt-1 font-bold">
+                &gt;_ READY_
+              </div>
+            </div>
+
+            {/* Card B: Cost Per Unit (Terminal Theme) */}
+            <div className="bg-zinc-950 border border-cyan-900/50 p-5 rounded-xl shadow-lg relative overflow-hidden group font-mono">
+              <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                <span className="text-cyan-500 text-3xl font-black">{`_`}</span>
+              </div>
+              <p className="text-cyan-500/80 text-[10px] uppercase tracking-wider font-bold flex items-center gap-1">
+                <span className="animate-pulse text-cyan-400">●</span> sys.est::unit_cost
+              </p>
+              <p className="text-neutral-400 text-xs mt-1 uppercase tracking-wider font-semibold">Cost Per Unit</p>
+              <h2 className="text-2xl font-black text-cyan-400 mt-2 font-mono">
+                ${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+              <div className="text-[9px] text-cyan-600 mt-1 font-bold">
+                &gt;_ READY_
               </div>
             </div>
           </div>
