@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info } from "lucide-react";
-import { getProjects, saveProject } from "@/lib/db";
+import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2 } from "lucide-react";
+import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
 import { Project } from "@/types/db";
+
 
 export default function ProjectsDashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -51,6 +52,14 @@ export default function ProjectsDashboard() {
     setBidDate("");
     setIsModalOpen(false);
   };
+
+  const handleDeleteProject = (projectId: string) => {
+    if (window.confirm("Are you sure you want to permanently erase this project and all associated estimate matrices?")) {
+      deleteProjectData(projectId);
+      setProjects(getProjects());
+    }
+  };
+
 
   return (
     <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100 font-mono p-8 selection:bg-blue-600/30 selection:text-blue-200">
@@ -152,12 +161,20 @@ export default function ProjectsDashboard() {
                       </div>
                     </td>
                     <td className="p-4 text-center">
-                      <Link
-                        href={`/projects/${proj.id}`}
-                        className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-blue-950/40 text-blue-400 hover:text-blue-300 border border-neutral-800 hover:border-blue-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
-                      >
-                        Launch <ExternalLink size={12} />
-                      </Link>
+                      <div className="flex items-center justify-center gap-2">
+                        <Link
+                          href={`/projects/${proj.id}`}
+                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-blue-950/40 text-blue-400 hover:text-blue-300 border border-neutral-800 hover:border-blue-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
+                        >
+                          Launch <ExternalLink size={12} />
+                        </Link>
+                        <button
+                          onClick={() => handleDeleteProject(proj.id)}
+                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-rose-950/40 text-rose-450 hover:text-rose-350 border border-neutral-800 hover:border-rose-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm cursor-pointer"
+                        >
+                          Delete <Trash2 size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -74,3 +74,24 @@ export function saveProjectEstimate(estimate: ProjectEstimate): void {
   const key = `${ESTIMATE_PREFIX}${estimate.projectId}`;
   localStorage.setItem(key, JSON.stringify(estimate));
 }
+
+/**
+ * Cleanly removes the project from takeoff_projects, erases its estimate and items,
+ * and clears custom key settings to prevent browser database bloating.
+ */
+export function deleteProjectData(projectId: string): void {
+  if (!isClient()) return;
+  
+  // 1. Remove from "takeoff_projects" array
+  const projects = getProjects();
+  const filtered = projects.filter((p) => p.id !== projectId);
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(filtered));
+
+  // 2. Erase the estimate block (and any estimate items row arrays)
+  localStorage.removeItem(`${ESTIMATE_PREFIX}${projectId}`);
+  localStorage.removeItem(`takeoff_estimate_items_${projectId}`);
+
+  // 3. Clear custom key settings (like user registry)
+  localStorage.removeItem(`takeoff_user_registry_${projectId}`);
+}
+
