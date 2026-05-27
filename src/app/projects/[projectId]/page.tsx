@@ -25,7 +25,8 @@ import {
   ChevronLeft, 
   MapPin, 
   Calendar, 
-  Activity 
+  Activity,
+  RotateCcw
 } from "lucide-react";
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
@@ -77,6 +78,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [globalRegistry, setGlobalRegistry] = useState<Record<string, string>>({});
   const [isLoaded, setIsLoaded] = useState(false);
   const [appendData, setAppendData] = useState(false);
+  const [historyStack, setHistoryStack] = useState<ProcessedTakeoffRow[][]>([]);
+
+  const pushSnapshotToStack = (currentRows: ProcessedTakeoffRow[]) => {
+    setHistoryStack((prev) => [...prev.slice(-9), JSON.parse(JSON.stringify(currentRows))]);
+  };
 
   // Load project details and estimate on mount
   useEffect(() => {
@@ -248,6 +254,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       skipEmptyLines: true,
       complete: (results) => {
         const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
+        pushSnapshotToStack(rows);
         if (appendData) {
           setRows((prevRows) => {
             const appended = parsed.map((item, index) => ({
@@ -286,6 +293,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       skipEmptyLines: true,
       complete: (results) => {
         const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
+        pushSnapshotToStack(rows);
         if (appendData) {
           setRows((prevRows) => {
             const appended = parsed.map((item, index) => ({
@@ -454,6 +462,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
     if (pastedText.includes("\t") || pastedText.includes("\n") || pastedText.includes("\r")) {
       e.preventDefault();
       
+      pushSnapshotToStack(rows);
       const columnsList: (keyof ProcessedTakeoffRow)[] = ["itemId", "description", "matchedQty", "unitPrice"];
       const fieldTypes: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
       const startColIdx = fieldTypes.indexOf(type);
@@ -522,6 +531,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   // Central onCellEditChange cell modification handler using applyCellEditDirect Cascader
   const handleCellEdit = (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => {
+    pushSnapshotToStack(rows);
     const updated = [...rows];
     const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
     if (newRegistry) {
@@ -1015,9 +1025,26 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
                 <Activity size={16} className="text-blue-500 animate-pulse" /> Interactive Cell Grid Matrix
               </h3>
-              <span className="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700">
-                Excel Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
-              </span>
+              <div className="flex items-center gap-3">
+                {historyStack.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const nextStack = [...historyStack];
+                      const previousRows = nextStack.pop();
+                      if (previousRows) {
+                        setRows(previousRows);
+                        setHistoryStack(nextStack);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-amber-950/40 text-amber-500 hover:text-amber-400 border border-neutral-800 hover:border-amber-900/60 rounded-md px-2.5 py-1 font-bold uppercase transition-all duration-300 text-[10px] cursor-pointer"
+                  >
+                    <RotateCcw size={12} /> Undo Action ({historyStack.length})
+                  </button>
+                )}
+                <span className="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700">
+                  Excel Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
+                </span>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
