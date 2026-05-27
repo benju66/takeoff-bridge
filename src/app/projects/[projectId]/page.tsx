@@ -420,6 +420,16 @@ export default function ProjectWorkspace({ params }: PageProps) {
       }
     }
 
+    // Ingest project isolated cell locks from localStorage
+    const savedLockedCells = localStorage.getItem(`takeoff_locked_cells_${projectId}`);
+    if (savedLockedCells) {
+      try {
+        setLockedCells(JSON.parse(savedLockedCells));
+      } catch (e) {
+        console.error("Failed to parse project lockedCells", e);
+      }
+    }
+
     setIsLoaded(true);
   }, [projectId]);
 
@@ -546,6 +556,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
     return { divisionBreakdown: divisionBreakdownList, costTypeBreakdown: costTypeBreakdownList };
   }, [rows, subtotal]);
 
+  // Auto-persist custom cell locks state when they mutate
+  useEffect(() => {
+    if (!isLoaded || !projectId) return;
+    localStorage.setItem(`takeoff_locked_cells_${projectId}`, JSON.stringify(lockedCells));
+  }, [lockedCells, isLoaded, projectId]);
+
   // Auto-persist estimate state when dynamic items or calculations change
   useEffect(() => {
     if (!isLoaded || !projectId) return;
@@ -603,7 +619,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [exportError, setExportError] = useState<string | null>(null);
 
   const handleExportExcel = () => {
-    const payload = generateExcelPayload(rows);
+    const payload = generateExcelPayload(rows, columnDefs);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 
@@ -616,7 +632,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
     setIsExportingExcel(true);
     setExportError(null);
     try {
-      const blob = await generateExcelWorkbook(rows, project);
+      const blob = await generateExcelWorkbook(rows, project, columnDefs);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
