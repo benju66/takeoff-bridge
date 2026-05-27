@@ -106,6 +106,73 @@ export default function ProjectWorkspace({ params }: PageProps) {
     setHistoryStack((prev) => [...prev.slice(-9), JSON.parse(JSON.stringify(currentRows))]);
   };
 
+  const [unmappedTakeoffClassifications, setUnmappedTakeoffClassifications] = useState<string[]>([]);
+
+  const initializeDefaultEstimateRows = (): ProcessedTakeoffRow[] => {
+    const sortedKeys = Object.keys(ESTIMATE_ITEMS_MASTER).sort();
+    return sortedKeys.map((key, idx) => {
+      const item = ESTIMATE_ITEMS_MASTER[key];
+      return {
+        id: `row-${idx}`,
+        classification: "",
+        itemId: item.itemId,
+        procoreParentCode: item.procoreParentCode,
+        description: item.description,
+        matchedQty: 0,
+        uom: item.targetUom,
+        unitPrice: item.defaultUnitPrice,
+        total: 0,
+        isMapped: true,
+        rawQuantities: [],
+        costType: item.costType
+      };
+    });
+  };
+
+  const mergeTakeoffData = (parsed: ProcessedTakeoffRow[]) => {
+    pushSnapshotToStack(rows);
+    
+    const unmappedList: string[] = [];
+    parsed.forEach((parsedRow) => {
+      if (!parsedRow.itemId) {
+        if (!unmappedList.includes(parsedRow.classification)) {
+          unmappedList.push(parsedRow.classification);
+        }
+      }
+    });
+    setUnmappedTakeoffClassifications(unmappedList);
+
+    setRows((prevRows) => {
+      const updatedRows = prevRows.map((r) => {
+        if (!appendData) {
+          return {
+            ...r,
+            matchedQty: 0,
+            total: 0,
+            classification: "",
+            rawQuantities: []
+          };
+        }
+        return { ...r };
+      });
+
+      parsed.forEach((parsedRow) => {
+        if (!parsedRow.itemId) return;
+
+        const targetIdx = updatedRows.findIndex((r) => r.itemId === parsedRow.itemId);
+        if (targetIdx !== -1) {
+          updatedRows[targetIdx].matchedQty += parsedRow.matchedQty;
+          updatedRows[targetIdx].total = updatedRows[targetIdx].matchedQty * updatedRows[targetIdx].unitPrice;
+          
+          updatedRows[targetIdx].classification = parsedRow.classification;
+          updatedRows[targetIdx].rawQuantities = parsedRow.rawQuantities;
+        }
+      });
+
+      return updatedRows;
+    });
+  };
+
   const getMonthsBetween = (startStr: string, finishStr: string): number => {
     if (!startStr || !finishStr) return 0;
     const startParts = startStr.split("-").map(Number);
@@ -179,8 +246,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
     // Load Project Isolated Estimate Items & GCs / Site Ops
     const savedEstimate = getProjectEstimate(projectId);
     if (savedEstimate) {
-      if (savedEstimate.items) {
+      if (savedEstimate.items && savedEstimate.items.length > 0) {
         setRows(savedEstimate.items);
+      } else {
+        setRows(initializeDefaultEstimateRows());
       }
       if (savedEstimate.gcUtilization) {
         setUtilEx(savedEstimate.gcUtilization.utilEx ?? 0);
@@ -226,6 +295,24 @@ export default function ProjectWorkspace({ params }: PageProps) {
       } else {
         setRateSoilBorings(0);
       }
+    } else {
+      setRows(initializeDefaultEstimateRows());
+      setUtilEx(0);
+      setUtilSrPm(0);
+      setUtilPm(0);
+      setUtilPe(0);
+      setUtilSrSu(0);
+      setUtilSu(0);
+      setUtilAsstSu(0);
+      setUtilPa(0);
+      setEqDumpsters(0);
+      setEqToilets(0);
+      setEqElectric(0);
+      setQtyKnox(0);
+      setQtyPayrollCleaning(0);
+      setQtyHiredCleaning(0);
+      setQtySoilBorings(0);
+      setRateSoilBorings(0);
     }
 
     setIsLoaded(true);
@@ -300,8 +387,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   const unitCount: number = project ? project.unitCount : 0;
 
-  const costPerSf: number = squareFootage > 0 ? totalEstimatedCost / squareFootage : 0;
-  const costPerUnit: number = unitCount > 0 ? totalEstimatedCost / unitCount : 0;
+  const costPerSf: number = totalEstimatedCost / (squareFootage || 1);
+  const costPerUnit: number = totalEstimatedCost / (unitCount || 1);
 
   // Divisional & Cost Type Budget Aggregations
   const { divisionBreakdown, costTypeBreakdown } = React.useMemo(() => {
@@ -330,7 +417,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       .filter(([, total]) => total > 0)
       .map(([code, total]) => {
         const name = code === "Unmapped" ? "Unmapped Scope" : (DIVISION_NAMES[code] || `Division ${code}`);
-        const percentage = subtotal > 0 ? (total / subtotal) * 100 : 0;
+        const percentage = (total / (subtotal || 1)) * 100;
         return { code, name, total, percentage };
       })
       .sort((a, b) => {
@@ -340,9 +427,9 @@ export default function ProjectWorkspace({ params }: PageProps) {
       });
 
     const costTypeBreakdownList: CostTypeAggregation[] = [
-      { key: "M", label: "Materials", total: costTotals.M, percentage: subtotal > 0 ? (costTotals.M / subtotal) * 100 : 0 },
-      { key: "L", label: "Labor", total: costTotals.L, percentage: subtotal > 0 ? (costTotals.L / subtotal) * 100 : 0 },
-      { key: "S", label: "Subcontract", total: costTotals.S, percentage: subtotal > 0 ? (costTotals.S / subtotal) * 100 : 0 }
+      { key: "M", label: "Materials", total: costTotals.M, percentage: (costTotals.M / (subtotal || 1)) * 100 },
+      { key: "L", label: "Labor", total: costTotals.L, percentage: (costTotals.L / (subtotal || 1)) * 100 },
+      { key: "S", label: "Subcontract", total: costTotals.S, percentage: (costTotals.S / (subtotal || 1)) * 100 }
     ];
 
     return { divisionBreakdown: divisionBreakdownList, costTypeBreakdown: costTypeBreakdownList };
@@ -446,18 +533,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       skipEmptyLines: true,
       complete: (results) => {
         const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
-        pushSnapshotToStack(rows);
-        if (appendData) {
-          setRows((prevRows) => {
-            const appended = parsed.map((item, index) => ({
-              ...item,
-              id: `row-${prevRows.length + index}`
-            }));
-            return [...prevRows, ...appended];
-          });
-        } else {
-          setRows(parsed);
-        }
+        mergeTakeoffData(parsed);
       },
     });
   };
@@ -485,18 +561,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       skipEmptyLines: true,
       complete: (results) => {
         const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
-        pushSnapshotToStack(rows);
-        if (appendData) {
-          setRows((prevRows) => {
-            const appended = parsed.map((item, index) => ({
-              ...item,
-              id: `row-${prevRows.length + index}`
-            }));
-            return [...prevRows, ...appended];
-          });
-        } else {
-          setRows(parsed);
-        }
+        mergeTakeoffData(parsed);
       },
     });
   };
@@ -888,7 +953,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       header: "Cost/Unit",
       cell: (info) => {
         const row = info.row.original;
-        const cpu = unitCount > 0 ? row.total / unitCount : 0;
+        const cpu = row.total / (unitCount || 1);
         return (
           <div className="text-right font-bold text-neutral-400">
             ${cpu.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -901,7 +966,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       header: "Cost/S.F.",
       cell: (info) => {
         const row = info.row.original;
-        const cpsf = squareFootage > 0 ? row.total / squareFootage : 0;
+        const cpsf = row.total / (squareFootage || 1);
         return (
           <div className="text-right font-bold text-neutral-400">
             ${cpsf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1445,6 +1510,30 @@ export default function ProjectWorkspace({ params }: PageProps) {
             </div>
           </div>
 
+          {unmappedTakeoffClassifications.length > 0 && (
+            <div className="bg-amber-955/20 border border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-mono text-xs text-amber-500 animate-shake">
+              <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+                <AlertTriangle className="text-amber-500 animate-pulse" size={16} />
+                <span>Notice: Unmapped Classifications Detected</span>
+              </div>
+              <p className="text-[11px] text-neutral-400 leading-relaxed uppercase">
+                The following {unmappedTakeoffClassifications.length} classification(s) from your takeoff CSV were skipped because they are not yet mapped to any corporate code in your registry:
+              </p>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {unmappedTakeoffClassifications.map((cl) => (
+                  <span key={cl} className="bg-neutral-900 border border-neutral-800 text-[10px] text-amber-500/80 px-2.5 py-1 rounded font-bold">
+                    {cl}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 text-right">
+                <Link href="/registry" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-blue-400 hover:text-blue-300 transition-colors">
+                  Go to Global Registry to Add Mappings &rarr;
+                </Link>
+              </div>
+            </div>
+          )}
+
           {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
           <div className="bg-neutral-955 border border-neutral-850 rounded-xl overflow-hidden shadow-xl font-mono text-xs">
             {/* Sheet title bar */}
@@ -1633,27 +1722,61 @@ export default function ProjectWorkspace({ params }: PageProps) {
                       </td>
                     </tr>
                   ) : (
-                    table.getRowModel().rows.map((row) => (
-                      <tr 
-                        key={row.id} 
-                        className={`transition-colors ${
-                          !row.original.isMapped 
-                            ? "bg-amber-950/10 hover:bg-amber-950/15 border-l-4 border-l-amber-500" 
-                            : "hover:bg-neutral-900/30 border-l-4 border-l-transparent"
-                        }`}
-                      >
-                        {row.getVisibleCells().map((cell) => {
-                          let alignClass = "text-left";
-                          if (cell.column.id === "costType" || cell.column.id === "uom") alignClass = "text-center";
-                          if (["matchedQty", "unitPrice", "total", "costPerUnit", "costPerSf"].includes(cell.column.id)) alignClass = "text-right";
-                          return (
-                            <td key={cell.id} className={`p-3 ${alignClass}`}>
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
+                    (() => {
+                      let lastDivision = "";
+                      return table.getRowModel().rows.map((row, idx) => {
+                        const itemId = row.original.itemId || "";
+                        const currentDivision = itemId.split("-")[0] || "";
+                        
+                        let dividerRow = null;
+                        if (currentDivision && currentDivision !== lastDivision) {
+                          lastDivision = currentDivision;
+                          
+                          let divLabel = `DIVISION ${currentDivision}`;
+                          if (currentDivision === "01") divLabel = "DIVISION 01 — GENERAL CONDITIONS";
+                          else if (currentDivision === "02") divLabel = "DIVISION 02 — SITE REQUIREMENTS";
+                          else if (currentDivision === "03") divLabel = "DIVISION 03 — CONCRETE";
+                          else if (currentDivision === "04") divLabel = "DIVISION 04 — MASONRY";
+                          else if (currentDivision === "05") divLabel = "DIVISION 05 — METALS";
+                          else if (currentDivision === "06") divLabel = "DIVISION 06 — WOOD & PLASTICS";
+                          else if (currentDivision === "07") divLabel = "DIVISION 07 — THERMAL & MOISTURE";
+                          else if (currentDivision === "08") divLabel = "DIVISION 08 — OPENINGS";
+                          else if (currentDivision === "09") divLabel = "DIVISION 09 — FINISHES";
+
+                          dividerRow = (
+                            <tr key={`div-header-${currentDivision}`} className="bg-blue-950/40 border-y border-blue-900/60 font-sans select-none">
+                              <td colSpan={9} className="p-3 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
+                                {divLabel}
+                              </td>
+                            </tr>
                           );
-                        })}
-                      </tr>
-                    ))
+                        }
+
+                        return (
+                          <React.Fragment key={row.original.id || `row-${idx}`}>
+                            {dividerRow}
+                            <tr 
+                              className={`transition-colors ${
+                                !row.original.isMapped 
+                                  ? "bg-amber-950/10 hover:bg-amber-950/15 border-l-4 border-l-amber-500" 
+                                  : "hover:bg-neutral-900/30 border-l-4 border-l-transparent"
+                              }`}
+                            >
+                              {row.getVisibleCells().map((cell) => {
+                                let alignClass = "text-left";
+                                if (cell.column.id === "costType" || cell.column.id === "uom") alignClass = "text-center";
+                                if (["matchedQty", "unitPrice", "total", "costPerUnit", "costPerSf"].includes(cell.column.id)) alignClass = "text-right";
+                                return (
+                                  <td key={cell.id} className={`p-3 ${alignClass}`}>
+                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          </React.Fragment>
+                        );
+                      });
+                    })()
                   )}
                 </tbody>
                 
@@ -1661,7 +1784,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 {rows.length > 0 && (
                   <tfoot>
                     {/* Subtotal Row */}
-                    <tr className="border-t border-neutral-850 bg-neutral-900/30 text-xs font-bold text-neutral-300 font-mono">
+                    <tr className="border-t border-neutral-855 bg-neutral-900/30 text-xs font-bold text-neutral-300 font-mono">
                       <td className="p-3 text-center">TI</td>
                       <td className="p-3"></td>
                       <td className="p-3 text-left">Takeoff Subtotal</td>
@@ -1672,10 +1795,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         ${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(unitCount > 0 ? subtotal / unitCount : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(squareFootage > 0 ? subtotal / squareFootage : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
 
@@ -1693,10 +1816,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         ${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(unitCount > 0 ? generalLiability / unitCount : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(squareFootage > 0 ? generalLiability / squareFootage : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
 
@@ -1714,10 +1837,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         ${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(unitCount > 0 ? fee / unitCount : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="p-3 text-right">
-                        ${(squareFootage > 0 ? fee / squareFootage : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
 

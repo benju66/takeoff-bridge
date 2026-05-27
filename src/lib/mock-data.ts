@@ -2,7 +2,57 @@ import { InternalEstimateItem } from "@/types";
 
 // Seed data from your company estimate spreadsheets
 export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
+  // --- Division 01 ---
+  "01-0000": {
+    itemId: "01-0000",
+    procoreParentCode: "1-10000.000",
+    description: "General Conditions - Supervision",
+    targetUom: "MO",
+    defaultUnitPrice: 0,
+    costType: "L"
+  },
+  "01-0400": {
+    itemId: "01-0400",
+    procoreParentCode: "1-10000.000",
+    description: "General Conditions - Superintendent",
+    targetUom: "MO",
+    defaultUnitPrice: 0,
+    costType: "L"
+  },
+  "01-0230": {
+    itemId: "01-0230",
+    procoreParentCode: "1-10000.000",
+    description: "General Conditions - Project Management",
+    targetUom: "MO",
+    defaultUnitPrice: 0,
+    costType: "L"
+  },
+
   // --- Division 02 ---
+  "02-4100": {
+    itemId: "02-4100",
+    procoreParentCode: "2-24100.000",
+    description: "Site Requirements - Demolition & Clearing",
+    targetUom: "LS",
+    defaultUnitPrice: 0,
+    costType: "S"
+  },
+  "02-9010": {
+    itemId: "02-9010",
+    procoreParentCode: "2-29010.000",
+    description: "Progress Cleaning",
+    targetUom: "HR",
+    defaultUnitPrice: 74.00,
+    costType: "L"
+  },
+  "02-9020": {
+    itemId: "02-9020",
+    procoreParentCode: "2-29020.000",
+    description: "Temp Protection",
+    targetUom: "SF",
+    defaultUnitPrice: 0.25,
+    costType: "M"
+  },
   "02-9200.001": {
     itemId: "02-9200.001",
     procoreParentCode: "2-29200.000",
