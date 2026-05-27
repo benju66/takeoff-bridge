@@ -8,6 +8,13 @@ export interface Project {
   unitCount: number;
   bidDate: string;
   createdAt: string;
+  buildingPerimeter?: number;
+  buildingFootprint?: number;
+  podiumArea?: number;
+  woodframedArea?: number;
+  levelsAbovePodium?: number;
+  expectedStart?: string;
+  expectedFinish?: string;
 }
 
 export interface ProjectEstimate {
@@ -17,4 +24,11 @@ export interface ProjectEstimate {
   fee: number;
   totalCost: number;
   items: ProcessedTakeoffRow[];
+  generalConditionsTotal?: number;
+  gcUtilization?: Record<string, number>;
+  gcEquipmentOverrides?: Record<string, number>;
+  siteOperationsTotal?: number;
+  siteOpsQuantities?: Record<string, number>;
+  siteOpsRates?: Record<string, number>;
 }
+

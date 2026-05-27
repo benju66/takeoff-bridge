@@ -351,7 +351,6 @@ export async function generateExcelWorkbook(
   feeRow.getCell('I').alignment = { horizontal: 'right' };
 
   // Cleanly write visual spacing rows step-by-step to avoid dead unformatted layout gaps
-  currentRawRow++;
   for (let i = 0; i < 2; i++) {
     const spacerRow = worksheet.getRow(currentRawRow);
     spacerRow.eachCell({ includeEmpty: true }, (cell) => {
