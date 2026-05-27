@@ -30,6 +30,38 @@ import {
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
 
+interface DivisionAggregation {
+  code: string;
+  name: string;
+  total: number;
+  percentage: number;
+}
+
+interface CostTypeAggregation {
+  key: string;
+  label: string;
+  total: number;
+  percentage: number;
+}
+
+const DIVISION_NAMES: Record<string, string> = {
+  "02": "Existing Conditions",
+  "03": "Concrete",
+  "04": "Masonry",
+  "05": "Metals",
+  "06": "Wood & Plastics",
+  "07": "Thermal & Moisture",
+  "08": "Openings",
+  "09": "Finishes"
+};
+
+const getTerminalProgressBar = (percentage: number): string => {
+  const totalBlocks = 10;
+  const filledBlocks = Math.min(totalBlocks, Math.max(0, Math.round(percentage / 10)));
+  const emptyBlocks = totalBlocks - filledBlocks;
+  return "█".repeat(filledBlocks) + "░".repeat(emptyBlocks);
+};
+
 interface PageProps {
   params: Promise<{ projectId: string }>;
 }
@@ -42,7 +74,9 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [rows, setRows] = useState<ProcessedTakeoffRow[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
+  const [globalRegistry, setGlobalRegistry] = useState<Record<string, string>>({});
   const [isLoaded, setIsLoaded] = useState(false);
+  const [appendData, setAppendData] = useState(false);
 
   // Load project details and estimate on mount
   useEffect(() => {
@@ -59,6 +93,16 @@ export default function ProjectWorkspace({ params }: PageProps) {
         setUserRegistry(JSON.parse(savedRegistry));
       } catch (e) {
         console.error("Failed to parse project userRegistry", e);
+      }
+    }
+
+    // Load Global Corporate Registry
+    const savedGlobalRegistry = localStorage.getItem("takeoff_global_user_registry");
+    if (savedGlobalRegistry) {
+      try {
+        setGlobalRegistry(JSON.parse(savedGlobalRegistry));
+      } catch (e) {
+        console.error("Failed to parse global userRegistry", e);
       }
     }
 
@@ -86,6 +130,51 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   const costPerSf: number = squareFootage > 0 ? totalEstimatedCost / squareFootage : 0;
   const costPerUnit: number = unitCount > 0 ? totalEstimatedCost / unitCount : 0;
+
+  // Divisional & Cost Type Budget Aggregations
+  const { divisionBreakdown, costTypeBreakdown } = React.useMemo(() => {
+    const divisionTotals: Record<string, number> = {};
+    const costTotals: Record<string, number> = {
+      M: 0,
+      L: 0,
+      S: 0
+    };
+
+    rows.forEach((row) => {
+      const code = row.itemId && row.itemId.length >= 2 ? row.itemId.substring(0, 2) : "";
+      const division = /^\d{2}$/.test(code) ? code : "Unmapped";
+      
+      divisionTotals[division] = (divisionTotals[division] || 0) + row.total;
+      
+      const type = (row.costType || "M").toUpperCase();
+      if (type in costTotals) {
+        costTotals[type] += row.total;
+      } else {
+        costTotals.M += row.total;
+      }
+    });
+
+    const divisionBreakdownList: DivisionAggregation[] = Object.entries(divisionTotals)
+      .filter(([, total]) => total > 0)
+      .map(([code, total]) => {
+        const name = code === "Unmapped" ? "Unmapped Scope" : (DIVISION_NAMES[code] || `Division ${code}`);
+        const percentage = subtotal > 0 ? (total / subtotal) * 100 : 0;
+        return { code, name, total, percentage };
+      })
+      .sort((a, b) => {
+        if (a.code === "Unmapped") return 1;
+        if (b.code === "Unmapped") return -1;
+        return a.code.localeCompare(b.code);
+      });
+
+    const costTypeBreakdownList: CostTypeAggregation[] = [
+      { key: "M", label: "Materials", total: costTotals.M, percentage: subtotal > 0 ? (costTotals.M / subtotal) * 100 : 0 },
+      { key: "L", label: "Labor", total: costTotals.L, percentage: subtotal > 0 ? (costTotals.L / subtotal) * 100 : 0 },
+      { key: "S", label: "Subcontract", total: costTotals.S, percentage: subtotal > 0 ? (costTotals.S / subtotal) * 100 : 0 }
+    ];
+
+    return { divisionBreakdown: divisionBreakdownList, costTypeBreakdown: costTypeBreakdownList };
+  }, [rows, subtotal]);
 
   // Auto-persist estimate state when dynamic items or calculations change
   useEffect(() => {
@@ -158,8 +247,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry);
-        setRows(parsed);
+        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
+        if (appendData) {
+          setRows((prevRows) => {
+            const appended = parsed.map((item, index) => ({
+              ...item,
+              id: `row-${prevRows.length + index}`
+            }));
+            return [...prevRows, ...appended];
+          });
+        } else {
+          setRows(parsed);
+        }
       },
     });
   };
@@ -186,8 +285,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry);
-        setRows(parsed);
+        const parsed = parseTogalCSV(results.data as TogalRowPayload[], userRegistry, globalRegistry);
+        if (appendData) {
+          setRows((prevRows) => {
+            const appended = parsed.map((item, index) => ({
+              ...item,
+              id: `row-${prevRows.length + index}`
+            }));
+            return [...prevRows, ...appended];
+          });
+        } else {
+          setRows(parsed);
+        }
       },
     });
   };
@@ -359,6 +468,9 @@ export default function ProjectWorkspace({ params }: PageProps) {
       let registryChanged = false;
       let didModify = false;
       
+      let currentGlobalRegistry = { ...globalRegistry };
+      let globalRegistryChanged = false;
+      
       for (let i = 0; i < lines.length; i++) {
         const targetRowIdx = startRowIdx + i;
         if (targetRowIdx >= updated.length) break;
@@ -379,6 +491,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
           if (resultRegistry) {
             currentRegistry = resultRegistry;
             registryChanged = true;
+            
+            if (field === "itemId") {
+              const row = updated[targetRowIdx];
+              if (row) {
+                currentGlobalRegistry = {
+                  ...currentGlobalRegistry,
+                  [row.classification]: String(rawValue).trim()
+                };
+                globalRegistryChanged = true;
+              }
+            }
           }
         }
       }
@@ -387,6 +510,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
         if (registryChanged) {
           setUserRegistry(currentRegistry);
           localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(currentRegistry));
+        }
+        if (globalRegistryChanged) {
+          setGlobalRegistry(currentGlobalRegistry);
+          localStorage.setItem("takeoff_global_user_registry", JSON.stringify(currentGlobalRegistry));
         }
         setRows(updated);
       }
@@ -400,6 +527,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
     if (newRegistry) {
       setUserRegistry(newRegistry);
       localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(newRegistry));
+      
+      // Update global company harvested registry overrides simultaneously
+      const classification = updated[index]?.classification;
+      if (classification && field === "itemId") {
+        const newGlobalRegistry = {
+          ...globalRegistry,
+          [classification]: String(value).trim(),
+        };
+        setGlobalRegistry(newGlobalRegistry);
+        localStorage.setItem("takeoff_global_user_registry", JSON.stringify(newGlobalRegistry));
+      }
     }
     setRows(updated);
   };
@@ -612,6 +750,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </button>
             </>
           )}
+          <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-lg px-4 py-3 text-xs text-neutral-355 transition-colors hover:border-neutral-700 select-none">
+            <input
+              id="append-checkbox-header"
+              type="checkbox"
+              checked={appendData}
+              onChange={(e) => setAppendData(e.target.checked)}
+              className="w-4 h-4 rounded border-neutral-700 text-blue-600 focus:ring-blue-500 bg-neutral-800 cursor-pointer"
+            />
+            <label htmlFor="append-checkbox-header" className="cursor-pointer font-bold uppercase tracking-wider">
+              Append Data
+            </label>
+          </div>
           <label className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg shadow-blue-900/30 hover:shadow-indigo-900/40 transform hover:-translate-y-0.5">
             <Upload size={18} /> Upload Togal CSV
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
@@ -642,6 +792,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
           <span className="text-neutral-600 text-[10px] uppercase tracking-widest bg-neutral-900 border border-neutral-800 px-3 py-1 rounded">
             UTF-8 CSV Only
           </span>
+          <div className="mt-6 flex items-center gap-2 bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-xs text-neutral-350 transition-colors hover:border-neutral-750 select-none">
+            <input 
+              id="append-checkbox-dropzone"
+              type="checkbox" 
+              checked={appendData} 
+              onChange={(e) => setAppendData(e.target.checked)} 
+              className="w-4 h-4 rounded border-neutral-700 text-blue-600 focus:ring-blue-500 bg-neutral-800 cursor-pointer"
+            />
+            <label htmlFor="append-checkbox-dropzone" className="cursor-pointer font-bold uppercase tracking-wider">
+              Append Data Mode
+            </label>
+          </div>
         </div>
       ) : (
         <div className="space-y-8 animate-fade-in">
@@ -765,6 +927,84 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </h2>
               <div className="text-[9px] text-cyan-600 mt-1 font-bold">
                 &gt;_ READY_
+              </div>
+            </div>
+          </div>
+
+          {/* Summary Analytics Matrix Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-neutral-800 bg-neutral-950 rounded-xl p-5 shadow-2xl font-mono text-xs">
+            {/* Left Column: Divisional Breakdown */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between border-b border-neutral-800 pb-2 text-[10px] text-neutral-500 uppercase tracking-widest font-bold">
+                <span>[SYS.ANALYTICS // DIVISIONAL BREAKDOWN]</span>
+                <span>Subtotal Contribution</span>
+              </div>
+              {divisionBreakdown.length === 0 ? (
+                <div className="text-neutral-600 italic py-4">No active divisions mapped.</div>
+              ) : (
+                <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto pr-1">
+                  {divisionBreakdown.map((div) => (
+                    <div key={div.code} className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-blue-500 font-bold w-6 text-right shrink-0">{div.code}</span>
+                        <span className="text-neutral-300 font-bold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono shrink-0 ml-auto">
+                        <span className="text-neutral-500 text-[10px] hidden sm:inline font-bold">
+                          [{getTerminalProgressBar(div.percentage)}]
+                        </span>
+                        <span className="text-neutral-400 text-right w-12 font-bold">{div.percentage.toFixed(1)}%</span>
+                        <span className="text-emerald-400 text-right w-24 font-bold">
+                          ${div.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Cost Type Breakdown */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center border-b border-neutral-800 pb-2 text-[10px] text-neutral-500 uppercase tracking-widest font-bold">
+                <span>[SYS.ANALYTICS // COST TYPE SCOPES]</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {costTypeBreakdown.map((ct) => {
+                  let accentColor = "border-neutral-800 text-neutral-400";
+                  let badgeBg = "bg-neutral-900 text-neutral-400 border-neutral-800";
+                  if (ct.key === "M") {
+                    accentColor = "border-emerald-900/60 hover:border-emerald-800 bg-emerald-950/5 text-emerald-400";
+                    badgeBg = "bg-emerald-950/40 text-emerald-400 border-emerald-900/50";
+                  } else if (ct.key === "L") {
+                    accentColor = "border-cyan-900/60 hover:border-cyan-800 bg-cyan-950/5 text-cyan-400";
+                    badgeBg = "bg-cyan-950/40 text-cyan-400 border-cyan-900/50";
+                  } else if (ct.key === "S") {
+                    accentColor = "border-amber-900/60 hover:border-amber-800 bg-amber-950/5 text-amber-500";
+                    badgeBg = "bg-amber-950/40 text-amber-500 border-amber-900/50";
+                  }
+                  return (
+                    <div
+                      key={ct.key}
+                      className={`flex flex-col justify-between p-4 border rounded-xl transition-all ${accentColor}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="font-extrabold uppercase text-[10px] tracking-wider">{ct.label}</span>
+                        <span className={`text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${badgeBg}`}>
+                          {ct.key}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <h4 className="text-neutral-100 text-base font-black">
+                          ${ct.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </h4>
+                        <p className="text-[10px] text-neutral-500 mt-1 font-bold">
+                          {ct.percentage.toFixed(1)}% of subtotal
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

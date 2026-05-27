@@ -24,15 +24,16 @@ function parseCleanFloat(val: unknown): number {
 
 export function parseTogalCSV(
   rawRows: TogalRowPayload[],
-  userRegistry: Record<string, string> = {}
+  userRegistry: Record<string, string> = {},
+  globalRegistry: Record<string, string> = {}
 ): ProcessedTakeoffRow[] {
   return rawRows.map((row, index) => {
     const rawClassification = getCaseInsensitiveProp(row, "Classification");
     const classification = typeof rawClassification === "string" ? rawClassification.trim() : String(rawClassification || "").trim();
     if (!classification) return null;
 
-    // Direct match first: userRegistry override has priority over INITIAL_MAPPING_REGISTRY constant
-    let itemId = userRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
+    // Direct match first: userRegistry override has priority over globalRegistry override and INITIAL_MAPPING_REGISTRY constant
+    let itemId = userRegistry[classification] || globalRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
     
     // Fallback: trimmed, case-insensitive mapping lookup to be highly robust
     if (!itemId) {
@@ -45,12 +46,20 @@ export function parseTogalCSV(
       if (userMatchedKey) {
         itemId = userRegistry[userMatchedKey];
       } else {
-        // Fallback to INITIAL_MAPPING_REGISTRY constants
-        const initialMatchedKey = Object.keys(INITIAL_MAPPING_REGISTRY).find(
+        // Attempt to match row classifications against globalRegistry overrides second
+        const globalMatchedKey = Object.keys(globalRegistry).find(
           (key) => key.trim().toLowerCase() === normalizedClassification
         );
-        if (initialMatchedKey) {
-          itemId = INITIAL_MAPPING_REGISTRY[initialMatchedKey];
+        if (globalMatchedKey) {
+          itemId = globalRegistry[globalMatchedKey];
+        } else {
+          // Fallback to INITIAL_MAPPING_REGISTRY constants
+          const initialMatchedKey = Object.keys(INITIAL_MAPPING_REGISTRY).find(
+            (key) => key.trim().toLowerCase() === normalizedClassification
+          );
+          if (initialMatchedKey) {
+            itemId = INITIAL_MAPPING_REGISTRY[initialMatchedKey];
+          }
         }
       }
     }

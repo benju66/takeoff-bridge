@@ -75,7 +75,13 @@ export default function ProjectsDashboard() {
           </p>
         </div>
         
-        <div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/registry"
+            className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-250 border border-neutral-800 hover:border-neutral-700 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg cursor-pointer"
+          >
+            <Activity size={18} className="text-blue-500" /> Global Registry
+          </Link>
           <button
             onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg shadow-blue-900/30 hover:shadow-indigo-900/40 transform hover:-translate-y-0.5"

@@ -216,8 +216,10 @@ export async function generateExcelWorkbook(
           fill: worksheet.getRow(r).getCell('D').fill,
           alignment: worksheet.getRow(r).getCell('D').alignment,
         };
-        // Clear this placeholder row to keep data region clean
-        worksheet.getRow(r).values = [];
+        // Clear this placeholder row cell values while preserving styles to prevent layout gaps
+        worksheet.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
+          cell.value = null;
+        });
       } else if (valStr.includes("Fee (5%)") || valStr.includes("Contractor Fee")) {
         // Capture cell styles
         feeStyle = {
@@ -225,8 +227,10 @@ export async function generateExcelWorkbook(
           fill: worksheet.getRow(r).getCell('D').fill,
           alignment: worksheet.getRow(r).getCell('D').alignment,
         };
-        // Clear this placeholder row
-        worksheet.getRow(r).values = [];
+        // Clear this placeholder row cell values while preserving styles
+        worksheet.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
+          cell.value = null;
+        });
       }
     }
   }
@@ -252,7 +256,7 @@ export async function generateExcelWorkbook(
     excelRow.getCell('F').value = qty;                       // Column F
     excelRow.getCell('G').value = row.uom || "";             // Column G
     excelRow.getCell('H').value = price;                     // Column H
-    excelRow.getCell('I').value = total;                     // Column I
+    excelRow.getCell('I').value = { formula: `F${currentRawRow}*H${currentRawRow}` }; // Column I live formula
 
     // Add formats/alignments
     excelRow.getCell('F').numFmt = '#,##0.00';
@@ -269,8 +273,17 @@ export async function generateExcelWorkbook(
     currentRawRow++;
   }
 
-  // Let's add two blank rows for visual spacing
-  currentRawRow += 2;
+  // Determine the exact end row of the inserted data block
+  const endRowIdx = currentRawRow - 1;
+
+  // Cleanly write visual spacing rows step-by-step and leverage explicit worksheet rows to avoid dead unformatted layout gaps
+  for (let i = 0; i < 2; i++) {
+    const spacerRow = worksheet.getRow(currentRawRow);
+    spacerRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.value = null;
+    });
+    currentRawRow++;
+  }
 
   // Append dynamic tracking rows at the bottom
   const generalLiability = subtotal * 0.01;
@@ -286,7 +299,7 @@ export async function generateExcelWorkbook(
   glRow.getCell('F').value = 1;
   glRow.getCell('G').value = "LS";
   glRow.getCell('H').value = generalLiability;
-  glRow.getCell('I').value = generalLiability;
+  glRow.getCell('I').value = { formula: `SUM(I10:I${endRowIdx})*0.01` };
 
   // Apply original style or premium default
   glRow.eachCell((cell) => {
@@ -318,7 +331,7 @@ export async function generateExcelWorkbook(
   feeRow.getCell('F').value = 1;
   feeRow.getCell('G').value = "LS";
   feeRow.getCell('H').value = fee;
-  feeRow.getCell('I').value = fee;
+  feeRow.getCell('I').value = { formula: `SUM(I10:I${endRowIdx})*0.05` };
 
   feeRow.eachCell((cell) => {
     if (feeStyle) {
@@ -337,10 +350,17 @@ export async function generateExcelWorkbook(
   feeRow.getCell('G').alignment = { horizontal: 'center' };
   feeRow.getCell('I').alignment = { horizontal: 'right' };
 
-  currentRawRow += 2;
+  // Cleanly write visual spacing rows step-by-step to avoid dead unformatted layout gaps
+  currentRawRow++;
+  for (let i = 0; i < 2; i++) {
+    const spacerRow = worksheet.getRow(currentRawRow);
+    spacerRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.value = null;
+    });
+    currentRawRow++;
+  }
 
   // 3. Grand Total Row
-  const totalRowValue = subtotal + generalLiability + fee;
   const grandTotalRow = worksheet.getRow(currentRawRow);
   grandTotalRow.getCell('A').value = "TI";
   grandTotalRow.getCell('B').value = "";
@@ -350,7 +370,7 @@ export async function generateExcelWorkbook(
   grandTotalRow.getCell('F').value = "";
   grandTotalRow.getCell('G').value = "";
   grandTotalRow.getCell('H').value = "";
-  grandTotalRow.getCell('I').value = totalRowValue;
+  grandTotalRow.getCell('I').value = { formula: `SUM(I10:I${currentRawRow - 1})` };
 
   grandTotalRow.eachCell((cell) => {
     cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
@@ -368,4 +388,5 @@ export async function generateExcelWorkbook(
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   });
 }
+
 
