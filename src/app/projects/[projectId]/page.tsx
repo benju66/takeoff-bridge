@@ -75,20 +75,46 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [globalRegistry, setGlobalRegistry] = useState<Record<string, string>>({});
   const [isLoaded, setIsLoaded] = useState(false);
   const [appendData, setAppendData] = useState(false);
-  const [historyStack, setHistoryStack] = useState<ProcessedTakeoffRow[][]>([]);
+  interface WorkbookSnapshot {
+    items: ProcessedTakeoffRow[];
+    locks: Record<string, boolean>;
+  }
+  const [historyStack, setHistoryStack] = useState<WorkbookSnapshot[]>([]);
+
+  interface ColumnDefinition {
+    id: string;
+    header: string;
+    type: "default" | "custom";
+  }
+
+  const [columnDefs, setColumnDefs] = useState<ColumnDefinition[]>([
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+    { id: "costPerUnit", header: "Cost/Unit", type: "default" },
+    { id: "costPerSf", header: "Cost/S.F.", type: "default" },
+  ]);
 
   interface ContextMenuState {
     visible: boolean;
     x: number;
     y: number;
     rowIndex: number;
+    columnId: string; // Tracks cell column identifier
   }
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
     y: 0,
-    rowIndex: -1
+    rowIndex: -1,
+    columnId: ""
   });
+
+  const [lockedCells, setLockedCells] = useState<Record<string, boolean>>({});
 
   // Step 2 & 3 Workspace Active Tab
   const [activeTab, setActiveTab] = useState<string>("step4");
@@ -115,8 +141,14 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [qtySoilBorings, setQtySoilBorings] = useState<number>(0);
   const [rateSoilBorings, setRateSoilBorings] = useState<number>(0);
 
-  const pushSnapshotToStack = (currentRows: ProcessedTakeoffRow[]) => {
-    setHistoryStack((prev) => [...prev.slice(-9), JSON.parse(JSON.stringify(currentRows))]);
+  const pushSnapshotToStack = (currentRows: ProcessedTakeoffRow[], currentLocks: Record<string, boolean>) => {
+    setHistoryStack((prev) => [
+      ...prev.slice(-9),
+      {
+        items: JSON.parse(JSON.stringify(currentRows)),
+        locks: JSON.parse(JSON.stringify(currentLocks))
+      }
+    ]);
   };
 
   // Outside click handler to dismiss context menu
@@ -134,7 +166,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   // Splicing engine to insert a new manual row above or below target index
   const insertManualRow = (direction: "above" | "below", targetIndex: number) => {
-    pushSnapshotToStack(rows);
+    pushSnapshotToStack(rows, lockedCells);
     const updated = [...rows];
     
     const newRow: ProcessedTakeoffRow = {
@@ -149,12 +181,23 @@ export default function ProjectWorkspace({ params }: PageProps) {
       total: 0,
       isMapped: false,
       rawQuantities: [],
-      costType: "M"
+      costType: "M",
+      customFields: {}
     };
 
     const insertIdx = direction === "above" ? targetIndex : targetIndex + 1;
     updated.splice(insertIdx, 0, newRow);
     setRows(updated);
+  };
+
+  const handleToggleCellLock = (rowId: string, columnId: string) => {
+    pushSnapshotToStack(rows, lockedCells);
+    const cellKey = `${rowId}::${columnId}`;
+    setLockedCells((prev) => ({
+      ...prev,
+      [cellKey]: !prev[cellKey]
+    }));
+    setContextMenu({ visible: false, x: 0, y: 0, rowIndex: -1, columnId: "" });
   };
 
   const [unmappedTakeoffClassifications, setUnmappedTakeoffClassifications] = useState<string[]>([]);
@@ -175,13 +218,14 @@ export default function ProjectWorkspace({ params }: PageProps) {
         total: 0,
         isMapped: true,
         rawQuantities: [],
-        costType: item.costType
+        costType: item.costType,
+        customFields: {}
       };
     });
   };
 
   const mergeTakeoffData = (parsed: ProcessedTakeoffRow[]) => {
-    pushSnapshotToStack(rows);
+    pushSnapshotToStack(rows, lockedCells);
     
     const unmappedList: string[] = [];
     parsed.forEach((parsedRow) => {
@@ -366,8 +410,24 @@ export default function ProjectWorkspace({ params }: PageProps) {
       setRateSoilBorings(0);
     }
 
+    // Load Project Isolated Column Definitions
+    const savedColumnDefs = localStorage.getItem(`takeoff_column_defs_${projectId}`);
+    if (savedColumnDefs) {
+      try {
+        setColumnDefs(JSON.parse(savedColumnDefs));
+      } catch (e) {
+        console.error("Failed to parse project columnDefs", e);
+      }
+    }
+
     setIsLoaded(true);
   }, [projectId]);
+
+  // Auto-persist column definitions when they change
+  useEffect(() => {
+    if (!isLoaded || !projectId) return;
+    localStorage.setItem(`takeoff_column_defs_${projectId}`, JSON.stringify(columnDefs));
+  }, [columnDefs, isLoaded, projectId]);
 
   // UI Metrics
   const totalRows = rows.length;
@@ -770,7 +830,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
     if (pastedText.includes("\t") || pastedText.includes("\n") || pastedText.includes("\r")) {
       e.preventDefault();
       
-      pushSnapshotToStack(rows);
+      pushSnapshotToStack(rows, lockedCells);
       const columnsList: (keyof ProcessedTakeoffRow)[] = ["itemId", "description", "matchedQty", "unitPrice"];
       const fieldTypes: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
       const startColIdx = fieldTypes.indexOf(type);
@@ -839,7 +899,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   // Central onCellEditChange cell modification handler using applyCellEditDirect Cascader
   const handleCellEdit = (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => {
-    pushSnapshotToStack(rows);
+    pushSnapshotToStack(rows, lockedCells);
     const updated = [...rows];
     const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
     if (newRegistry) {
@@ -860,172 +920,350 @@ export default function ProjectWorkspace({ params }: PageProps) {
     setRows(updated);
   };
 
-  // Define column builder using createColumnHelper and inline input items
-  const columnHelper = createColumnHelper<ProcessedTakeoffRow>();
-  const columns = [
-    columnHelper.accessor("costType", {
-      header: "TYPE",
-      cell: (info) => {
-        const row = info.row.original;
-        const val = row.costType || "TI";
-        return (
-          <div className="text-center font-bold">
-            <span className="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-0.5 rounded-md tracking-widest uppercase">
-              {val}
-            </span>
-          </div>
-        );
-      },
-    }),
-    columnHelper.accessor("itemId", {
-      header: "Code",
-      cell: (info) => {
-        const index = info.row.index;
-        const row = info.row.original;
-        return (
-          <div className="flex flex-col gap-2 w-full text-left">
-            <input
-              id={`code-input-${index}`}
-              type="text"
-              list="estimate-items-options"
-              className={`bg-neutral-900 border rounded px-3 py-1.5 w-36 text-neutral-100 text-left outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
-                row.isMapped 
-                  ? "border-neutral-850 focus:border-blue-500 focus:ring-blue-500" 
-                  : "border-amber-900/65 focus:border-amber-500 focus:ring-amber-500 bg-amber-950/20"
-              }`}
-              value={row.itemId}
-              onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
-              onKeyDown={(e) => handleKeyDown(e, index, "code")}
-              onPaste={(e) => handlePaste(e, index, "code")}
-              placeholder="Assign code..."
-            />
-            {!row.isMapped && (
-              <div className="flex flex-col gap-1 mt-1 text-left">
-                <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Suggestions:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER).map((sugg) => (
-                    <button
-                      key={sugg.itemId}
-                      type="button"
-                      onClick={() => handleCellEdit(index, "itemId", sugg.itemId)}
-                      title={sugg.description}
-                      className="bg-neutral-900 hover:bg-amber-950/40 text-amber-500/90 hover:text-amber-400 border border-neutral-800 hover:border-amber-800/80 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm"
-                    >
-                      {sugg.itemId}
-                    </button>
-                  ))}
+  // Dynamic custom cell edits and keys down
+  const handleCustomCellEdit = (rowIndex: number, columnId: string, value: string) => {
+    pushSnapshotToStack(rows, lockedCells);
+    setRows((prev) => {
+      const updated = [...prev];
+      const row = { ...updated[rowIndex] };
+      row.customFields = {
+        ...(row.customFields || {}),
+        [columnId]: value,
+      };
+      updated[rowIndex] = row;
+      return updated;
+    });
+  };
+
+  const handleCustomKeyDown = (e: React.KeyboardEvent, rIdx: number, colId: string) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      document.getElementById(`custom-${colId}-input-${rIdx - 1}`)?.focus();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
+    }
+  };
+
+  const handleAddCustomColumn = () => {
+    pushSnapshotToStack(rows, lockedCells);
+    const newColId = `custom-${Date.now()}`;
+    const newColDef: ColumnDefinition = {
+      id: newColId,
+      header: "NEW COLUMN",
+      type: "custom",
+    };
+    setColumnDefs((prev) => [...prev, newColDef]);
+  };
+
+  const handleDeleteColumn = (colId: string) => {
+    pushSnapshotToStack(rows, lockedCells);
+    setColumnDefs((prev) => prev.filter((col) => col.id !== colId));
+  };
+
+  const handleRenameColumn = (colId: string, newHeader: string) => {
+    setColumnDefs((prev) =>
+      prev.map((col) => (col.id === colId ? { ...col, header: newHeader } : col))
+    );
+  };
+
+  // Define column builder using createColumnHelper and dynamic state mapping
+  const columns = React.useMemo(() => {
+    const columnHelper = createColumnHelper<ProcessedTakeoffRow>();
+    return columnDefs.map((def) => {
+      if (def.type === "default") {
+        switch (def.id) {
+          case "costType":
+            return columnHelper.accessor("costType", {
+              header: def.header,
+              cell: (info) => {
+                const row = info.row.original;
+                const val = row.costType || "TI";
+                return (
+                  <div className="text-center font-bold">
+                    <span className="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-0.5 rounded-md tracking-widest uppercase">
+                      {val}
+                    </span>
+                  </div>
+                );
+              },
+            });
+          case "itemId":
+            return columnHelper.accessor("itemId", {
+              header: def.header,
+              cell: (info) => {
+                const index = info.row.index;
+                const row = info.row.original;
+                const isCellHardLocked = !!lockedCells[`${row.id}::itemId`];
+                return (
+                  <div className="flex flex-col gap-2 w-full text-left">
+                    <input
+                      id={`code-input-${index}`}
+                      type="text"
+                      list="estimate-items-options"
+                      disabled={isCellHardLocked}
+                      className={`rounded px-3 py-1.5 w-36 text-left outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
+                        isCellHardLocked
+                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
+                          : `bg-neutral-900 border text-neutral-100 ${
+                              row.isMapped 
+                                ? "border-neutral-850 focus:border-blue-500 focus:ring-blue-500" 
+                                : "border-amber-900/65 focus:border-amber-500 focus:ring-amber-500 bg-amber-955/20"
+                            }`
+                      }`}
+                      value={row.itemId}
+                      onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, index, "code")}
+                      onPaste={(e) => handlePaste(e, index, "code")}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                          visible: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          rowIndex: index,
+                          columnId: "itemId"
+                        });
+                      }}
+                      placeholder="Assign code..."
+                    />
+                    {!row.isMapped && (
+                      <div className="flex flex-col gap-1 mt-1 text-left">
+                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Suggestions:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER).map((sugg) => (
+                            <button
+                              key={sugg.itemId}
+                              type="button"
+                              disabled={isCellHardLocked}
+                              onClick={() => handleCellEdit(index, "itemId", sugg.itemId)}
+                              title={sugg.description}
+                              className="bg-neutral-900 hover:bg-amber-955/40 text-amber-500/90 hover:text-amber-400 border border-neutral-800 hover:border-amber-800/80 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {sugg.itemId}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              },
+            });
+          case "description":
+            return columnHelper.accessor("description", {
+              header: def.header,
+              cell: (info) => {
+                const index = info.row.index;
+                const row = info.row.original;
+                const isCellHardLocked = !!lockedCells[`${row.id}::description`];
+                return (
+                  <input
+                    id={`desc-input-${index}`}
+                    type="text"
+                    disabled={isCellHardLocked}
+                    className={`text-left rounded px-3 py-1.5 w-64 outline-none font-mono text-xs transition-all ${
+                      isCellHardLocked
+                        ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
+                        : "bg-neutral-900 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-neutral-100"
+                    }`}
+                    value={row.description}
+                    onChange={(e) => handleCellEdit(index, "description", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, index, "desc")}
+                    onPaste={(e) => handlePaste(e, index, "desc")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({
+                        visible: true,
+                        x: e.clientX,
+                        y: e.clientY,
+                        rowIndex: index,
+                        columnId: "description"
+                      });
+                    }}
+                  />
+                );
+              },
+            });
+          case "matchedQty":
+            return columnHelper.accessor("matchedQty", {
+              header: def.header,
+              cell: (info) => {
+                const index = info.row.index;
+                const row = info.row.original;
+                const isCellHardLocked = !!lockedCells[`${row.id}::matchedQty`];
+                return (
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <input
+                      id={`qty-input-${index}`}
+                      type="number"
+                      disabled={isCellHardLocked}
+                      className={`rounded px-2 py-1.5 w-24 text-right font-bold outline-none font-mono text-xs transition-all ${
+                        isCellHardLocked
+                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
+                          : "bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-white"
+                      }`}
+                      value={row.matchedQty}
+                      onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, index, "qty")}
+                      onPaste={(e) => handlePaste(e, index, "qty")}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                          visible: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          rowIndex: index,
+                          columnId: "matchedQty"
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              },
+            });
+          case "uom":
+            return columnHelper.accessor("uom", {
+              header: def.header,
+              cell: (info) => (
+                <div className="text-center text-neutral-400 font-bold uppercase">
+                  {info.getValue()}
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      },
-    }),
-    columnHelper.accessor("description", {
-      header: "Description",
-      cell: (info) => {
-        const index = info.row.index;
-        const row = info.row.original;
-        return (
-          <input
-            id={`desc-input-${index}`}
-            type="text"
-            className="bg-neutral-900 border border-neutral-850 text-left focus:border-blue-500 focus:ring-1 focus:ring-blue-550 rounded px-3 py-1.5 w-64 text-neutral-100 outline-none font-mono text-xs transition-all"
-            value={row.description}
-            onChange={(e) => handleCellEdit(index, "description", e.target.value)}
-            onKeyDown={(e) => handleKeyDown(e, index, "desc")}
-            onPaste={(e) => handlePaste(e, index, "desc")}
-          />
-        );
-      },
-    }),
-    columnHelper.accessor("matchedQty", {
-      header: "Quantity",
-      cell: (info) => {
-        const index = info.row.index;
-        const row = info.row.original;
-        return (
-          <div className="flex items-center gap-1.5 justify-end">
-            <input
-              id={`qty-input-${index}`}
-              type="number"
-              className="bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 rounded px-2 py-1.5 w-24 text-right text-white font-bold outline-none font-mono text-xs transition-all"
-              value={row.matchedQty}
-              onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
-              onKeyDown={(e) => handleKeyDown(e, index, "qty")}
-              onPaste={(e) => handlePaste(e, index, "qty")}
-            />
-          </div>
-        );
-      },
-    }),
-    columnHelper.accessor("uom", {
-      header: "Unit",
-      cell: (info) => (
-        <div className="text-center text-neutral-400 font-bold uppercase">
-          {info.getValue()}
-        </div>
-      ),
-    }),
-    columnHelper.accessor("unitPrice", {
-      header: "Rate",
-      cell: (info) => {
-        const index = info.row.index;
-        const row = info.row.original;
-        return (
-          <div className="flex items-center gap-1 justify-end">
-            <span className="text-neutral-500">$</span>
-            <input
-              id={`price-input-${index}`}
-              type="number"
-              step="0.01"
-              className="bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 rounded px-2 py-1.5 w-20 text-right text-white font-bold outline-none font-mono text-xs transition-all"
-              value={row.unitPrice}
-              onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
-              onKeyDown={(e) => handleKeyDown(e, index, "price")}
-              onPaste={(e) => handlePaste(e, index, "price")}
-            />
-          </div>
-        );
-      },
-    }),
-    columnHelper.accessor("total", {
-      header: "Total",
-      cell: (info) => (
-        <div className="text-right font-black">
-          <span className={info.getValue() > 0 ? "text-emerald-450" : "text-neutral-600"}>
-            ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-        </div>
-      ),
-    }),
-    columnHelper.display({
-      id: "costPerUnit",
-      header: "Cost/Unit",
-      cell: (info) => {
-        const row = info.row.original;
-        const cpu = row.total / (unitCount || 1);
-        return (
-          <div className="text-right font-bold text-neutral-400">
-            ${cpu.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-        );
+              ),
+            });
+          case "unitPrice":
+            return columnHelper.accessor("unitPrice", {
+              header: def.header,
+              cell: (info) => {
+                const index = info.row.index;
+                const row = info.row.original;
+                const isCellHardLocked = !!lockedCells[`${row.id}::unitPrice`];
+                return (
+                  <div className="flex items-center gap-1 justify-end">
+                    <span className="text-neutral-500">$</span>
+                    <input
+                      id={`price-input-${index}`}
+                      type="number"
+                      step="0.01"
+                      disabled={isCellHardLocked}
+                      className={`rounded px-2 py-1.5 w-20 text-right font-bold outline-none font-mono text-xs transition-all ${
+                        isCellHardLocked
+                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
+                          : "bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-white"
+                      }`}
+                      value={row.unitPrice}
+                      onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, index, "price")}
+                      onPaste={(e) => handlePaste(e, index, "price")}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({
+                          visible: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          rowIndex: index,
+                          columnId: "unitPrice"
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              },
+            });
+          case "total":
+            return columnHelper.accessor("total", {
+              header: def.header,
+              cell: (info) => (
+                <div className="text-right font-black">
+                  <span className={info.getValue() > 0 ? "text-emerald-450" : "text-neutral-600"}>
+                    ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              ),
+            });
+          case "costPerUnit":
+            return columnHelper.display({
+              id: "costPerUnit",
+              header: def.header,
+              cell: (info) => {
+                const row = info.row.original;
+                const cpu = row.total / (unitCount || 1);
+                return (
+                  <div className="text-right font-bold text-neutral-400">
+                    ${cpu.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                );
+              }
+            });
+          case "costPerSf":
+            return columnHelper.display({
+              id: "costPerSf",
+              header: def.header,
+              cell: (info) => {
+                const row = info.row.original;
+                const cpsf = row.total / (squareFootage || 1);
+                return (
+                  <div className="text-right font-bold text-neutral-400">
+                    ${cpsf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                );
+              }
+            });
+          default:
+            return columnHelper.display({ id: def.id, header: def.header });
+        }
+      } else {
+        // Custom Column
+        return columnHelper.accessor((row) => row.customFields?.[def.id] ?? "", {
+          id: def.id,
+          header: def.header,
+          cell: (info) => {
+            const index = info.row.index;
+            const row = info.row.original;
+            const isCellHardLocked = !!lockedCells[`${row.id}::${def.id}`];
+            const val = row.customFields?.[def.id] ?? "";
+            return (
+              <input
+                id={`custom-${def.id}-input-${index}`}
+                type="text"
+                disabled={isCellHardLocked}
+                className={`text-left rounded px-3 py-1.5 w-32 outline-none font-mono text-xs transition-all ${
+                  isCellHardLocked
+                    ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
+                    : "bg-neutral-900 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-neutral-100"
+                }`}
+                value={val}
+                onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
+                onKeyDown={(e) => handleCustomKeyDown(e, index, def.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setContextMenu({
+                    visible: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                    rowIndex: index,
+                    columnId: def.id
+                  });
+                }}
+                placeholder="..."
+              />
+            );
+          }
+        });
       }
-    }),
-    columnHelper.display({
-      id: "costPerSf",
-      header: "Cost/S.F.",
-      cell: (info) => {
-        const row = info.row.original;
-        const cpsf = row.total / (squareFootage || 1);
-        return (
-          <div className="text-right font-bold text-neutral-400">
-            ${cpsf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-        );
-      }
-    }),
-  ];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnDefs, lockedCells, unitCount, squareFootage, userRegistry, globalRegistry]);
 
   // Instantiate useReactTable Core Hook
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -1529,7 +1767,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </label>
             </div>
 
-            {/* Right side: Append Data toggler and Undo Action recovery state selector button side-by-side */}
+            {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons side-by-side */}
             <div className="flex items-center gap-3 shrink-0">
               <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-850 rounded-lg px-4 py-2.5 text-xs text-neutral-300 transition-colors hover:border-neutral-750 select-none">
                 <input
@@ -1545,11 +1783,20 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </div>
 
               <button
+                onClick={handleAddCustomColumn}
+                type="button"
+                className="inline-flex items-center gap-1.5 bg-neutral-955 hover:bg-blue-955/40 text-blue-450 hover:text-blue-400 border border-neutral-800 rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+              >
+                + Add Custom Column
+              </button>
+
+              <button
                 onClick={() => {
                   const nextStack = [...historyStack];
-                  const previousRows = nextStack.pop();
-                  if (previousRows) {
-                    setRows(previousRows);
+                  const previousSnapshot = nextStack.pop();
+                  if (previousSnapshot) {
+                    setRows(previousSnapshot.items);
+                    setLockedCells(previousSnapshot.locks);
                     setHistoryStack(nextStack);
                   }
                 }}
@@ -1751,14 +1998,35 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         let alignClass = "text-left";
                         if (header.id === "costType" || header.id === "uom") alignClass = "text-center";
                         if (["matchedQty", "unitPrice", "total", "costPerUnit", "costPerSf"].includes(header.id)) alignClass = "text-right";
+                        
+                        const colDef = columnDefs.find(c => c.id === header.column.id);
+                        const isCustom = colDef && colDef.type === "custom";
+
                         return (
                           <th key={header.id} className={`p-4 ${alignClass}`}>
-                            {header.isPlaceholder
-                              ? null
-                              : flexRender(
-                                  header.column.columnDef.header,
-                                  header.getContext()
-                                )}
+                            {header.isPlaceholder ? null : isCustom ? (
+                              <div className="flex items-center gap-1.5 justify-start">
+                                <input
+                                  type="text"
+                                  value={colDef.header}
+                                  onChange={(e) => handleRenameColumn(colDef.id, e.target.value)}
+                                  className="bg-neutral-900/80 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 text-xs text-neutral-100 font-bold outline-none uppercase w-28 text-left"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteColumn(colDef.id)}
+                                  title="Delete Column"
+                                  className="text-neutral-500 hover:text-red-400 font-bold text-xs p-1 transition-colors cursor-pointer animate-fade-in"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ) : (
+                              flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )
+                            )}
                           </th>
                         );
                       })}
@@ -1768,7 +2036,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 <tbody className="divide-y divide-neutral-850">
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-12 text-center text-neutral-555 italic font-mono uppercase tracking-wider">
+                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 text-center text-neutral-555 italic font-mono uppercase tracking-wider">
                         No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
                       </td>
                     </tr>
@@ -1796,7 +2064,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
                           dividerRow = (
                             <tr key={`div-header-${currentDivision}`} className="bg-blue-950/40 border-y border-blue-900/60 font-sans select-none">
-                              <td colSpan={9} className="p-3 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
+                              <td colSpan={table.getVisibleFlatColumns().length} className="p-3 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
                                 {divLabel}
                               </td>
                             </tr>
@@ -1818,7 +2086,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                   visible: true,
                                   x: e.clientX,
                                   y: e.clientY,
-                                  rowIndex: idx
+                                  rowIndex: idx,
+                                  columnId: ""
                                 });
                               }}
                             >
@@ -1845,82 +2114,144 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   <tfoot>
                     {/* Subtotal Row */}
                     <tr className="border-t border-neutral-855 bg-neutral-900/30 text-xs font-bold text-neutral-300 font-mono">
-                      <td className="p-3 text-center">TI</td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-left">Takeoff Subtotal</td>
-                      <td className="p-3"></td>
-                      <td className="p-3"></td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-right text-white">
-                        ${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                      {table.getVisibleFlatColumns().map((column) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left";
+                        if (column.id === "costType") {
+                          content = "TI";
+                          alignClass = "text-center";
+                        } else if (column.id === "description") {
+                          content = "Takeoff Subtotal";
+                          alignClass = "text-left";
+                        } else if (column.id === "total") {
+                          content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-white";
+                        } else if (column.id === "costPerUnit") {
+                          content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "costPerSf") {
+                          content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "uom") {
+                          alignClass = "text-center";
+                        } else if (["matchedQty", "unitPrice"].includes(column.id)) {
+                          alignClass = "text-right";
+                        }
+                        return (
+                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                            {content}
+                          </td>
+                        );
+                      })}
                     </tr>
 
                     {/* General Liability Row */}
                     <tr className="bg-neutral-900/30 text-xs font-bold text-neutral-350 font-mono">
-                      <td className="p-3 text-center">TI</td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-left">General Liability (1%)</td>
-                      <td className="p-3 text-right">1.00</td>
-                      <td className="p-3 text-center">LS</td>
-                      <td className="p-3 text-right">
-                        ${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right text-white">
-                        ${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                      {table.getVisibleFlatColumns().map((column) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left";
+                        if (column.id === "costType") {
+                          content = "TI";
+                          alignClass = "text-center";
+                        } else if (column.id === "description") {
+                          content = "General Liability (1%)";
+                          alignClass = "text-left";
+                        } else if (column.id === "matchedQty") {
+                          content = "1.00";
+                          alignClass = "text-right";
+                        } else if (column.id === "uom") {
+                          content = "LS";
+                          alignClass = "text-center";
+                        } else if (column.id === "unitPrice") {
+                          content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "total") {
+                          content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-white";
+                        } else if (column.id === "costPerUnit") {
+                          content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "costPerSf") {
+                          content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        }
+                        return (
+                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                            {content}
+                          </td>
+                        );
+                      })}
                     </tr>
 
                     {/* Contractor Fee Row */}
                     <tr className="bg-neutral-900/30 text-xs font-bold text-neutral-355 font-mono">
-                      <td className="p-3 text-center">TI</td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-left">Contractor Fee (5%)</td>
-                      <td className="p-3 text-right">1.00</td>
-                      <td className="p-3 text-center">LS</td>
-                      <td className="p-3 text-right">
-                        ${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right text-white">
-                        ${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                      {table.getVisibleFlatColumns().map((column) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left";
+                        if (column.id === "costType") {
+                          content = "TI";
+                          alignClass = "text-center";
+                        } else if (column.id === "description") {
+                          content = "Contractor Fee (5%)";
+                          alignClass = "text-left";
+                        } else if (column.id === "matchedQty") {
+                          content = "1.00";
+                          alignClass = "text-right";
+                        } else if (column.id === "uom") {
+                          content = "LS";
+                          alignClass = "text-center";
+                        } else if (column.id === "unitPrice") {
+                          content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "total") {
+                          content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-white";
+                        } else if (column.id === "costPerUnit") {
+                          content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        } else if (column.id === "costPerSf") {
+                          content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right";
+                        }
+                        return (
+                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                            {content}
+                          </td>
+                        );
+                      })}
                     </tr>
 
                     {/* Total Estimated Cost Row */}
                     <tr className="border-t border-double border-emerald-500/50 bg-emerald-950/15 text-xs font-black text-emerald-400 font-mono">
-                      <td className="p-3 text-center text-emerald-500 font-extrabold">TI</td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-left uppercase tracking-wider">Total Estimated Cost</td>
-                      <td className="p-3"></td>
-                      <td className="p-3"></td>
-                      <td className="p-3"></td>
-                      <td className="p-3 text-right text-sm text-emerald-450">
-                        ${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right text-sm">
-                        ${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-3 text-right text-sm">
-                        ${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+                      {table.getVisibleFlatColumns().map((column) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left";
+                        if (column.id === "costType") {
+                          content = "TI";
+                          alignClass = "text-center text-emerald-500 font-extrabold";
+                        } else if (column.id === "description") {
+                          content = "Total Estimated Cost";
+                          alignClass = "text-left uppercase tracking-wider";
+                        } else if (column.id === "total") {
+                          content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-sm text-emerald-450";
+                        } else if (column.id === "costPerUnit") {
+                          content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-sm";
+                        } else if (column.id === "costPerSf") {
+                          content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                          alignClass = "text-right text-sm";
+                        } else if (column.id === "uom") {
+                          alignClass = "text-center";
+                        } else if (["matchedQty", "unitPrice"].includes(column.id)) {
+                          alignClass = "text-right";
+                        }
+                        return (
+                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                            {content}
+                          </td>
+                        );
+                      })}
                     </tr>
                   </tfoot>
                 )}
@@ -1940,34 +2271,51 @@ export default function ProjectWorkspace({ params }: PageProps) {
       </datalist>
 
       {/* Floating Context Menu Portal UI */}
-      {contextMenu.visible && (
-        <div
-          className="fixed bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl rounded-md z-50 flex flex-col gap-1 min-w-[160px]"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
-            onClick={() => {
-              insertManualRow("above", contextMenu.rowIndex);
-              setContextMenu((prev) => ({ ...prev, visible: false }));
-            }}
+      {contextMenu.visible && (() => {
+        const currentRow = rows[contextMenu.rowIndex];
+        const currentRowId = currentRow ? currentRow.id : "";
+        const isCurrentCellLocked = currentRowId && contextMenu.columnId ? !!lockedCells[`${currentRowId}::${contextMenu.columnId}`] : false;
+
+        return (
+          <div
+            className="fixed bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl rounded-md z-50 flex flex-col gap-1 min-w-[160px]"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(e) => e.stopPropagation()}
           >
-            Insert Row Above
-          </button>
-          <button
-            type="button"
-            className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
-            onClick={() => {
-              insertManualRow("below", contextMenu.rowIndex);
-              setContextMenu((prev) => ({ ...prev, visible: false }));
-            }}
-          >
-            Insert Row Below
-          </button>
-        </div>
-      )}
+            {contextMenu.columnId && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-b border-neutral-800/60 pb-2 mb-1"
+                onClick={() => {
+                  handleToggleCellLock(currentRowId, contextMenu.columnId);
+                }}
+              >
+                {isCurrentCellLocked ? "🔓 UNLOCK CELL" : "🔒 LOCK CELL"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              onClick={() => {
+                insertManualRow("above", contextMenu.rowIndex);
+                setContextMenu((prev) => ({ ...prev, visible: false }));
+              }}
+            >
+              Insert Row Above
+            </button>
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              onClick={() => {
+                insertManualRow("below", contextMenu.rowIndex);
+                setContextMenu((prev) => ({ ...prev, visible: false }));
+              }}
+            >
+              Insert Row Below
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

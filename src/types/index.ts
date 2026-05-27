@@ -31,4 +31,5 @@ export interface ProcessedTakeoffRow {
   // Raw quantities extracted from CSV to enable dynamic target UOM re-matching
   rawQuantities: { qty: number; uom: string }[];
   costType: string;        // Dynamic costType mapped from InternalEstimateItem
+  customFields?: Record<string, string | number>;
 }
