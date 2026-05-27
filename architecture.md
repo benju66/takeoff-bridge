@@ -21,6 +21,22 @@ To assist users in reconciling unmapped classifications, `src/lib/similarity.ts`
 4. **Levenshtein String Distance on Item ID (10% Weight)**: Computes the edit distance against the item ID for secondary exact matches.
 5. **Badging UI Resolution**: Sorts all potential master items by the combined score, rendering the top three recommendations to the user as clickable action badges in the manual reconciliation table.
 
+## Custom Context Menu & Manual Row Insertion Pipeline (Phase 1 Expansion)
+To transition the ingestion grid from a rigid tabular layout into an elastic spreadsheet experience, the application uses a decoupled, event-driven row splicing architecture:
+
+1. Context Pointer Interception: The UI intercepts native browser right-click triggers on the Step 4 Takeoff Workbook Matrix via `onContextMenu` cell handlers. It prevents standard window events and records mouse coordinates (`clientX`, `clientY`) alongside runtime row index markers.
+2. Context Menu Portal UI: A floating context menu primitive renders conditionally at the recorded cursor screen coordinates. It provides explicit operational commands ("Insert Row Above", "Insert Row Below").
+3. Historical Rollback Protection: Before performing any array mutations, the system executes an isolated state copy save to the `pushSnapshotToStack(rows)` undo ledger. This ensures manual row insertions can be rolled back using the existing action undo infrastructure.
+4. Compliant Skeleton Splicing: The insertion engine performs an absolute array modification using `.splice()`. To maintain type contract validation and prevent application rendering runtime exceptions, the manual row object must initialize with valid fallback properties matching the `ProcessedTakeoffRow` contract:
+   - `id`: Unique timestamp-appended custom string hash.
+   - `classification`: Literalled string indicator `"MANUAL ENTRY"`.
+   - `itemId` & `procoreParentCode`: Empty strings until assigned.
+   - `description`: Empty text baseline.
+   - `matchedQty` & `unitPrice` & `total`: Hardset numerical defaults `0`.
+   - `isMapped`: Evaluates to boolean `false`.
+   - `costType`: Default construction material placeholder `"M"`.
+5. Window Blur Dismissal: An ambient event listener registers against the global `window` click target to automatically clear layout coordinate tracking and hide the panel on outside interaction clicks.
+
 ## Compounding Overhead Calculation Layer
 Upon establishing all mapped quantities and unit prices, the application dynamically aggregates takeoff values through a compounding overhead calculation layer:
 1. **Itemized Subtotal**: Sum of all line items, where `Total Cost = Matched Quantity × Unit Price`.

@@ -77,6 +77,19 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const [appendData, setAppendData] = useState(false);
   const [historyStack, setHistoryStack] = useState<ProcessedTakeoffRow[][]>([]);
 
+  interface ContextMenuState {
+    visible: boolean;
+    x: number;
+    y: number;
+    rowIndex: number;
+  }
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    rowIndex: -1
+  });
+
   // Step 2 & 3 Workspace Active Tab
   const [activeTab, setActiveTab] = useState<string>("step4");
 
@@ -104,6 +117,44 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   const pushSnapshotToStack = (currentRows: ProcessedTakeoffRow[]) => {
     setHistoryStack((prev) => [...prev.slice(-9), JSON.parse(JSON.stringify(currentRows))]);
+  };
+
+  // Outside click handler to dismiss context menu
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      if (contextMenu.visible) {
+        setContextMenu((prev) => ({ ...prev, visible: false }));
+      }
+    };
+    window.addEventListener("click", handleOutsideClick);
+    return () => {
+      window.removeEventListener("click", handleOutsideClick);
+    };
+  }, [contextMenu.visible]);
+
+  // Splicing engine to insert a new manual row above or below target index
+  const insertManualRow = (direction: "above" | "below", targetIndex: number) => {
+    pushSnapshotToStack(rows);
+    const updated = [...rows];
+    
+    const newRow: ProcessedTakeoffRow = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      classification: "MANUAL ENTRY",
+      itemId: "",
+      procoreParentCode: "",
+      description: "",
+      matchedQty: 0,
+      uom: "SF",
+      unitPrice: 0,
+      total: 0,
+      isMapped: false,
+      rawQuantities: [],
+      costType: "M"
+    };
+
+    const insertIdx = direction === "above" ? targetIndex : targetIndex + 1;
+    updated.splice(insertIdx, 0, newRow);
+    setRows(updated);
   };
 
   const [unmappedTakeoffClassifications, setUnmappedTakeoffClassifications] = useState<string[]>([]);
@@ -1761,6 +1812,15 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                   ? "bg-amber-950/10 hover:bg-amber-950/15 border-l-4 border-l-amber-500" 
                                   : "hover:bg-neutral-900/30 border-l-4 border-l-transparent"
                               }`}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                setContextMenu({
+                                  visible: true,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  rowIndex: idx
+                                });
+                              }}
                             >
                               {row.getVisibleCells().map((cell) => {
                                 let alignClass = "text-left";
@@ -1878,6 +1938,36 @@ export default function ProjectWorkspace({ params }: PageProps) {
           </option>
         ))}
       </datalist>
+
+      {/* Floating Context Menu Portal UI */}
+      {contextMenu.visible && (
+        <div
+          className="fixed bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl rounded-md z-50 flex flex-col gap-1 min-w-[160px]"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+            onClick={() => {
+              insertManualRow("above", contextMenu.rowIndex);
+              setContextMenu((prev) => ({ ...prev, visible: false }));
+            }}
+          >
+            Insert Row Above
+          </button>
+          <button
+            type="button"
+            className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+            onClick={() => {
+              insertManualRow("below", contextMenu.rowIndex);
+              setContextMenu((prev) => ({ ...prev, visible: false }));
+            }}
+          >
+            Insert Row Below
+          </button>
+        </div>
+      )}
     </div>
   );
 }

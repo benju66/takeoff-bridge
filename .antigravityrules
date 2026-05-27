@@ -9,6 +9,9 @@
 - Optimize data grids to emulate standard Excel spreadsheet behaviors.
 - Implement explicit keyboard event handlers (`ArrowUp`, `ArrowDown`, `Enter`) for fast data entry fields.
 - Wrap inline style rules cleanly using unified TailwindCSS utilities.
+- Context Menus & Portal Overlays: Design floating context structures to match the high-contrast dark terminal color values of the host layout (`bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl`).
+- Dropdown Button Standardization: Force context control items to share uniform utility styles across all columns (`w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider`).
+- Layout Overlay Clean Dismissal: Every context component or popover must hook into a window event listener to clear layout tracking states and close menu popups when a user clicks external coordinates.
 
 # Code Integrity & Output Guidelines
 - Provide functional, production-ready code outputs. Never use code blocks containing placeholders or `// TODO` tags.
