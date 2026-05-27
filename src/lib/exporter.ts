@@ -15,32 +15,33 @@ function escapeCSVField(val: unknown): string {
 
 /**
  * Generates a clean Excel payload CSV string.
- * Formats columns to match the company spreadsheet's Step 4 worksheet columns with exact placeholders:
+ * Formats columns to match the company spreadsheet's Step 4 worksheet columns:
  * Columns: [ "TI", "", itemId, description, "", matchedQty, uom, unitPrice, total ]
  * Incorporates standard markup layers (General Liability 1%, Contractor Fee 5%) cleanly at the bottom.
  */
 export function generateExcelPayload(rows: ProcessedTakeoffRow[]): string {
   const csvLines: string[] = [];
 
-  // Populate each data row adhering strictly to the spreadsheet layout sequence
+  // Populate each data row dynamically using active user modified grid values
   for (const row of rows) {
+    const calculatedTotal = row.matchedQty * row.unitPrice;
     const columns = [
       "TI",                       // Literal "TI"
       "",                         // Blank placeholder
-      row.itemId,                 // Suffix cost code
-      row.description,            // Item description
+      row.itemId,                 // Active user Suffix Code
+      row.description,            // Active user Description
       "",                         // Blank placeholder
-      row.matchedQty,             // Extracted Qty matching UOM
+      row.matchedQty,             // Active user Quantity
       row.uom,                    // Target UOM
-      row.unitPrice,              // Default Unit Price
-      row.total                   // Multiplied Total Cost
+      row.unitPrice,              // Active user Unit Price
+      calculatedTotal             // Recalculated dynamic Total
     ];
 
     csvLines.push(columns.map(escapeCSVField).join(","));
   }
 
-  // Calculate and append standard markup layers
-  const subtotal = rows.reduce((sum, r) => sum + r.total, 0);
+  // Calculate dynamic subtotal and append standard markup layers
+  const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
   if (subtotal > 0) {
     const generalLiability = subtotal * 0.01;
     const fee = subtotal * 0.05;
@@ -103,6 +104,7 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
     const parentCode = row.procoreParentCode.trim();
     const costType = row.costType.trim();
     const groupKey = `${parentCode}::${costType}`;
+    const calculatedTotal = row.matchedQty * row.unitPrice;
 
     if (!groupings[groupKey]) {
       groupings[groupKey] = {
@@ -114,7 +116,7 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
     }
 
     groupings[groupKey].descriptions.add(row.description);
-    groupings[groupKey].totalCost += row.total;
+    groupings[groupKey].totalCost += calculatedTotal;
   }
 
   // Serialize grouped lines
@@ -132,8 +134,8 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
     csvLines.push(columns.map(escapeCSVField).join(","));
   }
 
-  // Calculate and append standard markup layers
-  const subtotal = rows.reduce((sum, r) => sum + r.total, 0);
+  // Calculate subtotal and append standard markup layers dynamically
+  const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
   if (subtotal > 0) {
     const generalLiability = subtotal * 0.01;
     const fee = subtotal * 0.05;
@@ -153,5 +155,6 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
     ].map(escapeCSVField).join(","));
   }
 
+  // Ensure Windows line endings (\r\n) for seamless ingestion
   return csvLines.join("\r\n");
 }
