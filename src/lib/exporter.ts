@@ -1,4 +1,7 @@
 import { ProcessedTakeoffRow } from "@/types";
+import { Project } from "@/types/db";
+import ExcelJS from "exceljs";
+
 
 /**
  * Safely escapes value fields for safe, compliant CSV ingestion.
@@ -158,3 +161,211 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
   // Ensure Windows line endings (\r\n) for seamless ingestion
   return csvLines.join("\r\n");
 }
+
+/**
+ * Generates an Excel Workbook from a company template file, injects values
+ * into "STEP 4 - ESTIMATE" sheet, recalculates markups, and returns a downloadable Blob.
+ */
+export async function generateExcelWorkbook(
+  rows: ProcessedTakeoffRow[],
+  projectMetadata: Project | null | undefined
+): Promise<Blob> {
+  // Fetch template file
+  const response = await fetch('/templates/Company_Estimate_Template.xlsx');
+  if (!response.ok) {
+    throw new Error(`Failed to load corporate template Company_Estimate_Template.xlsx (Status: ${response.status})`);
+  }
+  const buffer = await response.arrayBuffer();
+
+  // Load into ExcelJS Workbook
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  // Retrieve worksheet "STEP 4 - ESTIMATE"
+  const worksheet = workbook.getWorksheet("STEP 4 - ESTIMATE");
+  if (!worksheet) {
+    throw new Error('Worksheet "STEP 4 - ESTIMATE" not found in the template');
+  }
+
+  // Update Project Metadata if metadata is available
+  if (projectMetadata) {
+    const projNameCell = worksheet.getCell('B4');
+    if (projNameCell) projNameCell.value = projectMetadata.name || "";
+    
+    const locCell = worksheet.getCell('F4');
+    if (locCell) locCell.value = projectMetadata.location || "";
+    
+    const dateCell = worksheet.getCell('I4');
+    if (dateCell) dateCell.value = projectMetadata.bidDate || "";
+  }
+
+  // Scan worksheet to find pre-existing tracking rows (General Liability and Fee)
+  // in Column D so we can extract their styles and then remove/clear them.
+  let glStyle: Partial<ExcelJS.Style> | null = null;
+  let feeStyle: Partial<ExcelJS.Style> | null = null;
+  
+  // We scan from Row 10 to 100 to locate tracking row placeholders
+  for (let r = 10; r <= 100; r++) {
+    const cellD = worksheet.getCell(`D${r}`);
+    if (cellD && cellD.value) {
+      const valStr = String(cellD.value).trim();
+      if (valStr.includes("General Liability")) {
+        // Capture cell styles
+        glStyle = {
+          font: worksheet.getRow(r).getCell('D').font,
+          fill: worksheet.getRow(r).getCell('D').fill,
+          alignment: worksheet.getRow(r).getCell('D').alignment,
+        };
+        // Clear this placeholder row to keep data region clean
+        worksheet.getRow(r).values = [];
+      } else if (valStr.includes("Fee (5%)") || valStr.includes("Contractor Fee")) {
+        // Capture cell styles
+        feeStyle = {
+          font: worksheet.getRow(r).getCell('D').font,
+          fill: worksheet.getRow(r).getCell('D').fill,
+          alignment: worksheet.getRow(r).getCell('D').alignment,
+        };
+        // Clear this placeholder row
+        worksheet.getRow(r).values = [];
+      }
+    }
+  }
+
+  // Write active estimate grid rows starting at Row 10
+  let currentRawRow = 10;
+  
+  // Calculate Subtotal dynamically
+  let subtotal = 0;
+
+  for (const row of rows) {
+    const qty = Number(row.matchedQty) || 0;
+    const price = Number(row.unitPrice) || 0;
+    const total = qty * price;
+    subtotal += total;
+
+    const excelRow = worksheet.getRow(currentRawRow);
+    excelRow.getCell('A').value = "TI";                      // Column A
+    excelRow.getCell('B').value = "";                        // Column B
+    excelRow.getCell('C').value = row.itemId || "";          // Column C
+    excelRow.getCell('D').value = row.description || "";     // Column D
+    excelRow.getCell('E').value = "";                        // Column E
+    excelRow.getCell('F').value = qty;                       // Column F
+    excelRow.getCell('G').value = row.uom || "";             // Column G
+    excelRow.getCell('H').value = price;                     // Column H
+    excelRow.getCell('I').value = total;                     // Column I
+
+    // Add formats/alignments
+    excelRow.getCell('F').numFmt = '#,##0.00';
+    excelRow.getCell('H').numFmt = '$#,##0.00';
+    excelRow.getCell('I').numFmt = '$#,##0.00';
+    
+    excelRow.getCell('A').alignment = { horizontal: 'center' };
+    excelRow.getCell('C').alignment = { horizontal: 'center' };
+    excelRow.getCell('F').alignment = { horizontal: 'right' };
+    excelRow.getCell('G').alignment = { horizontal: 'center' };
+    excelRow.getCell('H').alignment = { horizontal: 'right' };
+    excelRow.getCell('I').alignment = { horizontal: 'right' };
+
+    currentRawRow++;
+  }
+
+  // Let's add two blank rows for visual spacing
+  currentRawRow += 2;
+
+  // Append dynamic tracking rows at the bottom
+  const generalLiability = subtotal * 0.01;
+  const fee = subtotal * 0.05;
+
+  // 1. General Liability Row
+  const glRow = worksheet.getRow(currentRawRow);
+  glRow.getCell('A').value = "TI";
+  glRow.getCell('B').value = "";
+  glRow.getCell('C').value = "";
+  glRow.getCell('D').value = "General Liability (1%)";
+  glRow.getCell('E').value = "";
+  glRow.getCell('F').value = 1;
+  glRow.getCell('G').value = "LS";
+  glRow.getCell('H').value = generalLiability;
+  glRow.getCell('I').value = generalLiability;
+
+  // Apply original style or premium default
+  glRow.eachCell((cell) => {
+    if (glStyle) {
+      if (glStyle.font) cell.font = glStyle.font;
+      if (glStyle.fill) cell.fill = glStyle.fill;
+      if (glStyle.alignment) cell.alignment = glStyle.alignment;
+    } else {
+      cell.font = { bold: true, color: { argb: 'FF2563EB' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+    }
+  });
+  glRow.getCell('I').numFmt = '$#,##0.00';
+  glRow.getCell('H').numFmt = '$#,##0.00';
+  glRow.getCell('F').numFmt = '#,##0.00';
+  glRow.getCell('A').alignment = { horizontal: 'center' };
+  glRow.getCell('G').alignment = { horizontal: 'center' };
+  glRow.getCell('I').alignment = { horizontal: 'right' };
+
+  currentRawRow++;
+
+  // 2. Contractor Fee Row
+  const feeRow = worksheet.getRow(currentRawRow);
+  feeRow.getCell('A').value = "TI";
+  feeRow.getCell('B').value = "";
+  feeRow.getCell('C').value = "";
+  feeRow.getCell('D').value = "Fee (5%)";
+  feeRow.getCell('E').value = "";
+  feeRow.getCell('F').value = 1;
+  feeRow.getCell('G').value = "LS";
+  feeRow.getCell('H').value = fee;
+  feeRow.getCell('I').value = fee;
+
+  feeRow.eachCell((cell) => {
+    if (feeStyle) {
+      if (feeStyle.font) cell.font = feeStyle.font;
+      if (feeStyle.fill) cell.fill = feeStyle.fill;
+      if (feeStyle.alignment) cell.alignment = feeStyle.alignment;
+    } else {
+      cell.font = { bold: true, color: { argb: 'FF4F46E5' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+    }
+  });
+  feeRow.getCell('I').numFmt = '$#,##0.00';
+  feeRow.getCell('H').numFmt = '$#,##0.00';
+  feeRow.getCell('F').numFmt = '#,##0.00';
+  feeRow.getCell('A').alignment = { horizontal: 'center' };
+  feeRow.getCell('G').alignment = { horizontal: 'center' };
+  feeRow.getCell('I').alignment = { horizontal: 'right' };
+
+  currentRawRow += 2;
+
+  // 3. Grand Total Row
+  const totalRowValue = subtotal + generalLiability + fee;
+  const grandTotalRow = worksheet.getRow(currentRawRow);
+  grandTotalRow.getCell('A').value = "TI";
+  grandTotalRow.getCell('B').value = "";
+  grandTotalRow.getCell('C').value = "";
+  grandTotalRow.getCell('D').value = "TOTAL ESTIMATED COST";
+  grandTotalRow.getCell('E').value = "";
+  grandTotalRow.getCell('F').value = "";
+  grandTotalRow.getCell('G').value = "";
+  grandTotalRow.getCell('H').value = "";
+  grandTotalRow.getCell('I').value = totalRowValue;
+
+  grandTotalRow.eachCell((cell) => {
+    cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } };
+  });
+  grandTotalRow.getCell('I').numFmt = '$#,##0.00';
+  grandTotalRow.getCell('A').alignment = { horizontal: 'center' };
+  grandTotalRow.getCell('I').alignment = { horizontal: 'right' };
+
+  // Write to buffer
+  const outBuffer = await workbook.xlsx.writeBuffer();
+  
+  // Return as Blob
+  return new Blob([outBuffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+}
+

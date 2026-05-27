@@ -186,6 +186,32 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
     costType: "S"
   },
 
+  // --- Division 06 (Wood, Plastics, & Composites) ---
+  "06-1000.001": {
+    itemId: "06-1000.001",
+    procoreParentCode: "6-61000.000",
+    description: "Rough Carpentry - Wood Framing Labor",
+    targetUom: "SF",
+    defaultUnitPrice: 6.50,
+    costType: "S"
+  },
+  "06-1100.001": {
+    itemId: "06-1100.001",
+    procoreParentCode: "6-61100.000",
+    description: "Wood Framing Materials (Timber & Studs)",
+    targetUom: "MBF",
+    defaultUnitPrice: 1150.00,
+    costType: "M"
+  },
+  "06-1200.001": {
+    itemId: "06-1200.001",
+    procoreParentCode: "6-61200.000",
+    description: "Sheathing - OSB Wall & Roof Panels",
+    targetUom: "SF",
+    defaultUnitPrice: 1.45,
+    costType: "M"
+  },
+
   // --- Division 07 (Thermal & Moisture Protection) ---
   "07-0000.001": {
     itemId: "07-0000.001",
@@ -234,6 +260,82 @@ export const ESTIMATE_ITEMS_MASTER: Record<string, InternalEstimateItem> = {
     targetUom: "LF",
     defaultUnitPrice: 2.50,
     costType: "S"
+  },
+
+  // --- Division 08 (Openings) ---
+  "08-1100.001": {
+    itemId: "08-1100.001",
+    procoreParentCode: "8-81100.000",
+    description: "Hollow Metal Doors & Frames",
+    targetUom: "EA",
+    defaultUnitPrice: 420.00,
+    costType: "M"
+  },
+  "08-2000.001": {
+    itemId: "08-2000.001",
+    procoreParentCode: "8-82000.000",
+    description: "Solid Core Interior Wood Doors",
+    targetUom: "EA",
+    defaultUnitPrice: 350.00,
+    costType: "M"
+  },
+  "08-5000.001": {
+    itemId: "08-5000.001",
+    procoreParentCode: "8-85000.000",
+    description: "Vinyl Double-Hung Windows",
+    targetUom: "EA",
+    defaultUnitPrice: 395.00,
+    costType: "M"
+  },
+  "08-7100.001": {
+    itemId: "08-7100.001",
+    procoreParentCode: "8-87100.000",
+    description: "Door Hardware Sets & Locks",
+    targetUom: "EA",
+    defaultUnitPrice: 85.00,
+    costType: "M"
+  },
+
+  // --- Division 09 (Finishes) ---
+  "09-2200.001": {
+    itemId: "09-2200.001",
+    procoreParentCode: "9-92200.000",
+    description: "Metal Stud Wall Framing",
+    targetUom: "LF",
+    defaultUnitPrice: 15.00,
+    costType: "S"
+  },
+  "09-2900.001": {
+    itemId: "09-2900.001",
+    procoreParentCode: "9-92900.000",
+    description: "Gypsum Board / Drywall Assemblies",
+    targetUom: "SF",
+    defaultUnitPrice: 2.95,
+    costType: "S"
+  },
+  "09-2900.002": {
+    itemId: "09-2900.002",
+    procoreParentCode: "9-92900.000",
+    description: "Drywall Taping & Finishing",
+    targetUom: "SF",
+    defaultUnitPrice: 1.20,
+    costType: "S"
+  },
+  "09-6000.001": {
+    itemId: "09-6000.001",
+    procoreParentCode: "9-96000.000",
+    description: "Luxury Vinyl Plank (LVP) Flooring",
+    targetUom: "SF",
+    defaultUnitPrice: 5.50,
+    costType: "S"
+  },
+  "09-9000.001": {
+    itemId: "09-9000.001",
+    procoreParentCode: "9-99000.000",
+    description: "Interior Painting & Wall Coating",
+    targetUom: "SF",
+    defaultUnitPrice: 2.10,
+    costType: "S"
   }
 };
 
@@ -253,5 +355,28 @@ export const INITIAL_MAPPING_REGISTRY: Record<string, string> = {
   "Decorative Metal Railings": "05-0000.005",
   "TPO Roofing Area": "07-0000.004",
   "Under Slab Vapor Barrier": "07-0000.005",
-  "Joint Sealants Exterior": "07-0000.006"
+  "Joint Sealants Exterior": "07-0000.006",
+
+  // New Division 06 Multi-Family mappings
+  "Rough Carpentry": "06-1000.001",
+  "Wood Framing": "06-1100.001",
+  "Sheathing": "06-1200.001",
+  "Wall Sheathing": "06-1200.001",
+
+  // New Division 08 Multi-Family mappings
+  "Hollow Metal Doors": "08-1100.001",
+  "Wood Doors": "08-2000.001",
+  "Vinyl Windows": "08-5000.001",
+  "Door Hardware": "08-7100.001",
+
+  // New Division 09 Multi-Family mappings
+  "Drywall Framing": "09-2200.001",
+  "Metal Stud Framing": "09-2200.001",
+  "Gypsum Board Assemblies": "09-2900.001",
+  "Gypsum Board": "09-2900.001",
+  "Drywall Taping": "09-2900.002",
+  "Flooring": "09-6000.001",
+  "LVP Flooring": "09-6000.001",
+  "Painting": "09-9000.001",
+  "Interior Painting": "09-9000.001"
 };

@@ -27,7 +27,7 @@ import {
   Calendar, 
   Activity 
 } from "lucide-react";
-import { generateExcelPayload, generateProcoreBudget } from "@/lib/exporter";
+import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
 
 interface PageProps {
@@ -114,6 +114,9 @@ export default function ProjectWorkspace({ params }: PageProps) {
     document.body.removeChild(link);
   };
 
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   const handleExportExcel = () => {
     const payload = generateExcelPayload(rows);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
@@ -122,6 +125,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const handleExportProcore = () => {
     const payload = generateProcoreBudget(rows);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
+  };
+
+  const handleExportExcelWorkbook = async () => {
+    setIsExportingExcel(true);
+    setExportError(null);
+    try {
+      const blob = await generateExcelWorkbook(rows, project);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `takeoff_workbook_${projectId}.xlsx`);
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Workbook generation failed", err);
+      const message = err instanceof Error ? err.message : "Failed to generate Excel Workbook.";
+      setExportError(message);
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,36 +192,30 @@ export default function ProjectWorkspace({ params }: PageProps) {
     });
   };
 
-  // Keyboard navigation up & down within matching columns
-  const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx - 1}`)?.focus();
-    }
-  };
-
-  // Central onCellEditChange cell modification handler with cascading duplicates
-  const handleCellEdit = (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => {
-    const updated = [...rows];
+  // Comprehensive cell modification pure helper with cascading logic
+  const applyCellEditDirect = (
+    updated: ProcessedTakeoffRow[],
+    index: number,
+    field: keyof ProcessedTakeoffRow,
+    value: string | number,
+    currentRegistry: Record<string, string>
+  ): Record<string, string> | null => {
     const row = updated[index];
+    if (!row) return null;
+    
     const classification = row.classification;
+    let newRegistry: Record<string, string> | null = null;
 
     if (field === "itemId") {
-      const newCode = (value as string).trim();
+      const newCode = String(value).trim();
       row.itemId = newCode;
       const targetItem = ESTIMATE_ITEMS_MASTER[newCode];
 
       // Save project-isolated mapping pair
-      const updatedRegistry = {
-        ...userRegistry,
+      newRegistry = {
+        ...currentRegistry,
         [classification]: newCode,
       };
-      setUserRegistry(updatedRegistry);
-      localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(updatedRegistry));
 
       if (targetItem) {
         row.description = targetItem.description;
@@ -247,20 +267,20 @@ export default function ProjectWorkspace({ params }: PageProps) {
         row.uom = firstMeasure?.uom || "SF";
       }
     } else if (field === "description") {
-      row.description = value as string;
+      row.description = String(value);
       
       // Cascade description change to other rows with same classification
       for (let i = 0; i < updated.length; i++) {
         if (updated[i].classification === classification) {
-          updated[i].description = value as string;
+          updated[i].description = String(value);
         }
       }
     } else if (field === "matchedQty") {
-      const qty = typeof value === "number" ? value : parseFloat(value) || 0;
+      const qty = typeof value === "number" ? value : parseFloat(String(value)) || 0;
       row.matchedQty = qty;
       row.total = qty * row.unitPrice;
     } else if (field === "unitPrice") {
-      const price = typeof value === "number" ? value : parseFloat(value) || 0;
+      const price = typeof value === "number" ? value : parseFloat(String(value)) || 0;
       row.unitPrice = price;
       row.total = row.matchedQty * price;
 
@@ -273,6 +293,114 @@ export default function ProjectWorkspace({ params }: PageProps) {
       }
     }
 
+    return newRegistry;
+  };
+
+  // Keyboard navigation up & down, horizontal tab, and vertical enter shifting within inputs
+  const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => {
+    const columnsList: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
+    const colIdx = columnsList.indexOf(type);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      document.getElementById(`${type}-input-${rIdx - 1}`)?.focus();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
+    }
+    if (e.key === "Tab") {
+      if (e.shiftKey) {
+        // Shift + Tab: Move left
+        if (colIdx > 0) {
+          e.preventDefault();
+          document.getElementById(`${columnsList[colIdx - 1]}-input-${rIdx}`)?.focus();
+        } else if (rIdx > 0) {
+          e.preventDefault();
+          document.getElementById(`price-input-${rIdx - 1}`)?.focus();
+        }
+      } else {
+        // Tab: Move right
+        if (colIdx < columnsList.length - 1) {
+          e.preventDefault();
+          document.getElementById(`${columnsList[colIdx + 1]}-input-${rIdx}`)?.focus();
+        } else if (rIdx < rows.length - 1) {
+          e.preventDefault();
+          document.getElementById(`code-input-${rIdx + 1}`)?.focus();
+        }
+      }
+    }
+  };
+
+  // Batch clipboard pasting (onPaste) supporting multi-row, multi-column tab/newline delimited content
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => {
+    const clipboardData = e.clipboardData;
+    const pastedText = clipboardData.getData("text") || "";
+    
+    // Process tab or newline separated data block
+    if (pastedText.includes("\t") || pastedText.includes("\n") || pastedText.includes("\r")) {
+      e.preventDefault();
+      
+      const columnsList: (keyof ProcessedTakeoffRow)[] = ["itemId", "description", "matchedQty", "unitPrice"];
+      const fieldTypes: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
+      const startColIdx = fieldTypes.indexOf(type);
+      
+      const lines = pastedText.split(/\r\n|\r|\n/);
+      if (lines.length > 1 && lines[lines.length - 1] === "") {
+        lines.pop();
+      }
+      
+      const updated = [...rows];
+      let currentRegistry = { ...userRegistry };
+      let registryChanged = false;
+      let didModify = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const targetRowIdx = startRowIdx + i;
+        if (targetRowIdx >= updated.length) break;
+        
+        const line = lines[i];
+        const cells = line.split("\t");
+        
+        for (let j = 0; j < cells.length; j++) {
+          const targetColIdx = startColIdx + j;
+          if (targetColIdx >= columnsList.length) break;
+          
+          const field = columnsList[targetColIdx];
+          const rawValue = cells[j];
+          
+          didModify = true;
+          
+          const resultRegistry = applyCellEditDirect(updated, targetRowIdx, field, rawValue, currentRegistry);
+          if (resultRegistry) {
+            currentRegistry = resultRegistry;
+            registryChanged = true;
+          }
+        }
+      }
+      
+      if (didModify) {
+        if (registryChanged) {
+          setUserRegistry(currentRegistry);
+          localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(currentRegistry));
+        }
+        setRows(updated);
+      }
+    }
+  };
+
+  // Central onCellEditChange cell modification handler using applyCellEditDirect Cascader
+  const handleCellEdit = (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => {
+    const updated = [...rows];
+    const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
+    if (newRegistry) {
+      setUserRegistry(newRegistry);
+      localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(newRegistry));
+    }
     setRows(updated);
   };
 
@@ -302,6 +430,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               value={row.itemId}
               onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
               onKeyDown={(e) => handleKeyDown(e, index, "code")}
+              onPaste={(e) => handlePaste(e, index, "code")}
               placeholder="Assign suffix..."
             />
             {!row.isMapped && (
@@ -343,6 +472,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             value={row.description}
             onChange={(e) => handleCellEdit(index, "description", e.target.value)}
             onKeyDown={(e) => handleKeyDown(e, index, "desc")}
+            onPaste={(e) => handlePaste(e, index, "desc")}
           />
         );
       },
@@ -361,6 +491,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               value={row.matchedQty}
               onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
               onKeyDown={(e) => handleKeyDown(e, index, "qty")}
+              onPaste={(e) => handlePaste(e, index, "qty")}
             />
             <span className="text-neutral-500 text-[10px] w-6 text-left">{row.uom}</span>
           </div>
@@ -383,6 +514,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               value={row.unitPrice}
               onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
               onKeyDown={(e) => handleKeyDown(e, index, "price")}
+              onPaste={(e) => handlePaste(e, index, "price")}
             />
           </div>
         );
@@ -457,6 +589,14 @@ export default function ProjectWorkspace({ params }: PageProps) {
           {rows.length > 0 && (
             <>
               <button 
+                onClick={handleExportExcelWorkbook}
+                disabled={unmappedCount > 0 || isExportingExcel}
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-950/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} /> 
+                {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
+              </button>
+              <button 
                 onClick={handleExportExcel}
                 disabled={unmappedCount > 0}
                 className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 border border-neutral-800 hover:border-neutral-700 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
@@ -505,6 +645,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
         </div>
       ) : (
         <div className="space-y-8 animate-fade-in">
+          {exportError && (
+            <div className="bg-red-950/40 border border-red-900/50 rounded-xl p-4 flex items-center gap-3 text-red-400 text-xs font-mono animate-shake">
+              <AlertTriangle className="text-red-500 animate-pulse" size={16} />
+              <span><strong>System Alert:</strong> {exportError}</span>
+              <button 
+                onClick={() => setExportError(null)} 
+                className="ml-auto bg-transparent hover:text-white font-bold uppercase text-[10px] cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
           {/* KPI Dashboard Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-4">
             <div className="bg-neutral-900/60 border border-neutral-800/80 p-5 rounded-xl shadow-lg relative overflow-hidden group">
