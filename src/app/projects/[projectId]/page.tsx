@@ -1,4 +1,5 @@
 "use client";
+"use no compiler";
 
 import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
@@ -434,10 +435,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
   }, [projectId]);
 
   // Auto-persist column definitions when they change
+  const columnDefsString = JSON.stringify(columnDefs);
   useEffect(() => {
     if (!isLoaded || !projectId) return;
     localStorage.setItem(`takeoff_column_defs_${projectId}`, JSON.stringify(columnDefs));
-  }, [columnDefs, isLoaded, projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnDefsString, isLoaded, projectId]);
 
   // UI Metrics
   const totalRows = rows.length;
@@ -557,12 +560,15 @@ export default function ProjectWorkspace({ params }: PageProps) {
   }, [rows, subtotal]);
 
   // Auto-persist custom cell locks state when they mutate
+  const lockedCellsString = JSON.stringify(lockedCells);
   useEffect(() => {
     if (!isLoaded || !projectId) return;
     localStorage.setItem(`takeoff_locked_cells_${projectId}`, JSON.stringify(lockedCells));
-  }, [lockedCells, isLoaded, projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedCellsString, isLoaded, projectId]);
 
   // Auto-persist estimate state when dynamic items or calculations change
+  const rowsString = JSON.stringify(rows);
   useEffect(() => {
     if (!isLoaded || !projectId) return;
 
@@ -589,8 +595,9 @@ export default function ProjectWorkspace({ params }: PageProps) {
       }
     };
     saveProjectEstimate(estimate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    rows, 
+    rowsString, 
     projectId, 
     subtotal, 
     generalLiability, 
