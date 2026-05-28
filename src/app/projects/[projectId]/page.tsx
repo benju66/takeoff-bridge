@@ -1219,7 +1219,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const cpu = row.total / (unitCount || 1);
                 return (
-                  <div className="text-right font-bold text-slate-600 dark:text-slate-400 font-mono">
+                  <div className="text-center font-bold text-slate-600 dark:text-slate-400 font-mono">
                     ${cpu.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 );
@@ -1562,7 +1562,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-0430", role: "Asst. Superintendent", rate: 85, util: utilAsstSu, setUtil: setUtilAsstSu, qty: qtyAsstSu, total: totalAsstSu },
                   { code: "01-0510", role: "Project Assistant", rate: 55, util: utilPa, setUtil: setUtilPa, qty: qtyPa, total: totalPa }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.role}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">hr</td>
@@ -1597,7 +1597,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-1200", desc: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, qty: qtyFuelVehicle, total: totalFuelVehicle },
                   { code: "01-5111", desc: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, qty: qtyCellPhone, total: totalCellPhone }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
@@ -1617,7 +1617,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-5140", desc: "Temp Toilets (Lump Sum)", val: eqToilets, field: "toilets" },
                   { code: "01-5170", desc: "Temp Electric (Lump Sum)", val: eqElectric, field: "electric" }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">ls</td>
@@ -1688,7 +1688,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "02-9020", desc: "Temp Protection (Rate $0.25/sf, Quantity defaults to project square footage)", unit: "sf", rate: 0.25, qty: squareFootage, total: totalTempProtection },
                   { code: "02-9405", desc: "Material Hoist / Trash Chute (Rate $6,500/mo, Quantity defaults to duration)", unit: "mo", rate: 6500, qty: projectDurationMonths, total: totalMaterialHoist }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
@@ -1709,7 +1709,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "02-9010", desc: "Progress Cleaning - Hired (Rate $54/hr)", unit: "hr", rate: 54, val: qtyHiredCleaning, field: "hired", isRateEditable: false },
                   { code: "02-3200", desc: "Soil Borings (Lump Sum custom overrides)", unit: "ls", rate: rateSoilBorings, val: qtySoilBorings, field: "soilQty", isRateEditable: true }
                 ].map((row) => (
-                  <tr key={`${row.code}-${row.field}`} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={`${row.code}-${row.field}`} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
@@ -2103,7 +2103,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           );
                         }
 
-                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-background dark:group-hover:bg-slate-800/50";
+                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
 
                         return (
                           <React.Fragment key={row.original.id || `row-${idx}`}>
@@ -2112,7 +2112,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                               className={`group transition-colors ${
                                 !row.original.isMapped 
                                   ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500" 
-                                  : "hover:bg-background/40 dark:hover:bg-background/20 border-l-4 border-l-transparent"
+                                  : "hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 border-l-transparent"
                               }`}
                               onContextMenu={(e) => {
                                 e.preventDefault();
@@ -2127,8 +2127,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                             >
                               {row.getVisibleCells().map((cell) => {
                                 let alignClass = "text-left";
-                                if (["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf"].includes(cell.column.id)) alignClass = "text-center";
-                                if (cell.column.id === "costPerUnit") alignClass = "text-right";
+                                if (["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"].includes(cell.column.id)) alignClass = "text-center";
                                 
                                 const colDef = columnDefs.find(c => c.id === cell.column.id);
                                 const isCustom = colDef && colDef.type === "custom";
@@ -2169,17 +2168,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-left font-sans";
                         } else if (column.id === "total") {
                           content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-foreground font-bold font-mono";
+                          alignClass = "text-center text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "uom") {
                           alignClass = "text-center font-mono";
                         } else if (["matchedQty", "unitPrice"].includes(column.id)) {
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2202,22 +2201,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-left font-sans";
                         } else if (column.id === "matchedQty") {
                           content = "1.00";
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "uom") {
                           content = "LS";
                           alignClass = "text-center font-mono";
                         } else if (column.id === "unitPrice") {
                           content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "total") {
                           content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-foreground font-bold font-mono";
+                          alignClass = "text-center text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2240,22 +2239,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-left font-sans";
                         } else if (column.id === "matchedQty") {
                           content = "1.00";
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "uom") {
                           content = "LS";
                           alignClass = "text-center font-mono";
                         } else if (column.id === "unitPrice") {
                           content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "total") {
                           content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-foreground font-bold font-mono";
+                          alignClass = "text-center text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2278,17 +2277,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-left uppercase tracking-wider font-sans";
                         } else if (column.id === "total") {
                           content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono";
+                          alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm font-mono";
+                          alignClass = "text-center text-sm font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm font-mono";
+                          alignClass = "text-center text-sm font-mono";
                         } else if (column.id === "uom") {
                           alignClass = "text-center font-mono";
                         } else if (["matchedQty", "unitPrice"].includes(column.id)) {
-                          alignClass = "text-right font-mono";
+                          alignClass = "text-center font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>

@@ -263,16 +263,16 @@ export default function GlobalRegistryDashboard() {
 
                       return (
                         <tr key={row.classification} className="group transition-colors">
-                          <td className="p-4 font-bold text-foreground text-sm border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 font-bold text-foreground text-sm border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             {row.classification}
                           </td>
-                          <td className="p-4 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-widest uppercase border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-widest uppercase border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             {row.itemId}
                           </td>
-                          <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             {row.description}
                           </td>
-                          <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             <div className="flex items-center gap-2">
                               {row.divisionCode ? (
                                 <span className="bg-background dark:bg-slate-800 border border-grid-border text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
@@ -286,15 +286,15 @@ export default function GlobalRegistryDashboard() {
                               <span className="truncate max-w-[150px] font-bold">{row.divisionName}</span>
                             </div>
                           </td>
-                          <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${typeColor}`}>
                               {row.costType}
                             </span>
                           </td>
-                          <td className="p-4 text-center font-bold text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
+                          <td className="p-4 text-center font-bold text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60 font-mono">
                             {row.uom}
                           </td>
-                          <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             <button
                               onClick={() => handleDeleteRule(row.classification)}
                               className="inline-flex items-center justify-center p-2 rounded-lg bg-background hover:bg-rose-50 dark:bg-card dark:hover:bg-rose-950/30 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 border border-grid-border hover:border-rose-500/50 dark:hover:border-rose-400/50 transition-all duration-300 cursor-pointer shadow-sm"
