@@ -1039,7 +1039,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                           : row.isMapped
                             ? "text-slate-900 dark:text-slate-100 font-semibold"
-                            : "text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-955/10 font-bold"
+                            : "text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/10 font-bold"
                       }`}
                       value={row.itemId}
                       onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
@@ -1131,7 +1131,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     disabled={isCellHardLocked}
                     className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                       isCellHardLocked
-                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-955/30 cursor-not-allowed opacity-60"
+                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                         : "text-slate-900 dark:text-white"
                     }`}
                     value={row.matchedQty}
@@ -1157,7 +1157,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             return columnHelper.accessor("uom", {
               header: def.header,
               cell: (info) => (
-                <div className="text-center text-slate-500 dark:text-slate-400 font-bold uppercase">
+                <div className="text-center text-slate-500 dark:text-slate-400 font-bold uppercase font-mono">
                   {info.getValue()}
                 </div>
               ),
@@ -1177,7 +1177,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     disabled={isCellHardLocked}
                     className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                       isCellHardLocked
-                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-955/30 cursor-not-allowed opacity-60"
+                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                         : "text-slate-900 dark:text-white"
                     }`}
                     value={row.unitPrice}
@@ -1320,21 +1320,21 @@ export default function ProjectWorkspace({ params }: PageProps) {
       <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
               {project.name}
             </h1>
-            <span className="text-[10px] bg-blue-50 dark:bg-blue-955 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
+            <span className="text-[10px] bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
               {project.id}
             </span>
           </div>
 
           <div className="flex flex-wrap gap-4 mt-3 text-slate-500 dark:text-slate-400 text-xs items-center uppercase font-semibold">
             <span className="flex items-center gap-1"><MapPin size={13} className="text-slate-400 dark:text-slate-500" /> {project.location}</span>
-            <span className="text-slate-350 dark:text-slate-800">|</span>
+            <span className="text-slate-400 dark:text-slate-650">|</span>
             <span className="flex items-center gap-1"><Calendar size={13} className="text-slate-400 dark:text-slate-500" /> Bid: {project.bidDate}</span>
-            <span className="text-slate-355 dark:text-slate-800">|</span>
+            <span className="text-slate-400 dark:text-slate-650">|</span>
             <span>Size: {project.squareFootage.toLocaleString()} SF</span>
-            <span className="text-slate-350 dark:text-slate-800">|</span>
+            <span className="text-slate-400 dark:text-slate-650">|</span>
             <span>Units: {project.unitCount.toLocaleString()}</span>
           </div>
         </div>
@@ -1353,7 +1353,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button 
                 onClick={handleExportExcel}
                 disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:shadow-md"
               >
                 <FileDown size={18} /> Export Excel Payload
               </button>
@@ -1380,7 +1380,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-3 text-xs uppercase tracking-wider font-bold font-sans transition-all border-b-2 whitespace-nowrap cursor-pointer ${
               activeTab === tab.id
-                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-955/10"
+                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/10"
                 : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
@@ -1405,7 +1405,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       {/* STEP 1 PANEL */}
       {activeTab === "step1" && (
         <div className="bg-card border border-grid-border text-card-foreground p-6 rounded-xl shadow-sm animate-fade-in">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider mb-6 flex items-center gap-2">
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 flex items-center gap-2">
             <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Architectural Parameters & Schedule Constraints
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans text-xs">
@@ -1413,7 +1413,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Project Name</label>
               <input
                 type="text"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.name}
                 onChange={(e) => handleProjectParamChange("name", e.target.value)}
               />
@@ -1422,7 +1422,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Location</label>
               <input
                 type="text"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.location}
                 onChange={(e) => handleProjectParamChange("location", e.target.value)}
               />
@@ -1431,7 +1431,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Bid Date</label>
               <input
                 type="text"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.bidDate}
                 onChange={(e) => handleProjectParamChange("bidDate", e.target.value)}
               />
@@ -1440,7 +1440,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Expected Start Date</label>
               <input
                 type="date"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.expectedStart || ""}
                 onChange={(e) => handleProjectParamChange("expectedStart", e.target.value)}
               />
@@ -1449,7 +1449,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Expected Finish Date</label>
               <input
                 type="date"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.expectedFinish || ""}
                 onChange={(e) => handleProjectParamChange("expectedFinish", e.target.value)}
               />
@@ -1458,7 +1458,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Project Size (SF)</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.squareFootage}
                 onChange={(e) => handleProjectParamChange("squareFootage", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1467,7 +1467,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Unit Count</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.unitCount}
                 onChange={(e) => handleProjectParamChange("unitCount", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1476,7 +1476,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Building Perimeter (LF)</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.buildingPerimeter || 0}
                 onChange={(e) => handleProjectParamChange("buildingPerimeter", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1485,7 +1485,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Building Footprint (SF)</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.buildingFootprint || 0}
                 onChange={(e) => handleProjectParamChange("buildingFootprint", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1494,7 +1494,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Podium Area (SF)</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.podiumArea || 0}
                 onChange={(e) => handleProjectParamChange("podiumArea", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1503,7 +1503,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Woodframed Area (SF)</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.woodframedArea || 0}
                 onChange={(e) => handleProjectParamChange("woodframedArea", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1512,7 +1512,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Levels Above Podium</label>
               <input
                 type="number"
-                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10"
                 value={project.levelsAbovePodium || 0}
                 onChange={(e) => handleProjectParamChange("levelsAbovePodium", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1524,11 +1524,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
       {/* STEP 2 PANEL */}
       {activeTab === "step2" && (
         <div className="bg-card border border-grid-border text-card-foreground rounded-xl overflow-hidden shadow-sm animate-fade-in">
-          <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+          <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
+            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
               <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Division 01 General Conditions Pricing Matrix
             </h3>
-            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
+            <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
               Active Schedule Duration: {projectDurationMonths} Months
             </span>
           </div>
@@ -1536,7 +1536,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-separate border-spacing-0 font-sans">
               <thead>
-                <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                <tr className="bg-background dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
                   <th className="p-4 text-center w-28 border-r border-b border-grid-border font-semibold">Code</th>
                   <th className="p-4 text-left border-r border-b border-grid-border font-semibold">Staff Role / Operational Scope</th>
                   <th className="p-4 text-center w-20 border-r border-b border-grid-border font-semibold">Unit</th>
@@ -1548,7 +1548,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </thead>
               <tbody className="divide-y divide-grid-border">
                 {/* Staff Labor Directs */}
-                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
                   <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.A - Staff Labour Directs</td>
                 </tr>
                 {[
@@ -1561,25 +1561,25 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-0430", role: "Asst. Superintendent", rate: 85, util: utilAsstSu, setUtil: setUtilAsstSu, qty: qtyAsstSu, total: totalAsstSu },
                   { code: "01-0510", role: "Project Assistant", rate: 55, util: utilPa, setUtil: setUtilPa, qty: qtyPa, total: totalPa }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
-                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.role}</td>
-                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">hr</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.role}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">hr</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-foreground font-mono">${row.rate.toFixed(2)}</td>
                     <td className="p-0 border-r border-b border-grid-border">
                       <div className="flex items-center justify-end w-full h-full relative">
                         <input
                           type="number"
                           min="0"
                           max="100"
-                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
+                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono"
                           value={row.util}
                           onChange={(e) => {
                             const v = e.target.value === "" ? 0 : parseFloat(e.target.value) || 0;
                             row.setUtil(Math.min(100, Math.max(0, v)));
                           }}
                         />
-                        <span className="absolute right-2 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">%</span>
+                        <span className="absolute right-2 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none font-mono">%</span>
                       </div>
                     </td>
                     <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toFixed(1)} hrs</td>
@@ -1588,7 +1588,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 ))}
 
                 {/* Operational Expenses */}
-                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
                   <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.B - Operational Expenses</td>
                 </tr>
                 {[
@@ -1596,19 +1596,19 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-1200", desc: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, qty: qtyFuelVehicle, total: totalFuelVehicle },
                   { code: "01-5111", desc: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, qty: qtyCellPhone, total: totalCellPhone }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
-                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
-                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-400 dark:text-slate-500 uppercase text-[10px] font-bold">auto</td>
+                    <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-foreground font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">auto</td>
                     <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toFixed(2)} mos</td>
                     <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Site Equipment & Overrides */}
-                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
                   <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.C - Site Equipment & Mobilization Overrides</td>
                 </tr>
                 {[
@@ -1616,17 +1616,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-5140", desc: "Temp Toilets (Lump Sum)", val: eqToilets, field: "toilets" },
                   { code: "01-5170", desc: "Temp Electric (Lump Sum)", val: eqElectric, field: "electric" }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
-                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
-                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">ls</td>
+                    <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">ls</td>
                     <td className="p-3 text-right border-r border-b border-grid-border text-slate-400">—</td>
                     <td className="p-0 border-r border-b border-grid-border">
                       <div className="flex items-center justify-end w-full h-full relative">
-                        <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">$</span>
+                        <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none font-mono">$</span>
                         <input
                           type="number"
-                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
+                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono"
                           value={row.val === 0 ? "" : row.val}
                           placeholder="0.00"
                           onChange={(e) => handleEquipmentChange(row.field as "dumpsters" | "toilets" | "electric", e.target.value)}
@@ -1639,7 +1639,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 ))}
 
                 {/* Subtotal Row */}
-                <tr className="bg-slate-50 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-slate-800 dark:text-white">
+                <tr className="bg-background/80 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-foreground">
                   <td className="p-4 text-center border-r border-b border-grid-border font-bold">TOTAL</td>
                   <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-500 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 01 General Conditions Cost</td>
                   <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
@@ -1655,11 +1655,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
       {/* STEP 3 PANEL */}
       {activeTab === "step3" && (
         <div className="bg-card border border-grid-border text-card-foreground rounded-xl overflow-hidden shadow-sm animate-fade-in">
-          <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+          <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
+            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
               <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Division 02 Site Operations Calculation Module
             </h3>
-            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
+            <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
               Active SF: {squareFootage.toLocaleString()} SF | Duration: {projectDurationMonths} Mos
             </span>
           </div>
@@ -1667,7 +1667,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-separate border-spacing-0 font-sans">
               <thead>
-                <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                <tr className="bg-background dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
                   <th className="p-4 text-center w-28 border-r border-b border-grid-border font-semibold">Code</th>
                   <th className="p-4 text-left border-r border-b border-grid-border font-semibold">Description</th>
                   <th className="p-4 text-center w-20 border-r border-b border-grid-border font-semibold">Unit</th>
@@ -1679,7 +1679,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </thead>
               <tbody className="divide-y divide-grid-border">
                 {/* Injected Dynamic Operations */}
-                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
                   <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">02.A - Injected Dynamic Operations</td>
                 </tr>
                 {[
@@ -1687,19 +1687,19 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "02-9020", desc: "Temp Protection (Rate $0.25/sf, Quantity defaults to project square footage)", unit: "sf", rate: 0.25, qty: squareFootage, total: totalTempProtection },
                   { code: "02-9405", desc: "Material Hoist / Trash Chute (Rate $6,500/mo, Quantity defaults to duration)", unit: "mo", rate: 6500, qty: projectDurationMonths, total: totalMaterialHoist }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={row.code} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
-                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
-                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-450 dark:text-slate-500 uppercase text-[10px] font-bold">auto</td>
+                    <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-foreground font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">auto</td>
                     <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toLocaleString()} {row.unit}</td>
                     <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Manual Estimation Entries */}
-                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
                   <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">02.B - Manual Estimation Entries</td>
                 </tr>
                 {[
@@ -1708,31 +1708,31 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "02-9010", desc: "Progress Cleaning - Hired (Rate $54/hr)", unit: "hr", rate: 54, val: qtyHiredCleaning, field: "hired", isRateEditable: false },
                   { code: "02-3200", desc: "Soil Borings (Lump Sum custom overrides)", unit: "ls", rate: rateSoilBorings, val: qtySoilBorings, field: "soilQty", isRateEditable: true }
                 ].map((row) => (
-                  <tr key={`${row.code}-${row.field}`} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={`${row.code}-${row.field}`} className="hover:bg-background dark:hover:bg-slate-800/50 transition-colors">
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
-                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
-                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
-                    <td className={row.isRateEditable ? "p-0 border-r border-b border-grid-border" : "p-3 text-right border-r border-b border-grid-border"}>
+                    <td className="p-3 text-left font-semibold text-foreground border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">{row.unit}</td>
+                    <td className={row.isRateEditable ? "p-0 border-r border-b border-grid-border" : "p-3 text-right border-r border-b border-grid-border font-mono"}>
                       {row.isRateEditable ? (
                         <div className="flex items-center justify-end w-full h-full relative">
-                          <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">$</span>
+                          <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none font-mono">$</span>
                           <input
                             type="number"
-                            className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
+                            className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono"
                             value={rateSoilBorings === 0 ? "" : rateSoilBorings}
                             placeholder="0.00"
                             onChange={(e) => handleSiteOpsChange("soilRate", e.target.value)}
                           />
                         </div>
                       ) : (
-                        <span className="text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</span>
+                        <span className="text-foreground">${row.rate.toFixed(2)}</span>
                       )}
                     </td>
                     <td className="p-0 border-r border-b border-grid-border">
                       <input
                         type="number"
                         min="0"
-                        className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
+                        className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono"
                         value={row.val === 0 ? "" : row.val}
                         placeholder="0"
                         onChange={(e) => handleSiteOpsChange(row.field as "knox" | "payroll" | "hired" | "soilQty" | "soilRate", e.target.value)}
@@ -1746,7 +1746,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 ))}
 
                 {/* Subtotal Row */}
-                <tr className="bg-slate-50 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-slate-800 dark:text-white">
+                <tr className="bg-background/80 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-foreground">
                   <td className="p-4 text-center border-r border-b border-grid-border font-bold">TOTAL</td>
                   <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-500 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 02 Site Operations Cost</td>
                   <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
@@ -1772,12 +1772,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
               onDrop={handleDrop}
               className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
                 dragActive 
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-955/20 scale-[1.01]" 
-                  : "border-grid-border bg-slate-50 dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]" 
+                  : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
               }`}
             >
               <label className="flex flex-col items-center justify-center cursor-pointer select-none">
-                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                <div className="flex items-center gap-2 text-foreground">
                   <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-400 dark:text-slate-500"} />
                   <span className="text-xs font-bold uppercase tracking-wider">Ingest / Drop Takeoff CSV</span>
                 </div>
@@ -1788,7 +1788,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
             {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons side-by-side */}
             <div className="flex items-center gap-3 shrink-0">
-              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-slate-700 dark:text-slate-350 transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
+              <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
                 <input
                   id="append-checkbox-step4"
                   type="checkbox"
@@ -1804,7 +1804,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button
                 onClick={handleAddCustomColumn}
                 type="button"
-                className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-955/15 dark:hover:bg-blue-955/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+                className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
               >
                 + Add Custom Column
               </button>
@@ -1820,7 +1820,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   }
                 }}
                 disabled={historyStack.length === 0}
-                className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-955/15 dark:hover:bg-amber-955/35 text-amber-600 dark:text-amber-450 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+                className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
               >
                 <RotateCcw size={14} /> Undo Action ({historyStack.length})
               </button>
@@ -1828,7 +1828,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           </div>
 
           {unmappedTakeoffClassifications.length > 0 && (
-            <div className="bg-amber-50 dark:bg-amber-955/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-sans text-xs text-amber-700 dark:text-amber-500 animate-shake">
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-sans text-xs text-amber-700 dark:text-amber-500 animate-shake">
               <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
                 <AlertTriangle className="text-amber-500 animate-pulse" size={16} />
                 <span>Notice: Unmapped Classifications Detected</span>
@@ -1838,7 +1838,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </p>
               <div className="flex flex-wrap gap-2 mt-1">
                 {unmappedTakeoffClassifications.map((cl) => (
-                  <span key={cl} className="bg-slate-100 dark:bg-slate-900 border border-grid-border text-[10px] text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded font-bold">
+                  <span key={cl} className="bg-background dark:bg-slate-900 border border-grid-border text-[10px] text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded font-bold">
                     {cl}
                   </span>
                 ))}
@@ -1854,12 +1854,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
           {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
           <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm font-sans text-xs text-card-foreground">
             {/* Sheet title bar */}
-            <div className="bg-slate-50 dark:bg-slate-900/60 border-b border-grid-border px-4 py-2.5 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
+            <div className="bg-background/80 dark:bg-background/50 border-b border-grid-border px-4 py-2.5 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Grid size={16} className="text-blue-600 dark:text-blue-400" />
                 <span>STEP 4 - COMPANY ESTIMATE WORKBOOK</span>
               </div>
-              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-500 dark:text-slate-400 font-semibold">ROWS 2-4</span>
+              <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-500 dark:text-slate-400 font-semibold">ROWS 2-4</span>
             </div>
             
             {/* Grid matrix mapping rows 2-4 */}
@@ -1868,15 +1868,15 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
-                  <span className="text-slate-900 dark:text-white font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
+                  <span className="text-foreground font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
-                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.expectedStart || "—"}</span>
+                  <span className="text-foreground font-bold font-mono">{project.expectedStart || "—"}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
-                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.expectedFinish || "—"}</span>
+                  <span className="text-foreground font-bold font-mono">{project.expectedFinish || "—"}</span>
                 </div>
               </div>
 
@@ -1884,15 +1884,15 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
-                  <span className="text-slate-900 dark:text-white font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
+                  <span className="text-foreground font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
-                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
+                  <span className="text-foreground font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
-                  <span className="text-cyan-600 dark:text-cyan-405 font-bold font-mono">{projectDurationMonths} MONTHS</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono">{projectDurationMonths} MONTHS</span>
                 </div>
               </div>
 
@@ -1900,11 +1900,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
-                  <span className="text-slate-900 dark:text-white font-bold">{project.bidDate}</span>
+                  <span className="text-foreground font-bold">{project.bidDate}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
-                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
+                  <span className="text-foreground font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
@@ -1931,7 +1931,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                       <div key={div.code} className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-blue-600 dark:text-blue-400 font-bold w-6 text-right shrink-0">{div.code}</span>
-                          <span className="text-slate-700 dark:text-slate-300 font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
+                          <span className="text-foreground font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
                         </div>
                         <div className="flex items-center gap-3 font-mono shrink-0 ml-auto">
                           <span className="text-slate-400 dark:text-slate-500 text-[10px] hidden sm:inline font-bold">
@@ -1959,13 +1959,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     let badgeBg = "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-grid-border";
                     if (ct.key === "M") {
                       accentColor = "border-emerald-200 dark:border-emerald-900/60 hover:border-emerald-300 dark:hover:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/5 text-emerald-700 dark:text-emerald-400";
-                      badgeBg = "bg-emerald-100 dark:bg-emerald-955/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50";
+                      badgeBg = "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50";
                     } else if (ct.key === "L") {
-                      accentColor = "border-cyan-200 dark:border-cyan-900/60 hover:border-cyan-300 dark:hover:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-955/5 text-cyan-700 dark:text-cyan-400";
-                      badgeBg = "bg-cyan-100 dark:bg-cyan-955/40 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/50";
+                      accentColor = "border-cyan-200 dark:border-cyan-900/60 hover:border-cyan-300 dark:hover:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-950/5 text-cyan-700 dark:text-cyan-400";
+                      badgeBg = "bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/50";
                     } else if (ct.key === "S") {
-                      accentColor = "border-amber-200 dark:border-amber-900/60 hover:border-amber-300 dark:hover:border-amber-800 bg-amber-50/50 dark:bg-amber-955/5 text-amber-700 dark:text-amber-400";
-                      badgeBg = "bg-amber-100 dark:bg-amber-955/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50";
+                      accentColor = "border-amber-200 dark:border-amber-900/60 hover:border-amber-300 dark:hover:border-amber-800 bg-amber-50/50 dark:bg-amber-950/5 text-amber-700 dark:text-amber-400";
+                      badgeBg = "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50";
                     }
                     return (
                       <div
@@ -1979,7 +1979,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           </span>
                         </div>
                         <div className="mt-2">
-                          <h4 className="text-slate-900 dark:text-white text-base font-black">
+                          <h4 className="text-foreground text-base font-black">
                             ${ct.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </h4>
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">
@@ -1993,14 +1993,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </div>
             </div>
           )}
-
-          {/* Re-Architected workbook template grid */}
+            {/* Re-Architected workbook template grid */}
           <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+            <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
+              <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
                 <Activity size={16} className="text-blue-600 dark:text-blue-400 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
               </h3>
-              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
+              <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
                 Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
               </span>
             </div>
@@ -2011,7 +2010,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr 
                       key={headerGroup.id} 
-                      className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase border-b border-grid-border tracking-wider font-semibold font-sans"
+                      className="bg-background/80 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase border-b border-grid-border tracking-wider font-semibold font-sans"
                     >
                       {headerGroup.headers.map((header) => {
                         let alignClass = "text-left";
@@ -2033,7 +2032,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                   type="text"
                                   value={colDef.header}
                                   onChange={(e) => handleRenameColumn(colDef.id, e.target.value)}
-                                  className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 text-xs text-foreground font-semibold outline-none uppercase w-28 text-left focus:bg-white dark:focus:bg-slate-900/40"
+                                  className="bg-transparent border border-grid-border focus:ring-2 focus:ring-blue-500 focus:z-10 rounded-lg px-2 py-1 text-xs text-foreground font-semibold outline-none uppercase w-28 text-left focus:bg-white dark:focus:bg-slate-900/40"
                                 />
                                 <button
                                   type="button"
@@ -2057,7 +2056,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                   className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-opacity ${
                                     header.column.getIsResizing()
                                       ? "bg-blue-600 dark:bg-blue-400 opacity-100 w-1.5"
-                                      : "bg-slate-300 dark:bg-slate-700 opacity-0 group-hover/header:opacity-100"
+                                      : "bg-grid-border opacity-0 group-hover/header:opacity-100"
                                   }`}
                               />
                             )}
@@ -2070,7 +2069,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 <tbody className="divide-y divide-grid-border">
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-400 dark:text-slate-500 italic font-sans uppercase tracking-wider">
+                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-500 dark:text-slate-400 italic font-sans uppercase tracking-wider">
                         No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
                       </td>
                     </tr>
@@ -2097,7 +2096,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           else if (currentDivision === "09") divLabel = "DIVISION 09 — FINISHES";
 
                           dividerRow = (
-                            <tr key={`div-header-${currentDivision}`} className="bg-blue-50/50 dark:bg-blue-955/20 border-y border-grid-border font-sans select-none">
+                            <tr key={`div-header-${currentDivision}`} className="bg-blue-50/50 dark:bg-blue-950/20 border-y border-grid-border font-sans select-none">
                               <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-widest text-[10px]">
                                 {divLabel}
                               </td>
@@ -2105,7 +2104,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           );
                         }
 
-                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-955/15" : "group-hover:bg-slate-100 dark:group-hover:bg-slate-800/50";
+                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-background dark:group-hover:bg-slate-800/50";
 
                         return (
                           <React.Fragment key={row.original.id || `row-${idx}`}>
@@ -2113,8 +2112,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
                             <tr 
                               className={`group transition-colors ${
                                 !row.original.isMapped 
-                                  ? "bg-amber-50/20 dark:bg-amber-955/5 hover:bg-amber-50/40 dark:hover:bg-amber-955/10 border-l-4 border-l-amber-500" 
-                                  : "hover:bg-slate-50/40 dark:hover:bg-slate-900/20 border-l-4 border-l-transparent"
+                                  ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500" 
+                                  : "hover:bg-background/40 dark:hover:bg-background/20 border-l-4 border-l-transparent"
                               }`}
                               onContextMenu={(e) => {
                                 e.preventDefault();
@@ -2159,29 +2158,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 {rows.length > 0 && (
                   <tfoot>
                     {/* Subtotal Row */}
-                    <tr className="border-t border-grid-border bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
+                    <tr className="border-t border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-500 dark:text-slate-400 font-sans">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
-                        let alignClass = "text-left";
+                        let alignClass = "text-left font-sans";
                         if (column.id === "costType") {
                           content = "TI";
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "description") {
                           content = "Takeoff Subtotal";
-                          alignClass = "text-left";
+                          alignClass = "text-left font-sans";
                         } else if (column.id === "total") {
                           content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
+                          alignClass = "text-right text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "uom") {
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (["matchedQty", "unitPrice"].includes(column.id)) {
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2192,34 +2191,34 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* General Liability Row */}
-                    <tr className="bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
+                    <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-500 dark:text-slate-400 font-sans">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
-                        let alignClass = "text-left";
+                        let alignClass = "text-left font-sans";
                         if (column.id === "costType") {
                           content = "TI";
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "description") {
                           content = "General Liability (1%)";
-                          alignClass = "text-left";
+                          alignClass = "text-left font-sans";
                         } else if (column.id === "matchedQty") {
                           content = "1.00";
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "uom") {
                           content = "LS";
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "unitPrice") {
                           content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "total") {
                           content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
+                          alignClass = "text-right text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2230,34 +2229,34 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* Contractor Fee Row */}
-                    <tr className="bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
+                    <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-500 dark:text-slate-400 font-sans">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
-                        let alignClass = "text-left";
+                        let alignClass = "text-left font-sans";
                         if (column.id === "costType") {
                           content = "TI";
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "description") {
                           content = "Contractor Fee (5%)";
-                          alignClass = "text-left";
+                          alignClass = "text-left font-sans";
                         } else if (column.id === "matchedQty") {
                           content = "1.00";
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "uom") {
                           content = "LS";
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (column.id === "unitPrice") {
                           content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "total") {
                           content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
+                          alignClass = "text-right text-foreground font-bold font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
@@ -2268,29 +2267,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* Total Estimated Cost Row */}
-                    <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-955/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono">
+                    <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
-                        let alignClass = "text-left";
+                        let alignClass = "text-left font-sans";
                         if (column.id === "costType") {
                           content = "TI";
-                          alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold";
+                          alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold font-mono";
                         } else if (column.id === "description") {
                           content = "Total Estimated Cost";
-                          alignClass = "text-left uppercase tracking-wider";
+                          alignClass = "text-left uppercase tracking-wider font-sans";
                         } else if (column.id === "total") {
                           content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm text-emerald-600 dark:text-emerald-400 font-black";
+                          alignClass = "text-right text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono";
                         } else if (column.id === "costPerUnit") {
                           content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm";
+                          alignClass = "text-right text-sm font-mono";
                         } else if (column.id === "costPerSf") {
                           content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm";
+                          alignClass = "text-right text-sm font-mono";
                         } else if (column.id === "uom") {
-                          alignClass = "text-center";
+                          alignClass = "text-center font-mono";
                         } else if (["matchedQty", "unitPrice"].includes(column.id)) {
-                          alignClass = "text-right";
+                          alignClass = "text-right font-mono";
                         }
                         return (
                           <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
