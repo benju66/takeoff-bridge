@@ -1034,14 +1034,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
                       type="text"
                       list="estimate-items-options"
                       disabled={isCellHardLocked}
-                      className={`rounded px-3 py-1.5 w-36 text-left outline-none font-mono text-xs uppercase transition-all focus:ring-1 ${
+                      className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs uppercase transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
                         isCellHardLocked
-                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
-                          : `bg-neutral-900 border text-neutral-100 ${
-                              row.isMapped 
-                                ? "border-neutral-850 focus:border-blue-500 focus:ring-blue-500" 
-                                : "border-amber-900/65 focus:border-amber-500 focus:ring-amber-500 bg-amber-955/20"
-                            }`
+                          ? "text-neutral-500 bg-neutral-950/30 cursor-not-allowed opacity-60"
+                          : row.isMapped
+                            ? "text-neutral-100"
+                            : "text-amber-500 bg-amber-955/10"
                       }`}
                       value={row.itemId}
                       onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
@@ -1061,7 +1059,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                       placeholder="Assign code..."
                     />
                     {!row.isMapped && (
-                      <div className="flex flex-col gap-1 mt-1 text-left">
+                      <div className="flex flex-col gap-1 mt-1 text-left px-3 pb-2">
                         <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Suggestions:</span>
                         <div className="flex flex-wrap gap-1.5">
                           {getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER).map((sugg) => (
@@ -1095,10 +1093,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     id={`desc-input-${index}`}
                     type="text"
                     disabled={isCellHardLocked}
-                    className={`text-left rounded px-3 py-1.5 w-64 outline-none font-mono text-xs transition-all ${
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
                       isCellHardLocked
-                        ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
-                        : "bg-neutral-900 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-neutral-100"
+                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
+                        : "text-neutral-100"
                     }`}
                     value={row.description}
                     onChange={(e) => handleCellEdit(index, "description", e.target.value)}
@@ -1127,33 +1125,31 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const isCellHardLocked = !!lockedCells[`${row.id}::matchedQty`];
                 return (
-                  <div className="flex items-center gap-1.5 justify-end">
-                    <input
-                      id={`qty-input-${index}`}
-                      type="number"
-                      disabled={isCellHardLocked}
-                      className={`rounded px-2 py-1.5 w-24 text-right font-bold outline-none font-mono text-xs transition-all ${
-                        isCellHardLocked
-                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
-                          : "bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-white"
-                      }`}
-                      value={row.matchedQty}
-                      onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, index, "qty")}
-                      onPaste={(e) => handlePaste(e, index, "qty")}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu({
-                          visible: true,
-                          x: e.clientX,
-                          y: e.clientY,
-                          rowIndex: index,
-                          columnId: "matchedQty"
-                        });
-                      }}
-                    />
-                  </div>
+                  <input
+                    id={`qty-input-${index}`}
+                    type="number"
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                      isCellHardLocked
+                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
+                        : "text-white"
+                    }`}
+                    value={row.matchedQty}
+                    onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, index, "qty")}
+                    onPaste={(e) => handlePaste(e, index, "qty")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({
+                        visible: true,
+                        x: e.clientX,
+                        y: e.clientY,
+                        rowIndex: index,
+                        columnId: "matchedQty"
+                      });
+                    }}
+                  />
                 );
               },
             });
@@ -1174,35 +1170,32 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const isCellHardLocked = !!lockedCells[`${row.id}::unitPrice`];
                 return (
-                  <div className="flex items-center gap-1 justify-end">
-                    <span className="text-neutral-500">$</span>
-                    <input
-                      id={`price-input-${index}`}
-                      type="number"
-                      step="0.01"
-                      disabled={isCellHardLocked}
-                      className={`rounded px-2 py-1.5 w-20 text-right font-bold outline-none font-mono text-xs transition-all ${
-                        isCellHardLocked
-                          ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
-                          : "bg-neutral-900 border border-neutral-855 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-white"
-                      }`}
-                      value={row.unitPrice}
-                      onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, index, "price")}
-                      onPaste={(e) => handlePaste(e, index, "price")}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu({
-                          visible: true,
-                          x: e.clientX,
-                          y: e.clientY,
-                          rowIndex: index,
-                          columnId: "unitPrice"
-                        });
-                      }}
-                    />
-                  </div>
+                  <input
+                    id={`price-input-${index}`}
+                    type="number"
+                    step="0.01"
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                      isCellHardLocked
+                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
+                        : "text-white"
+                    }`}
+                    value={row.unitPrice}
+                    onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, index, "price")}
+                    onPaste={(e) => handlePaste(e, index, "price")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu({
+                        visible: true,
+                        x: e.clientX,
+                        y: e.clientY,
+                        rowIndex: index,
+                        columnId: "unitPrice"
+                      });
+                    }}
+                  />
                 );
               },
             });
@@ -1263,10 +1256,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 id={`custom-${def.id}-input-${index}`}
                 type="text"
                 disabled={isCellHardLocked}
-                className={`text-left rounded px-3 py-1.5 w-32 outline-none font-mono text-xs transition-all ${
+                className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
                   isCellHardLocked
-                    ? "bg-neutral-900/50 text-neutral-500 border-neutral-900 cursor-not-allowed opacity-60"
-                    : "bg-neutral-900 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-550 text-neutral-100"
+                    ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
+                    : "text-neutral-100"
                 }`}
                 value={val}
                 onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
@@ -1297,6 +1290,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const table = useReactTable({
     data: rows,
     columns,
+    columnResizeMode: "onChange",
     getCoreRowModel: getCoreRowModel(),
   });
 
@@ -2013,8 +2007,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="overflow-x-auto border-t border-l border-neutral-800">
+              <table className="w-full text-left text-xs border-separate border-spacing-0">
                 <thead>
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr 
@@ -2030,7 +2024,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         const isCustom = colDef && colDef.type === "custom";
 
                         return (
-                          <th key={header.id} className={`p-4 ${alignClass}`}>
+                          <th 
+                            key={header.id} 
+                            className={`p-4 border-r border-b border-neutral-800 relative group/header ${alignClass}`}
+                            style={{ width: header.getSize() }}
+                          >
                             {header.isPlaceholder ? null : isCustom ? (
                               <div className="flex items-center gap-1.5 justify-start">
                                 <input
@@ -2054,6 +2052,17 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                 header.getContext()
                               )
                             )}
+                            {header.column.getCanResize() && (
+                              <div
+                                onMouseDown={header.getResizeHandler()}
+                                onTouchStart={header.getResizeHandler()}
+                                className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-opacity ${
+                                  header.column.getIsResizing()
+                                    ? "bg-blue-500 opacity-100 w-1.5"
+                                    : "bg-neutral-700 opacity-0 group-hover/header:opacity-100"
+                                }`}
+                              />
+                            )}
                           </th>
                         );
                       })}
@@ -2063,7 +2072,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 <tbody className="divide-y divide-neutral-850">
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 text-center text-neutral-555 italic font-mono uppercase tracking-wider">
+                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-neutral-800 text-center text-neutral-555 italic font-mono uppercase tracking-wider">
                         No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
                       </td>
                     </tr>
@@ -2090,21 +2099,23 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           else if (currentDivision === "09") divLabel = "DIVISION 09 — FINISHES";
 
                           dividerRow = (
-                            <tr key={`div-header-${currentDivision}`} className="bg-blue-950/40 border-y border-blue-900/60 font-sans select-none">
-                              <td colSpan={table.getVisibleFlatColumns().length} className="p-3 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
+                            <tr key={`div-header-${currentDivision}`} className="bg-blue-955/40 border-y border-blue-900/60 font-sans select-none">
+                              <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-neutral-800 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
                                 {divLabel}
                               </td>
                             </tr>
                           );
                         }
 
+                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-900/20" : "group-hover:bg-neutral-900/60";
+
                         return (
                           <React.Fragment key={row.original.id || `row-${idx}`}>
                             {dividerRow}
                             <tr 
-                              className={`transition-colors ${
+                              className={`group transition-colors ${
                                 !row.original.isMapped 
-                                  ? "bg-amber-950/10 hover:bg-amber-950/15 border-l-4 border-l-amber-500" 
+                                  ? "bg-amber-955/10 hover:bg-amber-955/15 border-l-4 border-l-amber-500" 
                                   : "hover:bg-neutral-900/30 border-l-4 border-l-transparent"
                               }`}
                               onContextMenu={(e) => {
@@ -2122,8 +2133,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                 let alignClass = "text-left";
                                 if (cell.column.id === "costType" || cell.column.id === "uom") alignClass = "text-center";
                                 if (["matchedQty", "unitPrice", "total", "costPerUnit", "costPerSf"].includes(cell.column.id)) alignClass = "text-right";
+                                
+                                const colDef = columnDefs.find(c => c.id === cell.column.id);
+                                const isCustom = colDef && colDef.type === "custom";
+                                const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
+                                const paddingClass = isEditable ? "p-0" : "p-3";
+
                                 return (
-                                  <td key={cell.id} className={`p-3 ${alignClass}`}>
+                                  <td 
+                                    key={cell.id} 
+                                    className={`${paddingClass} border-r border-b border-neutral-800 ${alignClass} ${rowHoverClass} transition-colors`}
+                                    style={{ width: cell.column.getSize() }}
+                                  >
                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                   </td>
                                 );
@@ -2165,7 +2186,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2203,7 +2224,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2241,7 +2262,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2274,7 +2295,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 ${alignClass}`}>
+                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
