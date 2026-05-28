@@ -62,14 +62,14 @@ export default function ProjectsDashboard() {
 
 
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-600/30 selection:text-blue-200">
+    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-100 dark:selection:bg-blue-900/50">
       {/* Header Panel */}
       <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
             <Layers className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> TAKEOFF PORTAL
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
             Multi-Project Directory Node v2.0.0
           </p>
@@ -105,11 +105,11 @@ export default function ProjectsDashboard() {
       {/* Projects Matrix */}
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center border-2 border-dashed border-grid-border rounded-xl p-24 text-center bg-card dark:bg-card/10">
-          <div className="p-4 bg-background rounded-full border border-grid-border mb-6 text-slate-500 dark:text-slate-400">
-            <Folder size={48} className="text-slate-500 dark:text-slate-400" />
+          <div className="p-4 bg-background rounded-full border border-grid-border mb-6 text-slate-600 dark:text-slate-400">
+            <Folder size={48} className="text-slate-600 dark:text-slate-400" />
           </div>
           <h3 className="text-lg font-bold text-foreground mb-2">No Projects Detected</h3>
-          <p className="text-slate-500 dark:text-slate-400 max-w-md text-xs leading-relaxed mb-6">
+          <p className="text-slate-600 dark:text-slate-400 max-w-md text-xs leading-relaxed mb-6">
             Begin by initializing a new takeoff database entity. You will be prompted to supply scope details prior to uploading project estimation sheets.
           </p>
           <button
@@ -125,7 +125,7 @@ export default function ProjectsDashboard() {
             <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
               <Activity className="text-emerald-600 dark:text-emerald-400" size={16} /> Active Terminal Nodes
             </h3>
-            <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-3 py-1 rounded-full text-slate-500 dark:text-slate-400 font-sans font-semibold">
+            <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-3 py-1 rounded-full text-slate-600 dark:text-slate-400 font-sans font-semibold">
               Total Managed: {projects.length}
             </span>
           </div>
@@ -133,7 +133,7 @@ export default function ProjectsDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-grid-border">
               <thead>
-                <tr className="bg-background/80 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                <tr className="bg-background/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold">
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Project ID</th>
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Name</th>
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Location</th>
@@ -148,21 +148,21 @@ export default function ProjectsDashboard() {
                   <tr key={proj.id} className="group transition-colors">
                     <td className="p-4 font-bold text-blue-600 dark:text-blue-400 tracking-widest border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">{proj.id}</td>
                     <td className="p-4 font-bold text-foreground text-sm border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">{proj.name}</td>
-                    <td className="p-4 text-slate-500 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                    <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
                       <div className="flex items-center gap-1.5">
-                        <MapPin size={12} className="text-slate-400 dark:text-slate-500" />
+                        <MapPin size={12} className="text-slate-600 dark:text-slate-400" />
                         {proj.location}
                       </div>
                     </td>
                     <td className="p-4 text-right text-foreground font-bold border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
-                      {proj.squareFootage.toLocaleString()} <span className="text-slate-500 dark:text-slate-400 font-normal">SF</span>
+                      {proj.squareFootage.toLocaleString()} <span className="text-slate-600 dark:text-slate-400 font-normal">SF</span>
                     </td>
                     <td className="p-4 text-right text-foreground font-bold border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
-                      {proj.unitCount.toLocaleString()} <span className="text-slate-500 dark:text-slate-400 font-normal">Units</span>
+                      {proj.unitCount.toLocaleString()} <span className="text-slate-600 dark:text-slate-400 font-normal">Units</span>
                     </td>
-                    <td className="p-4 text-right text-slate-500 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
+                    <td className="p-4 text-right text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
                       <div className="flex items-center gap-1.5 justify-end">
-                        <Calendar size={12} className="text-slate-400 dark:text-slate-500" />
+                        <Calendar size={12} className="text-slate-600 dark:text-slate-400" />
                         {proj.bidDate}
                       </div>
                     </td>
@@ -200,7 +200,7 @@ export default function ProjectsDashboard() {
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-650 dark:text-slate-500 dark:hover:text-slate-350 transition-colors"
+                className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
               >
                 <X size={18} />
               </button>
@@ -208,7 +208,7 @@ export default function ProjectsDashboard() {
 
             <form onSubmit={handleCreateProject} className="p-6 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
                   Project Name
                 </label>
                 <input
@@ -222,11 +222,11 @@ export default function ProjectsDashboard() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
                   Location / Region
                 </label>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
+                  <MapPin className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400" size={14} />
                   <input
                     type="text"
                     placeholder="e.g. Chicago, IL"
@@ -239,11 +239,11 @@ export default function ProjectsDashboard() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
                     Square Footage (SF)
                   </label>
                   <div className="relative">
-                    <Hash className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
+                    <Hash className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400" size={14} />
                     <input
                       type="number"
                       min="0"
@@ -256,11 +256,11 @@ export default function ProjectsDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
                     Unit Count
                   </label>
                   <div className="relative">
-                    <Hash className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
+                    <Hash className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400" size={14} />
                     <input
                       type="number"
                       min="0"
@@ -274,11 +274,11 @@ export default function ProjectsDashboard() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
                   Bid Submission Date
                 </label>
                 <div className="relative">
-                  <Calendar className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
+                  <Calendar className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400" size={14} />
                   <input
                     type="date"
                     className="w-full bg-transparent border border-grid-border rounded-lg pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40"

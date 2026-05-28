@@ -113,7 +113,7 @@ export default function GlobalRegistryDashboard() {
       <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
         <Terminal className="text-blue-600 dark:text-blue-400 mb-4 animate-pulse" size={48} />
         <h3 className="text-lg font-bold text-foreground mb-2">Connecting to Harvester Registry...</h3>
-        <p className="text-xs text-slate-500 dark:text-slate-400">Initializing secure browser sandbox</p>
+        <p className="text-xs text-slate-600 dark:text-slate-400">Initializing secure browser sandbox</p>
       </div>
     );
   }
@@ -122,10 +122,10 @@ export default function GlobalRegistryDashboard() {
   const harvestedCount = Object.keys(registry).length;
 
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-600/30 selection:text-blue-200">
+    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-100 dark:selection:bg-blue-900/50">
       {/* Breadcrumb Back Navigation */}
       <div className="mb-4">
-        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors uppercase tracking-widest font-bold">
+        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors uppercase tracking-widest font-bold">
           <ChevronLeft size={16} /> Back to Directory
         </Link>
       </div>
@@ -136,7 +136,7 @@ export default function GlobalRegistryDashboard() {
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
             <Database className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> GLOBAL CORPORATE REGISTRY
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
             Centralized Harvester Node // Active Directory
           </p>
@@ -170,27 +170,27 @@ export default function GlobalRegistryDashboard() {
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <Database size={40} className="text-blue-600 dark:text-blue-400" />
           </div>
-          <p className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">Harvested Rules</p>
+          <p className="text-slate-600 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">Harvested Rules</p>
           <h2 className="text-2xl font-extrabold text-foreground mt-2">{harvestedCount}</h2>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Active global overrides stored</div>
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1">Active global overrides stored</div>
         </div>
 
         <div className="bg-card border border-grid-border text-card-foreground p-5 rounded-xl shadow-sm relative overflow-hidden group/kpi">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <CheckCircle2 size={40} className="text-emerald-600 dark:text-emerald-400" />
           </div>
-          <p className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">Master Reference Catalog</p>
+          <p className="text-slate-600 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">Master Reference Catalog</p>
           <h2 className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-2">{totalMappableItems}</h2>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Standard cost codes available</div>
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1">Standard cost codes available</div>
         </div>
 
         <div className="bg-card border border-grid-border text-card-foreground p-5 rounded-xl shadow-sm relative overflow-hidden group/kpi">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <Terminal size={40} className="text-cyan-600 dark:text-cyan-400" />
           </div>
-          <p className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">System Registry Status</p>
+          <p className="text-slate-600 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">System Registry Status</p>
           <h2 className="text-2xl font-extrabold text-cyan-600 dark:text-cyan-400 mt-2">ACTIVE</h2>
-          <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             HARVESTER_MODE::LISTENING
           </div>
@@ -200,11 +200,11 @@ export default function GlobalRegistryDashboard() {
       {/* Main Content Area */}
       {harvestedCount === 0 ? (
         <div className="flex flex-col items-center justify-center border-2 border-dashed border-grid-border rounded-xl p-24 text-center bg-card dark:bg-card/10">
-          <div className="p-4 bg-background rounded-full border border-grid-border mb-6 text-slate-500 dark:text-slate-400">
-            <Terminal size={48} className="text-slate-500 dark:text-slate-400 animate-pulse" />
+          <div className="p-4 bg-background rounded-full border border-grid-border mb-6 text-slate-600 dark:text-slate-400">
+            <Terminal size={48} className="text-slate-600 dark:text-slate-400 animate-pulse" />
           </div>
           <h3 className="text-lg font-bold text-foreground mb-2">No Harvested Mappings</h3>
-          <p className="text-slate-500 dark:text-slate-400 max-w-md text-xs leading-relaxed mb-6">
+          <p className="text-slate-600 dark:text-slate-400 max-w-md text-xs leading-relaxed mb-6">
             The global corporate lookup dictionary is currently empty. Mappings are automatically indexed here when estimators associate a Togal CSV classification string with an internal cost code in any active project workspace.
           </p>
           <Link
@@ -218,7 +218,7 @@ export default function GlobalRegistryDashboard() {
         <div className="space-y-4 animate-fade-in">
           {/* Instant Search Bar */}
           <div className="relative">
-            <Search className="absolute left-4 top-3.5 text-slate-400 dark:text-slate-500" size={16} />
+            <Search className="absolute left-4 top-3.5 text-slate-600 dark:text-slate-400" size={16} />
             <input
               type="text"
               placeholder="Search registry by Togal classification, assigned item code target, description..."
@@ -233,11 +233,11 @@ export default function GlobalRegistryDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-grid-border">
                 <thead>
-                  <tr className="bg-background/80 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
-                    <th className="p-4 border-r border-b border-grid-border font-semibold">Togal Classification</th>
-                    <th className="p-4 border-r border-b border-grid-border font-semibold">Assigned Suffix Code</th>
-                    <th className="p-4 border-r border-b border-grid-border font-semibold">Item Description Reference</th>
-                    <th className="p-4 border-r border-b border-grid-border font-semibold">Division Code & Scope</th>
+                  <tr className="bg-background/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                    <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Togal Classification</th>
+                    <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Assigned Suffix Code</th>
+                    <th className="p-4 text-center w-80 border-r border-b border-grid-border font-semibold">Item Description Reference</th>
+                    <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Division Code & Scope</th>
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Cost Type</th>
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">UOM</th>
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Action</th>
@@ -246,13 +246,13 @@ export default function GlobalRegistryDashboard() {
                 <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-500 dark:text-slate-400 italic border-r border-b border-grid-border">
+                      <td colSpan={7} className="p-8 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
                         No registry items match the query: &quot;{searchQuery}&quot;
                       </td>
                     </tr>
                   ) : (
                     filteredRows.map((row) => {
-                      let typeColor = "bg-background dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-grid-border";
+                      let typeColor = "bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-grid-border";
                       if (row.costType === "M") {
                         typeColor = "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50";
                       } else if (row.costType === "L") {
@@ -272,14 +272,14 @@ export default function GlobalRegistryDashboard() {
                           <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
                             {row.description}
                           </td>
-                          <td className="p-4 text-slate-500 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                          <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
                             <div className="flex items-center gap-2">
                               {row.divisionCode ? (
-                                <span className="bg-background dark:bg-slate-800 border border-grid-border text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
+                                <span className="bg-background dark:bg-slate-800 border border-grid-border text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
                                   Div {row.divisionCode}
                                 </span>
                               ) : (
-                                <span className="bg-background dark:bg-slate-800 border border-grid-border text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded font-mono text-[10px]">
+                                <span className="bg-background dark:bg-slate-800 border border-grid-border text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono text-[10px]">
                                   —
                                 </span>
                               )}
@@ -291,13 +291,13 @@ export default function GlobalRegistryDashboard() {
                               {row.costType}
                             </span>
                           </td>
-                          <td className="p-4 text-center font-bold text-slate-500 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
+                          <td className="p-4 text-center font-bold text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
                             {row.uom}
                           </td>
                           <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
                             <button
                               onClick={() => handleDeleteRule(row.classification)}
-                              className="inline-flex items-center justify-center p-2 rounded-lg bg-background hover:bg-rose-50 dark:bg-card dark:hover:bg-rose-950/30 text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 border border-grid-border hover:border-rose-500/50 dark:hover:border-rose-400/50 transition-all duration-300 cursor-pointer shadow-sm"
+                              className="inline-flex items-center justify-center p-2 rounded-lg bg-background hover:bg-rose-50 dark:bg-card dark:hover:bg-rose-950/30 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 border border-grid-border hover:border-rose-500/50 dark:hover:border-rose-400/50 transition-all duration-300 cursor-pointer shadow-sm"
                               title="Delete individual mapping rule"
                             >
                               <Trash2 size={14} />

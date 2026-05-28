@@ -1,11 +1,14 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
-  --grid-border: #e2e8f0;
+  --grid-border: #94a3b8;
 }
 
 /* Automatic System Preference (Only applies if no manual theme preference is set) */
@@ -15,7 +18,7 @@
     --foreground: #f1f5f9;
     --card: #111827;
     --card-foreground: #f1f5f9;
-    --grid-border: #1f2937;
+    --grid-border: #374151;
   }
 }
 
@@ -25,7 +28,7 @@
   --foreground: #f1f5f9;
   --card: #111827;
   --card-foreground: #f1f5f9;
-  --grid-border: #1f2937;
+  --grid-border: #374151;
 }
 
 :root[data-theme="light"] {
@@ -33,7 +36,7 @@
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
-  --grid-border: #e2e8f0;
+  --grid-border: #94a3b8;
 }
 
 @theme inline {
