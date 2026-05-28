@@ -713,10 +713,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
       const targetItem = ESTIMATE_ITEMS_MASTER[newCode];
 
       // Save project-isolated mapping pair
-      newRegistry = {
-        ...currentRegistry,
-        [classification]: newCode,
-      };
+      if (classification !== "MANUAL ENTRY") {
+        newRegistry = {
+          ...currentRegistry,
+          [classification]: newCode,
+        };
+      }
 
       if (targetItem) {
         row.description = targetItem.description;
@@ -736,23 +738,25 @@ export default function ProjectWorkspace({ params }: PageProps) {
         row.isMapped = true;
 
         // Cascade duplicates matching classification inside the project grid scope
-        for (let i = 0; i < updated.length; i++) {
-          if (i !== index && updated[i].classification === classification) {
-            updated[i].itemId = newCode;
-            updated[i].description = targetItem.description;
-            updated[i].procoreParentCode = targetItem.procoreParentCode;
-            updated[i].unitPrice = targetItem.defaultUnitPrice;
-            updated[i].uom = targetItem.targetUom;
-            updated[i].costType = targetItem.costType;
+        if (classification !== "MANUAL ENTRY") {
+          for (let i = 0; i < updated.length; i++) {
+            if (i !== index && updated[i].classification === classification) {
+              updated[i].itemId = newCode;
+              updated[i].description = targetItem.description;
+              updated[i].procoreParentCode = targetItem.procoreParentCode;
+              updated[i].unitPrice = targetItem.defaultUnitPrice;
+              updated[i].uom = targetItem.targetUom;
+              updated[i].costType = targetItem.costType;
 
-            const m = updated[i].rawQuantities.find(
-              (mq) => mq.uom?.trim().toUpperCase() === targetUom.toUpperCase()
-            ) || updated[i].rawQuantities[0];
+              const m = updated[i].rawQuantities.find(
+                (mq) => mq.uom?.trim().toUpperCase() === targetUom.toUpperCase()
+              ) || updated[i].rawQuantities[0];
 
-            const q = m?.qty || 0;
-            updated[i].matchedQty = q;
-            updated[i].total = q * targetItem.defaultUnitPrice;
-            updated[i].isMapped = true;
+              const q = m?.qty || 0;
+              updated[i].matchedQty = q;
+              updated[i].total = q * targetItem.defaultUnitPrice;
+              updated[i].isMapped = true;
+            }
           }
         }
       } else {
@@ -771,9 +775,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
       row.description = String(value);
       
       // Cascade description change to other rows with same classification
-      for (let i = 0; i < updated.length; i++) {
-        if (updated[i].classification === classification) {
-          updated[i].description = String(value);
+      if (classification !== "MANUAL ENTRY") {
+        for (let i = 0; i < updated.length; i++) {
+          if (updated[i].classification === classification) {
+            updated[i].description = String(value);
+          }
         }
       }
     } else if (field === "matchedQty") {
@@ -786,10 +792,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
       row.total = row.matchedQty * price;
 
       // Cascade unit price change to other rows with same classification
-      for (let i = 0; i < updated.length; i++) {
-        if (updated[i].classification === classification) {
-          updated[i].unitPrice = price;
-          updated[i].total = updated[i].matchedQty * price;
+      if (classification !== "MANUAL ENTRY") {
+        for (let i = 0; i < updated.length; i++) {
+          if (updated[i].classification === classification) {
+            updated[i].unitPrice = price;
+            updated[i].total = updated[i].matchedQty * price;
+          }
         }
       }
     }
@@ -918,19 +926,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
     pushSnapshotToStack(rows, lockedCells);
     const updated = [...rows];
     const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
-    if (newRegistry) {
-      setUserRegistry(newRegistry);
-      localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(newRegistry));
-      
-      // Update global company harvested registry overrides simultaneously
-      const classification = updated[index]?.classification;
-      if (classification && field === "itemId") {
-        const newGlobalRegistry = {
-          ...globalRegistry,
-          [classification]: String(value).trim(),
-        };
-        setGlobalRegistry(newGlobalRegistry);
-        localStorage.setItem("takeoff_global_user_registry", JSON.stringify(newGlobalRegistry));
+    
+    const classification = updated[index]?.classification;
+    if (classification !== "MANUAL ENTRY") {
+      if (newRegistry) {
+        setUserRegistry(newRegistry);
+        localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(newRegistry));
+        
+        // Update global company harvested registry overrides simultaneously
+        if (classification && field === "itemId") {
+          const newGlobalRegistry = {
+            ...globalRegistry,
+            [classification]: String(value).trim(),
+          };
+          setGlobalRegistry(newGlobalRegistry);
+          localStorage.setItem("takeoff_global_user_registry", JSON.stringify(newGlobalRegistry));
+        }
       }
     }
     setRows(updated);
