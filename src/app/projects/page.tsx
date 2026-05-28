@@ -62,14 +62,14 @@ export default function ProjectsDashboard() {
 
 
   return (
-    <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100 font-mono p-8 selection:bg-blue-600/30 selection:text-blue-200">
+    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-600/30 selection:text-blue-200">
       {/* Header Panel */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-neutral-850 pb-6 mb-8 gap-4">
+      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-wider text-white flex items-center gap-3">
-            <Layers className="text-blue-500 animate-pulse" size={32} /> TAKEOFF PORTAL
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
+            <Layers className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> TAKEOFF PORTAL
           </h1>
-          <p className="text-xs text-neutral-400 mt-2 uppercase tracking-widest font-semibold flex items-center gap-2">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
             Multi-Project Directory Node v2.0.0
           </p>
@@ -78,9 +78,9 @@ export default function ProjectsDashboard() {
         <div className="flex items-center gap-3">
           <Link
             href="/registry"
-            className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-250 border border-neutral-800 hover:border-neutral-700 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg cursor-pointer"
+            className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm cursor-pointer"
           >
-            <Activity size={18} className="text-blue-500" /> Global Registry
+            <Activity size={18} className="text-blue-600 dark:text-blue-400" /> Global Registry
           </Link>
           <button
             onClick={() => setIsModalOpen(true)}
@@ -92,11 +92,11 @@ export default function ProjectsDashboard() {
       </header>
 
       {/* Info Notice Banner */}
-      <div className="bg-blue-950/20 border border-blue-900/45 p-4 rounded-xl mb-8 flex items-start gap-3">
-        <Info className="text-blue-400 mt-0.5 flex-shrink-0" size={18} />
+      <div className="bg-blue-50/50 dark:bg-blue-955/10 border border-blue-200 dark:border-blue-900/50 p-4 rounded-xl mb-8 flex items-start gap-3">
+        <Info className="text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" size={18} />
         <div>
-          <h4 className="text-xs font-bold text-blue-300 uppercase tracking-wider">Relational Isolation Enabled</h4>
-          <p className="text-[11px] text-neutral-400 leading-relaxed mt-1">
+          <h4 className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Relational Isolation Enabled</h4>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mt-1">
             Each project functions as an isolated digital sandbox. Calculations, registry bindings, and unit-metric mappings are dynamically containerized per project to avoid global state pollution.
           </p>
         </div>
@@ -104,79 +104,79 @@ export default function ProjectsDashboard() {
 
       {/* Projects Matrix */}
       {projects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-800 rounded-xl p-24 text-center bg-neutral-900/10">
-          <div className="p-4 bg-neutral-900 rounded-full border border-neutral-800 mb-6 text-neutral-500">
-            <Folder size={48} className="text-neutral-600" />
+        <div className="flex flex-col items-center justify-center border-2 border-dashed border-grid-border rounded-xl p-24 text-center bg-slate-50/50 dark:bg-slate-900/10">
+          <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-full border border-grid-border mb-6 text-slate-400 dark:text-slate-500">
+            <Folder size={48} className="text-slate-400 dark:text-slate-500" />
           </div>
-          <h3 className="text-lg font-bold text-white mb-2">No Projects Detected</h3>
-          <p className="text-neutral-400 max-w-md text-xs leading-relaxed mb-6">
+          <h3 className="text-lg font-bold text-slate-800 dark:text-neutral-200 mb-2">No Projects Detected</h3>
+          <p className="text-slate-500 dark:text-slate-400 max-w-md text-xs leading-relaxed mb-6">
             Begin by initializing a new takeoff database entity. You will be prompted to supply scope details prior to uploading project estimation sheets.
           </p>
           <button
             onClick={() => setIsModalOpen(true)}
-            className="bg-neutral-900 hover:bg-neutral-850 text-blue-400 border border-neutral-800 hover:border-blue-900/60 text-xs px-5 py-2.5 rounded font-bold uppercase tracking-wider transition-all"
+            className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-blue-600 dark:text-blue-400 border border-grid-border hover:border-blue-500/50 dark:hover:border-blue-400/50 text-xs px-5 py-2.5 rounded font-bold uppercase tracking-wider transition-all cursor-pointer"
           >
             Initialize First Project
           </button>
         </div>
       ) : (
-        <div className="bg-neutral-950 border border-neutral-850 rounded-xl overflow-hidden shadow-2xl">
-          <div className="p-4 bg-neutral-900/50 border-b border-neutral-850 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
-              <Activity className="text-emerald-500" size={16} /> Active Terminal Nodes
+        <div className="bg-card border border-grid-border rounded-xl shadow-sm overflow-hidden">
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+              <Activity className="text-emerald-600 dark:text-emerald-400" size={16} /> Active Terminal Nodes
             </h3>
-            <span className="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700">
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 border border-grid-border px-3 py-1 rounded-full text-slate-600 dark:text-slate-400 font-sans font-semibold">
               Total Managed: {projects.length}
             </span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-neutral-800">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-grid-border">
               <thead>
-                <tr className="bg-neutral-900/80 text-neutral-400 uppercase tracking-wider font-semibold">
-                  <th className="p-4 border-r border-b border-neutral-800">Project ID</th>
-                  <th className="p-4 border-r border-b border-neutral-800">Name</th>
-                  <th className="p-4 border-r border-b border-neutral-800">Location</th>
-                  <th className="p-4 text-right border-r border-b border-neutral-800">Square Footage</th>
-                  <th className="p-4 text-right border-r border-b border-neutral-800">Unit Count</th>
-                  <th className="p-4 text-right border-r border-b border-neutral-800">Bid Date</th>
-                  <th className="p-4 text-center border-r border-b border-neutral-800">Action</th>
+                <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Project ID</th>
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Name</th>
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Location</th>
+                  <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Square Footage</th>
+                  <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Unit Count</th>
+                  <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Bid Date</th>
+                  <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {projects.map((proj) => (
-                  <tr key={proj.id} className="group transition-colors hover:bg-neutral-900/30">
-                    <td className="p-4 font-bold text-blue-450 tracking-widest border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">{proj.id}</td>
-                    <td className="p-4 font-bold text-white text-sm border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">{proj.name}</td>
-                    <td className="p-4 text-neutral-400 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
+                  <tr key={proj.id} className="group transition-colors">
+                    <td className="p-4 font-bold text-blue-600 dark:text-blue-400 tracking-widest border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40 font-mono">{proj.id}</td>
+                    <td className="p-4 font-bold text-slate-900 dark:text-white text-sm border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40">{proj.name}</td>
+                    <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40">
                       <div className="flex items-center gap-1.5">
-                        <MapPin size={12} className="text-neutral-500" />
+                        <MapPin size={12} className="text-slate-400 dark:text-slate-500" />
                         {proj.location}
                       </div>
                     </td>
-                    <td className="p-4 text-right text-neutral-300 font-bold border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
-                      {proj.squareFootage.toLocaleString()} <span className="text-neutral-600 font-normal">SF</span>
+                    <td className="p-4 text-right text-slate-700 dark:text-slate-300 font-bold border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40 font-mono">
+                      {proj.squareFootage.toLocaleString()} <span className="text-slate-400 dark:text-slate-500 font-normal">SF</span>
                     </td>
-                    <td className="p-4 text-right text-neutral-300 font-bold border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
-                      {proj.unitCount.toLocaleString()} <span className="text-neutral-600 font-normal">Units</span>
+                    <td className="p-4 text-right text-slate-700 dark:text-slate-300 font-bold border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40 font-mono">
+                      {proj.unitCount.toLocaleString()} <span className="text-slate-400 dark:text-slate-500 font-normal">Units</span>
                     </td>
-                    <td className="p-4 text-right text-neutral-400 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
+                    <td className="p-4 text-right text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40 font-mono">
                       <div className="flex items-center gap-1.5 justify-end">
-                        <Calendar size={12} className="text-neutral-500" />
+                        <Calendar size={12} className="text-slate-400 dark:text-slate-500" />
                         {proj.bidDate}
                       </div>
                     </td>
-                    <td className="p-4 text-center border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
+                    <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-slate-100 dark:group-hover:bg-slate-800/40">
                       <div className="flex items-center justify-center gap-2">
                         <Link
                           href={`/projects/${proj.id}`}
-                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-blue-955/40 text-blue-400 hover:text-blue-300 border border-neutral-800 hover:border-blue-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
+                          className="inline-flex items-center gap-1.5 bg-slate-50 hover:bg-blue-50 dark:bg-slate-900 dark:hover:bg-blue-955/30 text-blue-600 dark:text-blue-400 border border-grid-border hover:border-blue-500/50 dark:hover:border-blue-400/50 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
                         >
                           Launch <ExternalLink size={12} />
                         </Link>
                         <button
                           onClick={() => handleDeleteProject(proj.id)}
-                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-rose-955/40 text-rose-450 hover:text-rose-350 border border-neutral-800 hover:border-rose-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm cursor-pointer"
+                          className="inline-flex items-center gap-1.5 bg-slate-50 hover:bg-rose-50 dark:bg-slate-900 dark:hover:bg-rose-955/30 text-rose-600 dark:text-rose-400 border border-grid-border hover:border-rose-500/50 dark:hover:border-rose-400/50 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm cursor-pointer"
                         >
                           Delete <Trash2 size={12} />
                         </button>
@@ -192,15 +192,15 @@ export default function ProjectsDashboard() {
 
       {/* Creation Modal dialog */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-neutral-950 border border-neutral-800 w-full max-w-lg rounded-xl shadow-2xl overflow-hidden">
-            <div className="flex justify-between items-center bg-neutral-900 p-4 border-b border-neutral-800">
-              <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                <Plus size={16} className="text-blue-500" /> Initialize New Estimate Scope
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 dark:bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-card border border-grid-border w-full max-w-lg rounded-xl shadow-xl overflow-hidden text-card-foreground">
+            <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 p-4 border-b border-grid-border">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                <Plus size={16} className="text-blue-600 dark:text-blue-400" /> Initialize New Estimate Scope
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-neutral-500 hover:text-neutral-300 transition-colors"
+                className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
               >
                 <X size={18} />
               </button>
@@ -208,29 +208,29 @@ export default function ProjectsDashboard() {
 
             <form onSubmit={handleCreateProject} className="p-6 space-y-4">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
                   Project Name
                 </label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Oakridge Residential Phase II"
-                  className="w-full bg-neutral-900 border border-neutral-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-xs text-white outline-none font-mono"
+                  className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:bg-white dark:focus:bg-slate-900/40"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
                   Location / Region
                 </label>
                 <div className="relative">
-                  <MapPin className="absolute left-3 top-2.5 text-neutral-600" size={14} />
+                  <MapPin className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
                   <input
                     type="text"
                     placeholder="e.g. Chicago, IL"
-                    className="w-full bg-neutral-900 border border-neutral-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-white outline-none font-mono"
+                    className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:bg-white dark:focus:bg-slate-900/40"
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                   />
@@ -239,16 +239,16 @@ export default function ProjectsDashboard() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5 font-bold">
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
                     Square Footage (SF)
                   </label>
                   <div className="relative">
-                    <Hash className="absolute left-3 top-2.5 text-neutral-600" size={14} />
+                    <Hash className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
                     <input
                       type="number"
                       min="0"
                       placeholder="e.g. 145000"
-                      className="w-full bg-neutral-900 border border-neutral-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-white outline-none font-mono"
+                      className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:bg-white dark:focus:bg-slate-900/40"
                       value={squareFootage}
                       onChange={(e) => setSquareFootage(e.target.value)}
                     />
@@ -256,16 +256,16 @@ export default function ProjectsDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5 font-bold">
+                  <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
                     Unit Count
                   </label>
                   <div className="relative">
-                    <Hash className="absolute left-3 top-2.5 text-neutral-600" size={14} />
+                    <Hash className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
                     <input
                       type="number"
                       min="0"
                       placeholder="e.g. 120"
-                      className="w-full bg-neutral-900 border border-neutral-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-white outline-none font-mono"
+                      className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:bg-white dark:focus:bg-slate-900/40"
                       value={unitCount}
                       onChange={(e) => setUnitCount(e.target.value)}
                     />
@@ -274,31 +274,31 @@ export default function ProjectsDashboard() {
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-neutral-400 mb-1.5 font-bold">
+                <label className="block text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 font-bold">
                   Bid Submission Date
                 </label>
                 <div className="relative">
-                  <Calendar className="absolute left-3 top-2.5 text-neutral-600" size={14} />
+                  <Calendar className="absolute left-3 top-2.5 text-slate-400 dark:text-slate-500" size={14} />
                   <input
                     type="date"
-                    className="w-full bg-neutral-900 border border-neutral-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-white outline-none font-mono"
+                    className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:bg-white dark:focus:bg-slate-900/40"
                     value={bidDate}
                     onChange={(e) => setBidDate(e.target.value)}
                   />
                 </div>
               </div>
 
-              <div className="flex gap-3 justify-end pt-4 border-t border-neutral-900">
+              <div className="flex gap-3 justify-end pt-4 border-t border-grid-border">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="bg-neutral-900 hover:bg-neutral-850 text-neutral-450 border border-neutral-800 rounded px-4 py-2 text-xs font-bold uppercase transition-colors"
+                  className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-grid-border rounded px-4 py-2 text-xs font-bold uppercase transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded px-5 py-2 text-xs font-bold uppercase shadow-lg shadow-blue-900/20 transition-all"
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded px-5 py-2 text-xs font-bold uppercase shadow-md shadow-blue-500/10 transition-all cursor-pointer"
                 >
                   Create Node
                 </button>

@@ -1566,20 +1566,20 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.role}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">hr</td>
                     <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border">
-                      <div className="flex items-center gap-1 justify-end">
+                    <td className="p-0 border-r border-b border-grid-border">
+                      <div className="flex items-center justify-end w-full h-full relative">
                         <input
                           type="number"
                           min="0"
                           max="100"
-                          className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-16 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
                           value={row.util}
                           onChange={(e) => {
                             const v = e.target.value === "" ? 0 : parseFloat(e.target.value) || 0;
                             row.setUtil(Math.min(100, Math.max(0, v)));
                           }}
                         />
-                        <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">%</span>
+                        <span className="absolute right-2 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">%</span>
                       </div>
                     </td>
                     <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toFixed(1)} hrs</td>
@@ -1621,12 +1621,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">ls</td>
                     <td className="p-3 text-right border-r border-b border-grid-border text-slate-400">—</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border">
-                      <div className="flex items-center gap-1 justify-end">
-                        <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">$</span>
+                    <td className="p-0 border-r border-b border-grid-border">
+                      <div className="flex items-center justify-end w-full h-full relative">
+                        <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">$</span>
                         <input
                           type="number"
-                          className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-24 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                          className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
                           value={row.val === 0 ? "" : row.val}
                           placeholder="0.00"
                           onChange={(e) => handleEquipmentChange(row.field as "dumpsters" | "toilets" | "electric", e.target.value)}
@@ -1712,13 +1712,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
                     <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
                     <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
-                    <td className="p-3 text-right border-r border-b border-grid-border">
+                    <td className={row.isRateEditable ? "p-0 border-r border-b border-grid-border" : "p-3 text-right border-r border-b border-grid-border"}>
                       {row.isRateEditable ? (
-                        <div className="flex items-center gap-1 justify-end">
-                          <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">$</span>
+                        <div className="flex items-center justify-end w-full h-full relative">
+                          <span className="absolute left-2.5 text-slate-400 dark:text-slate-500 text-[10px] font-bold pointer-events-none select-none">$</span>
                           <input
                             type="number"
-                            className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                            className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
                             value={rateSoilBorings === 0 ? "" : rateSoilBorings}
                             placeholder="0.00"
                             onChange={(e) => handleSiteOpsChange("soilRate", e.target.value)}
@@ -1728,11 +1728,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         <span className="text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</span>
                       )}
                     </td>
-                    <td className="p-3 text-right border-r border-b border-grid-border">
+                    <td className="p-0 border-r border-b border-grid-border">
                       <input
                         type="number"
                         min="0"
-                        className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                        className="w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-right px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all"
                         value={row.val === 0 ? "" : row.val}
                         placeholder="0"
                         onChange={(e) => handleSiteOpsChange(row.field as "knox" | "payroll" | "hired" | "soilQty" | "soilRate", e.target.value)}
