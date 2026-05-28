@@ -1013,7 +1013,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const val = row.costType || "TI";
                 return (
                   <div className="text-center font-bold">
-                    <span className="text-[10px] bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-0.5 rounded-md tracking-widest uppercase">
+                    <span className="text-[10px] bg-slate-100 dark:bg-slate-800 border border-grid-border text-slate-500 dark:text-slate-400 px-2 py-0.5 rounded-md tracking-widest uppercase font-semibold">
                       {val}
                     </span>
                   </div>
@@ -1028,18 +1028,18 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const isCellHardLocked = !!lockedCells[`${row.id}::itemId`];
                 return (
-                  <div className="flex flex-col gap-2 w-full text-left">
+                  <div className="flex flex-col gap-2 w-full text-left font-sans">
                     <input
                       id={`code-input-${index}`}
                       type="text"
                       list="estimate-items-options"
                       disabled={isCellHardLocked}
-                      className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs uppercase transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                      className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs uppercase transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                         isCellHardLocked
-                          ? "text-neutral-500 bg-neutral-950/30 cursor-not-allowed opacity-60"
+                          ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                           : row.isMapped
-                            ? "text-neutral-100"
-                            : "text-amber-500 bg-amber-955/10"
+                            ? "text-slate-900 dark:text-slate-100 font-semibold"
+                            : "text-amber-700 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-955/10 font-bold"
                       }`}
                       value={row.itemId}
                       onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
@@ -1060,7 +1060,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     />
                     {!row.isMapped && (
                       <div className="flex flex-col gap-1 mt-1 text-left px-3 pb-2">
-                        <span className="text-[9px] text-neutral-500 uppercase tracking-wider font-bold">Suggestions:</span>
+                        <span className="text-[9px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Suggestions:</span>
                         <div className="flex flex-wrap gap-1.5">
                           {getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER).map((sugg) => (
                             <button
@@ -1069,7 +1069,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                               disabled={isCellHardLocked}
                               onClick={() => handleCellEdit(index, "itemId", sugg.itemId)}
                               title={sugg.description}
-                              className="bg-neutral-900 hover:bg-amber-955/40 text-amber-500/90 hover:text-amber-400 border border-neutral-800 hover:border-amber-800/80 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-grid-border hover:border-amber-500/50 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {sugg.itemId}
                             </button>
@@ -1093,10 +1093,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     id={`desc-input-${index}`}
                     type="text"
                     disabled={isCellHardLocked}
-                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                       isCellHardLocked
-                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
-                        : "text-neutral-100"
+                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-slate-100 font-medium"
                     }`}
                     value={row.description}
                     onChange={(e) => handleCellEdit(index, "description", e.target.value)}
@@ -1129,10 +1129,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     id={`qty-input-${index}`}
                     type="number"
                     disabled={isCellHardLocked}
-                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                       isCellHardLocked
-                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
-                        : "text-white"
+                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-955/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-white"
                     }`}
                     value={row.matchedQty}
                     onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
@@ -1157,7 +1157,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             return columnHelper.accessor("uom", {
               header: def.header,
               cell: (info) => (
-                <div className="text-center text-neutral-400 font-bold uppercase">
+                <div className="text-center text-slate-500 dark:text-slate-400 font-bold uppercase">
                   {info.getValue()}
                 </div>
               ),
@@ -1175,10 +1175,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     type="number"
                     step="0.01"
                     disabled={isCellHardLocked}
-                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-right font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                       isCellHardLocked
-                        ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
-                        : "text-white"
+                        ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-955/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-white"
                     }`}
                     value={row.unitPrice}
                     onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
@@ -1203,8 +1203,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
             return columnHelper.accessor("total", {
               header: def.header,
               cell: (info) => (
-                <div className="text-right font-black">
-                  <span className={info.getValue() > 0 ? "text-emerald-450" : "text-neutral-600"}>
+                <div className="text-right font-black font-mono">
+                  <span className={info.getValue() > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-600"}>
                     ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -1218,7 +1218,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const cpu = row.total / (unitCount || 1);
                 return (
-                  <div className="text-right font-bold text-neutral-400">
+                  <div className="text-right font-bold text-slate-500 dark:text-slate-400 font-mono">
                     ${cpu.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 );
@@ -1232,7 +1232,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 const row = info.row.original;
                 const cpsf = row.total / (squareFootage || 1);
                 return (
-                  <div className="text-right font-bold text-neutral-400">
+                  <div className="text-right font-bold text-slate-500 dark:text-slate-400 font-mono">
                     ${cpsf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 );
@@ -1256,10 +1256,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 id={`custom-${def.id}-input-${index}`}
                 type="text"
                 disabled={isCellHardLocked}
-                className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-neutral-900/50 ${
+                className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                   isCellHardLocked
-                    ? "text-neutral-500 bg-neutral-955/30 cursor-not-allowed opacity-60"
-                    : "text-neutral-100"
+                    ? "text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                    : "text-slate-900 dark:text-slate-100 font-medium"
                 }`}
                 value={val}
                 onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
@@ -1296,11 +1296,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   if (!project) {
     return (
-      <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100 font-mono items-center justify-center p-8">
+      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
         <AlertTriangle className="text-amber-500 mb-4 animate-bounce" size={48} />
-        <h3 className="text-lg font-bold text-white mb-2">Project Database Node Offline</h3>
-        <p className="text-xs text-neutral-400 mb-6">Requested Project ID does not exist in local cache.</p>
-        <Link href="/projects" className="bg-neutral-900 border border-neutral-800 text-xs px-5 py-2.5 rounded font-bold uppercase hover:border-neutral-700 transition-colors">
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Project Database Node Offline</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">Requested Project ID does not exist in local cache.</p>
+        <Link href="/projects" className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-grid-border text-xs px-5 py-2.5 rounded font-bold uppercase transition-colors">
           Return to Dashboard
         </Link>
       </div>
@@ -1308,33 +1308,33 @@ export default function ProjectWorkspace({ params }: PageProps) {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-neutral-950 text-neutral-100 font-mono p-8 selection:bg-blue-600/30 selection:text-blue-200">
+    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-600/30 selection:text-blue-200">
       {/* Breadcrumb Back Navigation */}
       <div className="mb-4">
-        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-blue-400 transition-colors uppercase tracking-widest font-bold font-sans">
+        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors uppercase tracking-widest font-bold">
           <ChevronLeft size={16} /> Back to Directory
         </Link>
       </div>
 
       {/* Header Panel */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-neutral-850 pb-6 mb-8 gap-4">
+      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-extrabold tracking-wider text-white">
+            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
               {project.name}
             </h1>
-            <span className="text-[10px] bg-blue-955 border border-blue-900 text-blue-450 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
+            <span className="text-[10px] bg-blue-50 dark:bg-blue-955 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
               {project.id}
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-4 mt-3 text-neutral-450 text-xs items-center uppercase font-semibold">
-            <span className="flex items-center gap-1"><MapPin size={13} className="text-neutral-500" /> {project.location}</span>
-            <span className="text-neutral-700">|</span>
-            <span className="flex items-center gap-1"><Calendar size={13} className="text-neutral-500" /> Bid: {project.bidDate}</span>
-            <span className="text-neutral-700">|</span>
+          <div className="flex flex-wrap gap-4 mt-3 text-slate-500 dark:text-slate-400 text-xs items-center uppercase font-semibold">
+            <span className="flex items-center gap-1"><MapPin size={13} className="text-slate-400 dark:text-slate-500" /> {project.location}</span>
+            <span className="text-slate-350 dark:text-slate-800">|</span>
+            <span className="flex items-center gap-1"><Calendar size={13} className="text-slate-400 dark:text-slate-500" /> Bid: {project.bidDate}</span>
+            <span className="text-slate-355 dark:text-slate-800">|</span>
             <span>Size: {project.squareFootage.toLocaleString()} SF</span>
-            <span className="text-neutral-700">|</span>
+            <span className="text-slate-350 dark:text-slate-800">|</span>
             <span>Units: {project.unitCount.toLocaleString()}</span>
           </div>
         </div>
@@ -1345,7 +1345,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button 
                 onClick={handleExportExcelWorkbook}
                 disabled={unmappedCount > 0 || isExportingExcel}
-                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-950/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} /> 
                 {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
@@ -1353,24 +1353,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button 
                 onClick={handleExportExcel}
                 disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-850 text-neutral-200 border border-neutral-800 hover:border-neutral-750 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} /> Export Excel Payload
               </button>
               <button 
                 onClick={handleExportProcore}
                 disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-955/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-950/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} /> Export Procore Budget
               </button>
             </>
           )}
         </div>
-      </header>
-
-      {/* Tab Navigation */}
-      <div className="flex border-b border-neutral-850 mb-6 gap-2 select-none overflow-x-auto">
+      </header>      {/* Tab Navigation */}
+      <div className="flex border-b border-grid-border mb-6 gap-2 select-none overflow-x-auto">
         {[
           { id: "step1", label: "Multi-Family Layout" },
           { id: "step2", label: "GC Personnel" },
@@ -1382,8 +1380,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-3 text-xs uppercase tracking-wider font-bold font-sans transition-all border-b-2 whitespace-nowrap cursor-pointer ${
               activeTab === tab.id
-                ? "border-blue-500 text-blue-400 bg-neutral-900/30"
-                : "border-transparent text-neutral-500 hover:text-neutral-300"
+                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-955/10"
+                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-200"
             }`}
           >
             {tab.label}
@@ -1392,12 +1390,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
       </div>
 
       {exportError && (
-        <div className="bg-red-955/40 border border-red-900/50 rounded-xl p-4 flex items-center gap-3 text-red-400 text-xs font-mono animate-shake mb-6">
+        <div className="bg-red-50 dark:bg-red-950/25 border border-red-200 dark:border-red-900/50 rounded-xl p-4 flex items-center gap-3 text-red-700 dark:text-red-400 text-xs font-mono animate-shake mb-6 shadow-sm">
           <AlertTriangle className="text-red-500 animate-pulse" size={16} />
           <span><strong>System Alert:</strong> {exportError}</span>
           <button 
             onClick={() => setExportError(null)} 
-            className="ml-auto bg-transparent hover:text-white font-bold uppercase text-[10px] cursor-pointer"
+            className="ml-auto bg-transparent hover:text-slate-900 dark:hover:text-white font-bold uppercase text-[10px] cursor-pointer"
           >
             Dismiss
           </button>
@@ -1406,115 +1404,115 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
       {/* STEP 1 PANEL */}
       {activeTab === "step1" && (
-        <div className="bg-neutral-900/40 border border-neutral-850 rounded-xl p-6 shadow-xl animate-fade-in">
-          <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider mb-6 flex items-center gap-2">
-            <Activity size={16} className="text-blue-500" /> Architectural Parameters & Schedule Constraints
+        <div className="bg-card border border-grid-border text-card-foreground p-6 rounded-xl shadow-sm animate-fade-in">
+          <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider mb-6 flex items-center gap-2">
+            <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Architectural Parameters & Schedule Constraints
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-mono text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans text-xs">
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Project Name</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Project Name</label>
               <input
                 type="text"
-                className="bg-neutral-950 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.name}
                 onChange={(e) => handleProjectParamChange("name", e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Location</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Location</label>
               <input
                 type="text"
-                className="bg-neutral-950 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.location}
                 onChange={(e) => handleProjectParamChange("location", e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Bid Date</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Bid Date</label>
               <input
                 type="text"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.bidDate}
                 onChange={(e) => handleProjectParamChange("bidDate", e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Expected Start Date</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Expected Start Date</label>
               <input
                 type="date"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.expectedStart || ""}
                 onChange={(e) => handleProjectParamChange("expectedStart", e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Expected Finish Date</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Expected Finish Date</label>
               <input
                 type="date"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.expectedFinish || ""}
                 onChange={(e) => handleProjectParamChange("expectedFinish", e.target.value)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Project Size (SF)</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Project Size (SF)</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.squareFootage}
                 onChange={(e) => handleProjectParamChange("squareFootage", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Unit Count</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Unit Count</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.unitCount}
                 onChange={(e) => handleProjectParamChange("unitCount", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Building Perimeter (LF)</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Building Perimeter (LF)</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.buildingPerimeter || 0}
                 onChange={(e) => handleProjectParamChange("buildingPerimeter", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Building Footprint (SF)</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Building Footprint (SF)</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.buildingFootprint || 0}
                 onChange={(e) => handleProjectParamChange("buildingFootprint", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Podium Area (SF)</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Podium Area (SF)</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.podiumArea || 0}
                 onChange={(e) => handleProjectParamChange("podiumArea", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Woodframed Area (SF)</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Woodframed Area (SF)</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.woodframedArea || 0}
                 onChange={(e) => handleProjectParamChange("woodframedArea", Math.max(0, parseInt(e.target.value) || 0))}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <label className="text-neutral-400 font-bold uppercase tracking-wider">Levels Above Podium</label>
+              <label className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Levels Above Podium</label>
               <input
                 type="number"
-                className="bg-neutral-955 border border-neutral-850 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-white outline-none font-bold transition-all"
+                className="bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-3 py-2 text-foreground outline-none font-semibold transition-all focus:bg-white dark:focus:bg-slate-900/40"
                 value={project.levelsAbovePodium || 0}
                 onChange={(e) => handleProjectParamChange("levelsAbovePodium", Math.max(0, parseInt(e.target.value) || 0))}
               />
@@ -1525,33 +1523,33 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
       {/* STEP 2 PANEL */}
       {activeTab === "step2" && (
-        <div className="bg-neutral-955 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl animate-fade-in">
-          <div className="p-4 bg-neutral-900/50 border-b border-neutral-800 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
-              <Activity size={16} className="text-blue-500" /> Division 01 General Conditions Pricing Matrix
+        <div className="bg-card border border-grid-border text-card-foreground rounded-xl overflow-hidden shadow-sm animate-fade-in">
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+              <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Division 01 General Conditions Pricing Matrix
             </h3>
-            <span className="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700 font-mono">
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
               Active Schedule Duration: {projectDurationMonths} Months
             </span>
           </div>
           
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse font-mono">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 font-sans">
               <thead>
-                <tr className="bg-neutral-900/80 text-neutral-400 uppercase border-b border-neutral-800 tracking-wider font-semibold">
-                  <th className="p-4 text-center w-28">Code</th>
-                  <th className="p-4 text-left">Staff Role / Operational Scope</th>
-                  <th className="p-4 text-center w-20">Unit</th>
-                  <th className="p-4 text-right w-32">Rate</th>
-                  <th className="p-4 text-right w-44">Utilization</th>
-                  <th className="p-4 text-right w-40">Calculated Qty</th>
-                  <th className="p-4 text-right w-36">Total Cost</th>
+                <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                  <th className="p-4 text-center w-28 border-r border-b border-grid-border font-semibold">Code</th>
+                  <th className="p-4 text-left border-r border-b border-grid-border font-semibold">Staff Role / Operational Scope</th>
+                  <th className="p-4 text-center w-20 border-r border-b border-grid-border font-semibold">Unit</th>
+                  <th className="p-4 text-right w-32 border-r border-b border-grid-border font-semibold">Rate</th>
+                  <th className="p-4 text-right w-44 border-r border-b border-grid-border font-semibold">Utilization</th>
+                  <th className="p-4 text-right w-40 border-r border-b border-grid-border font-semibold">Calculated Qty</th>
+                  <th className="p-4 text-right w-36 border-b border-grid-border font-semibold">Total Cost</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-850 text-neutral-355">
+              <tbody className="divide-y divide-grid-border">
                 {/* Staff Labor Directs */}
-                <tr className="bg-neutral-900/20 text-neutral-400 font-bold">
-                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-neutral-900/40">01.A - Staff Labour Directs</td>
+                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.A - Staff Labour Directs</td>
                 </tr>
                 {[
                   { code: "01-0310", role: "Project Executive", rate: 175, util: utilEx, setUtil: setUtilEx, qty: qtyEx, total: totalEx },
@@ -1563,88 +1561,88 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "01-0430", role: "Asst. Superintendent", rate: 85, util: utilAsstSu, setUtil: setUtilAsstSu, qty: qtyAsstSu, total: totalAsstSu },
                   { code: "01-0510", role: "Project Assistant", rate: 55, util: utilPa, setUtil: setUtilPa, qty: qtyPa, total: totalPa }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-neutral-900/30">
-                    <td className="p-3 text-center text-blue-500 font-semibold">{row.code}</td>
-                    <td className="p-3 text-left font-bold text-neutral-200">{row.role}</td>
-                    <td className="p-3 text-center">hr</td>
-                    <td className="p-3 text-right">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right">
+                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
+                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.role}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">hr</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border">
                       <div className="flex items-center gap-1 justify-end">
                         <input
                           type="number"
                           min="0"
                           max="100"
-                          className="bg-neutral-900 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 w-16 text-right text-white font-bold outline-none"
+                          className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-16 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
                           value={row.util}
                           onChange={(e) => {
                             const v = e.target.value === "" ? 0 : parseFloat(e.target.value) || 0;
                             row.setUtil(Math.min(100, Math.max(0, v)));
                           }}
                         />
-                        <span className="text-neutral-500 text-[10px]">%</span>
+                        <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">%</span>
                       </div>
                     </td>
-                    <td className="p-3 text-right font-bold text-neutral-500">{row.qty.toFixed(1)} hrs</td>
-                    <td className="p-3 text-right text-emerald-450 font-bold">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toFixed(1)} hrs</td>
+                    <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Operational Expenses */}
-                <tr className="bg-neutral-900/20 text-neutral-400 font-bold">
-                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-neutral-900/40">01.B - Operational Expenses</td>
+                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.B - Operational Expenses</td>
                 </tr>
                 {[
                   { code: "01-1000", desc: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500, qty: qtySmallTools, total: totalSmallTools },
                   { code: "01-1200", desc: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, qty: qtyFuelVehicle, total: totalFuelVehicle },
                   { code: "01-5111", desc: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, qty: qtyCellPhone, total: totalCellPhone }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-neutral-900/30">
-                    <td className="p-3 text-center text-blue-500 font-semibold">{row.code}</td>
-                    <td className="p-3 text-left font-bold text-neutral-200">{row.desc}</td>
-                    <td className="p-3 text-center">{row.unit}</td>
-                    <td className="p-3 text-right">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right text-neutral-500">auto</td>
-                    <td className="p-3 text-right font-bold text-neutral-505">{row.qty.toFixed(2)} mos</td>
-                    <td className="p-3 text-right text-emerald-455 font-bold">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
+                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-400 dark:text-slate-500 uppercase text-[10px] font-bold">auto</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toFixed(2)} mos</td>
+                    <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Site Equipment & Overrides */}
-                <tr className="bg-neutral-900/20 text-neutral-400 font-bold">
-                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-neutral-900/40">01.C - Site Equipment & Mobilization Overrides</td>
+                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.C - Site Equipment & Mobilization Overrides</td>
                 </tr>
                 {[
                   { code: "01-5130", desc: "Dumpsters (Lump Sum)", val: eqDumpsters, field: "dumpsters" },
                   { code: "01-5140", desc: "Temp Toilets (Lump Sum)", val: eqToilets, field: "toilets" },
                   { code: "01-5170", desc: "Temp Electric (Lump Sum)", val: eqElectric, field: "electric" }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-neutral-900/30">
-                    <td className="p-3 text-center text-blue-500 font-semibold">{row.code}</td>
-                    <td className="p-3 text-left font-bold text-neutral-200">{row.desc}</td>
-                    <td className="p-3 text-center">ls</td>
-                    <td className="p-3 text-right">—</td>
-                    <td className="p-3 text-right">
+                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
+                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">ls</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-400">—</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border">
                       <div className="flex items-center gap-1 justify-end">
-                        <span className="text-neutral-500 text-[10px]">$</span>
+                        <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">$</span>
                         <input
                           type="number"
-                          className="bg-neutral-900 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 w-24 text-right text-white font-bold outline-none"
+                          className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-24 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
                           value={row.val === 0 ? "" : row.val}
                           placeholder="0.00"
                           onChange={(e) => handleEquipmentChange(row.field as "dumpsters" | "toilets" | "electric", e.target.value)}
                         />
                       </div>
                     </td>
-                    <td className="p-3 text-right text-neutral-500">—</td>
-                    <td className="p-3 text-right text-emerald-455 font-bold">${row.val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-400">—</td>
+                    <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Subtotal Row */}
-                <tr className="bg-neutral-900 border-t border-neutral-800 text-xs font-black text-white">
-                  <td className="p-4 text-center">TOTAL</td>
-                  <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-neutral-500">Cumulative Division 01 General Conditions Cost</td>
-                  <td className="p-4 text-right text-emerald-455 text-sm font-black">
+                <tr className="bg-slate-50 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-slate-800 dark:text-white">
+                  <td className="p-4 text-center border-r border-b border-grid-border font-bold">TOTAL</td>
+                  <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-500 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 01 General Conditions Cost</td>
+                  <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
                     ${totalGCs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
@@ -1656,53 +1654,53 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
       {/* STEP 3 PANEL */}
       {activeTab === "step3" && (
-        <div className="bg-neutral-955 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl animate-fade-in">
-          <div className="p-4 bg-neutral-900/50 border-b border-neutral-800 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
-              <Activity size={16} className="text-blue-500" /> Division 02 Site Operations Calculation Module
+        <div className="bg-card border border-grid-border text-card-foreground rounded-xl overflow-hidden shadow-sm animate-fade-in">
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+              <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Division 02 Site Operations Calculation Module
             </h3>
-            <span className="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700 font-mono">
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
               Active SF: {squareFootage.toLocaleString()} SF | Duration: {projectDurationMonths} Mos
             </span>
           </div>
           
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse font-mono">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 font-sans">
               <thead>
-                <tr className="bg-neutral-900/80 text-neutral-400 uppercase border-b border-neutral-800 tracking-wider font-semibold">
-                  <th className="p-4 text-center w-28">Code</th>
-                  <th className="p-4 text-left">Description</th>
-                  <th className="p-4 text-center w-20">Unit</th>
-                  <th className="p-4 text-right w-32">Rate</th>
-                  <th className="p-4 text-right w-44">Override Value</th>
-                  <th className="p-4 text-right w-40">Calculated Qty</th>
-                  <th className="p-4 text-right w-36">Total Cost</th>
+                <tr className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                  <th className="p-4 text-center w-28 border-r border-b border-grid-border font-semibold">Code</th>
+                  <th className="p-4 text-left border-r border-b border-grid-border font-semibold">Description</th>
+                  <th className="p-4 text-center w-20 border-r border-b border-grid-border font-semibold">Unit</th>
+                  <th className="p-4 text-right w-32 border-r border-b border-grid-border font-semibold">Rate</th>
+                  <th className="p-4 text-right w-44 border-r border-b border-grid-border font-semibold">Override Value</th>
+                  <th className="p-4 text-right w-40 border-r border-b border-grid-border font-semibold">Calculated Qty</th>
+                  <th className="p-4 text-right w-36 border-b border-grid-border font-semibold">Total Cost</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-850 text-neutral-355">
+              <tbody className="divide-y divide-grid-border">
                 {/* Injected Dynamic Operations */}
-                <tr className="bg-neutral-900/20 text-neutral-400 font-bold">
-                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-neutral-900/40">02.A - Injected Dynamic Operations</td>
+                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">02.A - Injected Dynamic Operations</td>
                 </tr>
                 {[
                   { code: "02-9015", desc: "Safety (Rate $500/mo, Quantity defaults to schedule duration)", unit: "mo", rate: 500, qty: projectDurationMonths, total: totalSafety },
                   { code: "02-9020", desc: "Temp Protection (Rate $0.25/sf, Quantity defaults to project square footage)", unit: "sf", rate: 0.25, qty: squareFootage, total: totalTempProtection },
                   { code: "02-9405", desc: "Material Hoist / Trash Chute (Rate $6,500/mo, Quantity defaults to duration)", unit: "mo", rate: 6500, qty: projectDurationMonths, total: totalMaterialHoist }
                 ].map((row) => (
-                  <tr key={row.code} className="hover:bg-neutral-900/30">
-                    <td className="p-3 text-center text-blue-500 font-semibold">{row.code}</td>
-                    <td className="p-3 text-left font-bold text-neutral-200">{row.desc}</td>
-                    <td className="p-3 text-center">{row.unit}</td>
-                    <td className="p-3 text-right">${row.rate.toFixed(2)}</td>
-                    <td className="p-3 text-right text-neutral-500">auto</td>
-                    <td className="p-3 text-right font-bold text-neutral-550">{row.qty.toLocaleString()} {row.unit}</td>
-                    <td className="p-3 text-right text-emerald-400 font-bold">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <tr key={row.code} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
+                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-450 dark:text-slate-500 uppercase text-[10px] font-bold">auto</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border font-semibold text-slate-500 dark:text-slate-400 font-mono">{row.qty.toLocaleString()} {row.unit}</td>
+                    <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">${row.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                   </tr>
                 ))}
 
                 {/* Manual Estimation Entries */}
-                <tr className="bg-neutral-900/20 text-neutral-400 font-bold">
-                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-neutral-900/40">02.B - Manual Estimation Entries</td>
+                <tr className="bg-blue-50/50 dark:bg-blue-955/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+                  <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">02.B - Manual Estimation Entries</td>
                 </tr>
                 {[
                   { code: "02-9307", desc: "Knox Box (Rate $650/ea)", unit: "ea", rate: 650, val: qtyKnox, field: "knox", isRateEditable: false },
@@ -1710,48 +1708,48 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   { code: "02-9010", desc: "Progress Cleaning - Hired (Rate $54/hr)", unit: "hr", rate: 54, val: qtyHiredCleaning, field: "hired", isRateEditable: false },
                   { code: "02-3200", desc: "Soil Borings (Lump Sum custom overrides)", unit: "ls", rate: rateSoilBorings, val: qtySoilBorings, field: "soilQty", isRateEditable: true }
                 ].map((row) => (
-                  <tr key={`${row.code}-${row.field}`} className="hover:bg-neutral-900/30">
-                    <td className="p-3 text-center text-blue-500 font-semibold">{row.code}</td>
-                    <td className="p-3 text-left font-bold text-neutral-200">{row.desc}</td>
-                    <td className="p-3 text-center">{row.unit}</td>
-                    <td className="p-3 text-right">
+                  <tr key={`${row.code}-${row.field}`} className="hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors">
+                    <td className="p-3 text-center text-blue-600 dark:text-blue-400 font-semibold border-r border-b border-grid-border font-mono">{row.code}</td>
+                    <td className="p-3 text-left font-semibold text-slate-800 dark:text-slate-100 border-r border-b border-grid-border">{row.desc}</td>
+                    <td className="p-3 text-center border-r border-b border-grid-border text-slate-500 dark:text-slate-400 uppercase text-[10px] font-bold">{row.unit}</td>
+                    <td className="p-3 text-right border-r border-b border-grid-border">
                       {row.isRateEditable ? (
                         <div className="flex items-center gap-1 justify-end">
-                          <span className="text-neutral-500 text-[10px]">$</span>
+                          <span className="text-slate-400 dark:text-slate-500 text-[10px] font-bold">$</span>
                           <input
                             type="number"
-                            className="bg-neutral-900 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-white font-bold outline-none"
+                            className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
                             value={rateSoilBorings === 0 ? "" : rateSoilBorings}
                             placeholder="0.00"
                             onChange={(e) => handleSiteOpsChange("soilRate", e.target.value)}
                           />
                         </div>
                       ) : (
-                        <span>${row.rate.toFixed(2)}</span>
+                        <span className="text-slate-700 dark:text-slate-300 font-mono">${row.rate.toFixed(2)}</span>
                       )}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="p-3 text-right border-r border-b border-grid-border">
                       <input
                         type="number"
                         min="0"
-                        className="bg-neutral-900 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-white font-bold outline-none"
+                        className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 w-20 text-right text-foreground font-semibold outline-none focus:ring-1 focus:ring-blue-500 transition-all focus:bg-white dark:focus:bg-slate-900/40"
                         value={row.val === 0 ? "" : row.val}
                         placeholder="0"
                         onChange={(e) => handleSiteOpsChange(row.field as "knox" | "payroll" | "hired" | "soilQty" | "soilRate", e.target.value)}
                       />
                     </td>
-                    <td className="p-3 text-right text-neutral-500">—</td>
-                    <td className="p-3 text-right text-emerald-400 font-bold">
+                    <td className="p-3 text-right border-r border-b border-grid-border text-slate-400">—</td>
+                    <td className="p-3 text-right border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono">
                       ${(row.val * row.rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   </tr>
                 ))}
 
                 {/* Subtotal Row */}
-                <tr className="bg-neutral-900 border-t border-neutral-800 text-xs font-black text-white">
-                  <td className="p-4 text-center">TOTAL</td>
-                  <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-neutral-550">Cumulative Division 02 Site Operations Cost</td>
-                  <td className="p-4 text-right text-emerald-450 text-sm font-black">
+                <tr className="bg-slate-50 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-slate-800 dark:text-white">
+                  <td className="p-4 text-center border-r border-b border-grid-border font-bold">TOTAL</td>
+                  <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-500 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 02 Site Operations Cost</td>
+                  <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
                     ${siteOperationsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                 </tr>
@@ -1765,7 +1763,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
       {activeTab === "step4" && (
         <div className="space-y-6 animate-fade-in">
           {/* Top Ingestion Module Tray */}
-          <div className="bg-neutral-900/40 border border-neutral-850 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             {/* Left side: Compact Ingest / Drop Takeoff CSV box */}
             <div 
               onDragEnter={handleDrag}
@@ -1774,29 +1772,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
               onDrop={handleDrop}
               className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
                 dragActive 
-                  ? "border-blue-500 bg-blue-955/20 scale-[1.01]" 
-                  : "border-neutral-800 bg-neutral-955/40 hover:border-neutral-750"
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-955/20 scale-[1.01]" 
+                  : "border-grid-border bg-slate-50 dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
               }`}
             >
               <label className="flex flex-col items-center justify-center cursor-pointer select-none">
-                <div className="flex items-center gap-2 text-neutral-300">
-                  <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-neutral-400"} />
+                <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                  <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-400 dark:text-slate-500"} />
                   <span className="text-xs font-bold uppercase tracking-wider">Ingest / Drop Takeoff CSV</span>
                 </div>
-                <span className="text-[10px] text-neutral-500 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
                 <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
               </label>
             </div>
 
             {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons side-by-side */}
             <div className="flex items-center gap-3 shrink-0">
-              <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-850 rounded-lg px-4 py-2.5 text-xs text-neutral-300 transition-colors hover:border-neutral-750 select-none">
+              <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-slate-700 dark:text-slate-350 transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
                 <input
                   id="append-checkbox-step4"
                   type="checkbox"
                   checked={appendData}
                   onChange={(e) => setAppendData(e.target.checked)}
-                  className="w-4 h-4 rounded border-neutral-750 text-blue-600 focus:ring-blue-500 bg-neutral-800 cursor-pointer"
+                  className="w-4 h-4 rounded border-grid-border text-blue-600 focus:ring-blue-500 bg-transparent cursor-pointer"
                 />
                 <label htmlFor="append-checkbox-step4" className="cursor-pointer font-bold uppercase tracking-wider">
                   Append Data
@@ -1806,7 +1804,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button
                 onClick={handleAddCustomColumn}
                 type="button"
-                className="inline-flex items-center gap-1.5 bg-neutral-955 hover:bg-blue-955/40 text-blue-450 hover:text-blue-400 border border-neutral-800 rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+                className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-955/15 dark:hover:bg-blue-955/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
               >
                 + Add Custom Column
               </button>
@@ -1822,7 +1820,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                   }
                 }}
                 disabled={historyStack.length === 0}
-                className="inline-flex items-center gap-1.5 bg-neutral-955 hover:bg-amber-955/40 text-amber-500 disabled:text-neutral-600 hover:text-amber-400 border border-neutral-800 disabled:border-neutral-900 disabled:hover:bg-transparent rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+                className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-955/15 dark:hover:bg-amber-955/35 text-amber-600 dark:text-amber-450 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
               >
                 <RotateCcw size={14} /> Undo Action ({historyStack.length})
               </button>
@@ -1830,23 +1828,23 @@ export default function ProjectWorkspace({ params }: PageProps) {
           </div>
 
           {unmappedTakeoffClassifications.length > 0 && (
-            <div className="bg-amber-955/20 border border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-mono text-xs text-amber-500 animate-shake">
+            <div className="bg-amber-50 dark:bg-amber-955/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-sans text-xs text-amber-700 dark:text-amber-500 animate-shake">
               <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
                 <AlertTriangle className="text-amber-500 animate-pulse" size={16} />
                 <span>Notice: Unmapped Classifications Detected</span>
               </div>
-              <p className="text-[11px] text-neutral-400 leading-relaxed uppercase">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed uppercase">
                 The following {unmappedTakeoffClassifications.length} classification(s) from your takeoff CSV were skipped because they are not yet mapped to any corporate code in your registry:
               </p>
               <div className="flex flex-wrap gap-2 mt-1">
                 {unmappedTakeoffClassifications.map((cl) => (
-                  <span key={cl} className="bg-neutral-900 border border-neutral-800 text-[10px] text-amber-500/80 px-2.5 py-1 rounded font-bold">
+                  <span key={cl} className="bg-slate-100 dark:bg-slate-900 border border-grid-border text-[10px] text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded font-bold">
                     {cl}
                   </span>
                 ))}
               </div>
               <div className="mt-2 text-right">
-                <Link href="/registry" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-blue-400 hover:text-blue-300 transition-colors">
+                <Link href="/registry" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400 hover:underline transition-colors">
                   Go to Global Registry to Add Mappings &rarr;
                 </Link>
               </div>
@@ -1854,63 +1852,63 @@ export default function ProjectWorkspace({ params }: PageProps) {
           )}
 
           {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
-          <div className="bg-neutral-955 border border-neutral-850 rounded-xl overflow-hidden shadow-xl font-mono text-xs">
+          <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm font-sans text-xs text-card-foreground">
             {/* Sheet title bar */}
-            <div className="bg-neutral-900/60 border-b border-neutral-850 px-4 py-2.5 text-neutral-400 font-bold uppercase tracking-wider flex items-center justify-between">
+            <div className="bg-slate-50 dark:bg-slate-900/60 border-b border-grid-border px-4 py-2.5 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Grid size={16} className="text-blue-500" />
+                <Grid size={16} className="text-blue-600 dark:text-blue-400" />
                 <span>STEP 4 - COMPANY ESTIMATE WORKBOOK</span>
               </div>
-              <span className="text-[10px] bg-neutral-800 border border-neutral-750 px-2 py-0.5 rounded text-neutral-500">ROWS 2-4</span>
+              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-500 dark:text-slate-400 font-semibold">ROWS 2-4</span>
             </div>
             
             {/* Grid matrix mapping rows 2-4 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-neutral-850">
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-grid-border">
               {/* Row 2 info */}
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
-                  <span className="text-white font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
+                  <span className="text-slate-900 dark:text-white font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
-                  <span className="text-neutral-200 font-bold font-mono">{project.expectedStart || "—"}</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
+                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.expectedStart || "—"}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
-                  <span className="text-neutral-200 font-bold font-mono">{project.expectedFinish || "—"}</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
+                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.expectedFinish || "—"}</span>
                 </div>
               </div>
 
               {/* Row 3 info */}
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
-                  <span className="text-white font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
+                  <span className="text-slate-900 dark:text-white font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
-                  <span className="text-neutral-200 font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
+                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
-                  <span className="text-cyan-400 font-bold font-mono">{projectDurationMonths} MONTHS</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
+                  <span className="text-cyan-600 dark:text-cyan-405 font-bold font-mono">{projectDurationMonths} MONTHS</span>
                 </div>
               </div>
 
               {/* Row 4 info */}
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
-                  <span className="text-white font-bold">{project.bidDate}</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
+                  <span className="text-slate-900 dark:text-white font-bold">{project.bidDate}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
-                  <span className="text-neutral-200 font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
+                  <span className="text-slate-700 dark:text-slate-205 font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
-                  <span className="text-emerald-450 font-black font-mono">${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-black font-mono">${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
                 </div>
               </div>
             </div>
@@ -1918,29 +1916,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
           {/* Division Summary Analytics Drawer */}
           {rows.length > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-neutral-855 bg-neutral-950 rounded-xl p-5 shadow-2xl font-mono text-xs">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-grid-border bg-card rounded-xl p-5 shadow-sm font-sans text-xs">
               {/* Left Column: Divisional Breakdown */}
               <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-neutral-800 pb-2 text-[10px] text-neutral-550 uppercase tracking-widest font-bold">
+                <div className="flex items-center justify-between border-b border-grid-border pb-2 text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-widest font-bold">
                   <span>[SYS.ANALYTICS // DIVISIONAL BREAKDOWN]</span>
                   <span>Subtotal Contribution</span>
                 </div>
                 {divisionBreakdown.length === 0 ? (
-                  <div className="text-neutral-600 italic py-4">No active divisions mapped.</div>
+                  <div className="text-slate-400 dark:text-slate-500 italic py-4">No active divisions mapped.</div>
                 ) : (
                   <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto pr-1">
                     {divisionBreakdown.map((div) => (
                       <div key={div.code} className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-blue-500 font-bold w-6 text-right shrink-0">{div.code}</span>
-                          <span className="text-neutral-300 font-bold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
+                          <span className="text-blue-600 dark:text-blue-400 font-bold w-6 text-right shrink-0">{div.code}</span>
+                          <span className="text-slate-700 dark:text-slate-300 font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
                         </div>
                         <div className="flex items-center gap-3 font-mono shrink-0 ml-auto">
-                          <span className="text-neutral-500 text-[10px] hidden sm:inline font-bold">
+                          <span className="text-slate-400 dark:text-slate-500 text-[10px] hidden sm:inline font-bold">
                             [{getTerminalProgressBar(div.percentage)}]
                           </span>
-                          <span className="text-neutral-400 text-right w-12 font-bold">{div.percentage.toFixed(1)}%</span>
-                          <span className="text-emerald-450 text-right w-24 font-bold">
+                          <span className="text-slate-500 dark:text-slate-400 text-right w-12 font-bold">{div.percentage.toFixed(1)}%</span>
+                          <span className="text-emerald-600 dark:text-emerald-400 text-right w-24 font-bold">
                             ${div.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
@@ -1952,22 +1950,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
               {/* Right Column: Cost Type Breakdown */}
               <div className="flex flex-col gap-3">
-                <div className="flex items-center border-b border-neutral-800 pb-2 text-[10px] text-neutral-555 uppercase tracking-widest font-bold">
+                <div className="flex items-center border-b border-grid-border pb-2 text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-widest font-bold">
                   <span>[SYS.ANALYTICS // COST TYPE SCOPES]</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {costTypeBreakdown.map((ct) => {
-                    let accentColor = "border-neutral-800 text-neutral-400";
-                    let badgeBg = "bg-neutral-900 text-neutral-400 border-neutral-800";
+                    let accentColor = "border-grid-border text-slate-500 dark:text-slate-400";
+                    let badgeBg = "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-grid-border";
                     if (ct.key === "M") {
-                      accentColor = "border-emerald-900/60 hover:border-emerald-800 bg-emerald-950/5 text-emerald-455";
-                      badgeBg = "bg-emerald-950/40 text-emerald-450 border-emerald-900/50";
+                      accentColor = "border-emerald-200 dark:border-emerald-900/60 hover:border-emerald-300 dark:hover:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/5 text-emerald-700 dark:text-emerald-400";
+                      badgeBg = "bg-emerald-100 dark:bg-emerald-955/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50";
                     } else if (ct.key === "L") {
-                      accentColor = "border-cyan-900/60 hover:border-cyan-800 bg-cyan-955/5 text-cyan-455";
-                      badgeBg = "bg-cyan-950/40 text-cyan-405 border-cyan-900/50";
+                      accentColor = "border-cyan-200 dark:border-cyan-900/60 hover:border-cyan-300 dark:hover:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-955/5 text-cyan-700 dark:text-cyan-400";
+                      badgeBg = "bg-cyan-100 dark:bg-cyan-955/40 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/50";
                     } else if (ct.key === "S") {
-                      accentColor = "border-amber-900/60 hover:border-amber-800 bg-amber-955/5 text-amber-500";
-                      badgeBg = "bg-amber-950/40 text-amber-500 border-amber-900/50";
+                      accentColor = "border-amber-200 dark:border-amber-900/60 hover:border-amber-300 dark:hover:border-amber-800 bg-amber-50/50 dark:bg-amber-955/5 text-amber-700 dark:text-amber-400";
+                      badgeBg = "bg-amber-100 dark:bg-amber-955/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50";
                     }
                     return (
                       <div
@@ -1981,10 +1979,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           </span>
                         </div>
                         <div className="mt-2">
-                          <h4 className="text-neutral-100 text-base font-black">
+                          <h4 className="text-slate-900 dark:text-white text-base font-black">
                             ${ct.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </h4>
-                          <p className="text-[10px] text-neutral-550 mt-1 font-bold">
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 font-bold">
                             {ct.percentage.toFixed(1)}% of subtotal
                           </p>
                         </div>
@@ -1997,23 +1995,23 @@ export default function ProjectWorkspace({ params }: PageProps) {
           )}
 
           {/* Re-Architected workbook template grid */}
-          <div className="bg-neutral-955 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl">
-            <div className="p-4 bg-neutral-900/50 border-b border-neutral-800 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
-                <Activity size={16} className="text-blue-500 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
+          <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
+            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border-b border-grid-border flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                <Activity size={16} className="text-blue-600 dark:text-blue-400 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
               </h3>
-              <span className="text-[10px] bg-neutral-850 text-neutral-400 px-3 py-1 rounded-full border border-neutral-750 font-mono">
+              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
                 Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
               </span>
             </div>
 
-            <div className="overflow-x-auto border-t border-l border-neutral-800">
+            <div className="overflow-x-auto border-t border-l border-grid-border">
               <table className="w-full text-left text-xs border-separate border-spacing-0">
                 <thead>
                   {table.getHeaderGroups().map((headerGroup) => (
                     <tr 
                       key={headerGroup.id} 
-                      className="bg-neutral-900/80 text-neutral-400 uppercase border-b border-neutral-800 tracking-wider font-semibold font-mono"
+                      className="bg-slate-50 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 uppercase border-b border-grid-border tracking-wider font-semibold font-sans"
                     >
                       {headerGroup.headers.map((header) => {
                         let alignClass = "text-left";
@@ -2026,7 +2024,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                         return (
                           <th 
                             key={header.id} 
-                            className={`p-4 border-r border-b border-neutral-800 relative group/header ${alignClass}`}
+                            className={`p-4 border-r border-b border-grid-border relative group/header font-semibold ${alignClass}`}
                             style={{ width: header.getSize() }}
                           >
                             {header.isPlaceholder ? null : isCustom ? (
@@ -2035,13 +2033,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                   type="text"
                                   value={colDef.header}
                                   onChange={(e) => handleRenameColumn(colDef.id, e.target.value)}
-                                  className="bg-neutral-900/80 border border-neutral-800 focus:border-blue-500 rounded px-2 py-1 text-xs text-neutral-100 font-bold outline-none uppercase w-28 text-left"
+                                  className="bg-transparent border border-grid-border focus:border-blue-500 rounded px-2 py-1 text-xs text-foreground font-semibold outline-none uppercase w-28 text-left focus:bg-white dark:focus:bg-slate-900/40"
                                 />
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteColumn(colDef.id)}
                                   title="Delete Column"
-                                  className="text-neutral-500 hover:text-red-400 font-bold text-xs p-1 transition-colors cursor-pointer animate-fade-in"
+                                  className="text-slate-400 dark:text-slate-500 hover:text-red-500 font-bold text-xs p-1 transition-colors cursor-pointer animate-fade-in"
                                 >
                                   ×
                                 </button>
@@ -2054,13 +2052,13 @@ export default function ProjectWorkspace({ params }: PageProps) {
                             )}
                             {header.column.getCanResize() && (
                               <div
-                                onMouseDown={header.getResizeHandler()}
-                                onTouchStart={header.getResizeHandler()}
-                                className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-opacity ${
-                                  header.column.getIsResizing()
-                                    ? "bg-blue-500 opacity-100 w-1.5"
-                                    : "bg-neutral-700 opacity-0 group-hover/header:opacity-100"
-                                }`}
+                                  onMouseDown={header.getResizeHandler()}
+                                  onTouchStart={header.getResizeHandler()}
+                                  className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-opacity ${
+                                    header.column.getIsResizing()
+                                      ? "bg-blue-600 dark:bg-blue-400 opacity-100 w-1.5"
+                                      : "bg-slate-300 dark:bg-slate-700 opacity-0 group-hover/header:opacity-100"
+                                  }`}
                               />
                             )}
                           </th>
@@ -2069,10 +2067,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
                   ))}
                 </thead>
-                <tbody className="divide-y divide-neutral-850">
+                <tbody className="divide-y divide-grid-border">
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-neutral-800 text-center text-neutral-555 italic font-mono uppercase tracking-wider">
+                      <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-400 dark:text-slate-500 italic font-sans uppercase tracking-wider">
                         No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
                       </td>
                     </tr>
@@ -2099,15 +2097,15 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           else if (currentDivision === "09") divLabel = "DIVISION 09 — FINISHES";
 
                           dividerRow = (
-                            <tr key={`div-header-${currentDivision}`} className="bg-blue-955/40 border-y border-blue-900/60 font-sans select-none">
-                              <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-neutral-800 text-left font-extrabold text-blue-400 uppercase tracking-widest text-[10px]">
+                            <tr key={`div-header-${currentDivision}`} className="bg-blue-50/50 dark:bg-blue-955/20 border-y border-grid-border font-sans select-none">
+                              <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-extrabold text-blue-600 dark:text-blue-400 uppercase tracking-widest text-[10px]">
                                 {divLabel}
                               </td>
                             </tr>
                           );
                         }
 
-                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-900/20" : "group-hover:bg-neutral-900/60";
+                        const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-955/15" : "group-hover:bg-slate-100 dark:group-hover:bg-slate-800/50";
 
                         return (
                           <React.Fragment key={row.original.id || `row-${idx}`}>
@@ -2115,8 +2113,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
                             <tr 
                               className={`group transition-colors ${
                                 !row.original.isMapped 
-                                  ? "bg-amber-955/10 hover:bg-amber-955/15 border-l-4 border-l-amber-500" 
-                                  : "hover:bg-neutral-900/30 border-l-4 border-l-transparent"
+                                  ? "bg-amber-50/20 dark:bg-amber-955/5 hover:bg-amber-50/40 dark:hover:bg-amber-955/10 border-l-4 border-l-amber-500" 
+                                  : "hover:bg-slate-50/40 dark:hover:bg-slate-900/20 border-l-4 border-l-transparent"
                               }`}
                               onContextMenu={(e) => {
                                 e.preventDefault();
@@ -2142,7 +2140,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                                 return (
                                   <td 
                                     key={cell.id} 
-                                    className={`${paddingClass} border-r border-b border-neutral-800 ${alignClass} ${rowHoverClass} transition-colors`}
+                                    className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} transition-colors`}
                                     style={{ width: cell.column.getSize() }}
                                   >
                                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -2161,7 +2159,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                 {rows.length > 0 && (
                   <tfoot>
                     {/* Subtotal Row */}
-                    <tr className="border-t border-neutral-855 bg-neutral-900/30 text-xs font-bold text-neutral-300 font-mono">
+                    <tr className="border-t border-grid-border bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
                         let alignClass = "text-left";
@@ -2173,7 +2171,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-left";
                         } else if (column.id === "total") {
                           content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-white";
+                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                           alignClass = "text-right";
@@ -2186,7 +2184,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
+                          <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2194,7 +2192,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* General Liability Row */}
-                    <tr className="bg-neutral-900/30 text-xs font-bold text-neutral-350 font-mono">
+                    <tr className="bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
                         let alignClass = "text-left";
@@ -2215,7 +2213,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         } else if (column.id === "total") {
                           content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-white";
+                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                           alignClass = "text-right";
@@ -2224,7 +2222,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
+                          <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2232,7 +2230,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* Contractor Fee Row */}
-                    <tr className="bg-neutral-900/30 text-xs font-bold text-neutral-355 font-mono">
+                    <tr className="bg-slate-50 dark:bg-slate-900/30 text-xs font-bold text-slate-700 dark:text-slate-350 font-mono">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
                         let alignClass = "text-left";
@@ -2253,7 +2251,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         } else if (column.id === "total") {
                           content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-white";
+                          alignClass = "text-right text-slate-900 dark:text-white font-bold";
                         } else if (column.id === "costPerUnit") {
                           content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                           alignClass = "text-right";
@@ -2262,7 +2260,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
+                          <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2270,19 +2268,19 @@ export default function ProjectWorkspace({ params }: PageProps) {
                     </tr>
 
                     {/* Total Estimated Cost Row */}
-                    <tr className="border-t border-double border-emerald-500/50 bg-emerald-950/15 text-xs font-black text-emerald-400 font-mono">
+                    <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-955/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono">
                       {table.getVisibleFlatColumns().map((column) => {
                         let content: React.ReactNode = "";
                         let alignClass = "text-left";
                         if (column.id === "costType") {
                           content = "TI";
-                          alignClass = "text-center text-emerald-500 font-extrabold";
+                          alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold";
                         } else if (column.id === "description") {
                           content = "Total Estimated Cost";
                           alignClass = "text-left uppercase tracking-wider";
                         } else if (column.id === "total") {
                           content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                          alignClass = "text-right text-sm text-emerald-450";
+                          alignClass = "text-right text-sm text-emerald-600 dark:text-emerald-400 font-black";
                         } else if (column.id === "costPerUnit") {
                           content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                           alignClass = "text-right text-sm";
@@ -2295,7 +2293,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
                           alignClass = "text-right";
                         }
                         return (
-                          <td key={column.id} className={`p-3 border-r border-b border-neutral-800 ${alignClass}`} style={{ width: column.getSize() }}>
+                          <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>
                             {content}
                           </td>
                         );
@@ -2326,14 +2324,14 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
         return (
           <div
-            className="fixed bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl rounded-md z-50 flex flex-col gap-1 min-w-[160px]"
+            className="fixed bg-card border border-grid-border p-1.5 shadow-2xl rounded-lg z-50 flex flex-col gap-1 min-w-[160px] text-card-foreground"
             style={{ top: contextMenu.y, left: contextMenu.x }}
             onClick={(e) => e.stopPropagation()}
           >
             {contextMenu.columnId && (
               <button
                 type="button"
-                className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-b border-neutral-800/60 pb-2 mb-1"
+                className="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer border-b border-grid-border pb-2 mb-1"
                 onClick={() => {
                   handleToggleCellLock(currentRowId, contextMenu.columnId);
                 }}
@@ -2343,7 +2341,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             )}
             <button
               type="button"
-              className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
               onClick={() => {
                 insertManualRow("above", contextMenu.rowIndex);
                 setContextMenu((prev) => ({ ...prev, visible: false }));
@@ -2353,7 +2351,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
             </button>
             <button
               type="button"
-              className="w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              className="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
               onClick={() => {
                 insertManualRow("below", contextMenu.rowIndex);
                 setContextMenu((prev) => ({ ...prev, visible: false }));

@@ -131,52 +131,52 @@ export default function ProjectsDashboard() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-neutral-800">
               <thead>
-                <tr className="bg-neutral-900/80 text-neutral-400 uppercase border-b border-neutral-850 tracking-wider font-semibold">
-                  <th className="p-4">Project ID</th>
-                  <th className="p-4">Name</th>
-                  <th className="p-4">Location</th>
-                  <th className="p-4 text-right">Square Footage</th>
-                  <th className="p-4 text-right">Unit Count</th>
-                  <th className="p-4 text-right">Bid Date</th>
-                  <th className="p-4 text-center">Action</th>
+                <tr className="bg-neutral-900/80 text-neutral-400 uppercase tracking-wider font-semibold">
+                  <th className="p-4 border-r border-b border-neutral-800">Project ID</th>
+                  <th className="p-4 border-r border-b border-neutral-800">Name</th>
+                  <th className="p-4 border-r border-b border-neutral-800">Location</th>
+                  <th className="p-4 text-right border-r border-b border-neutral-800">Square Footage</th>
+                  <th className="p-4 text-right border-r border-b border-neutral-800">Unit Count</th>
+                  <th className="p-4 text-right border-r border-b border-neutral-800">Bid Date</th>
+                  <th className="p-4 text-center border-r border-b border-neutral-800">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-900">
+              <tbody>
                 {projects.map((proj) => (
-                  <tr key={proj.id} className="hover:bg-neutral-900/30 transition-colors">
-                    <td className="p-4 font-bold text-blue-450 tracking-widest">{proj.id}</td>
-                    <td className="p-4 font-bold text-white text-sm">{proj.name}</td>
-                    <td className="p-4 text-neutral-400">
+                  <tr key={proj.id} className="group transition-colors hover:bg-neutral-900/30">
+                    <td className="p-4 font-bold text-blue-450 tracking-widest border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">{proj.id}</td>
+                    <td className="p-4 font-bold text-white text-sm border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">{proj.name}</td>
+                    <td className="p-4 text-neutral-400 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                       <div className="flex items-center gap-1.5">
                         <MapPin size={12} className="text-neutral-500" />
                         {proj.location}
                       </div>
                     </td>
-                    <td className="p-4 text-right text-neutral-300 font-bold">
+                    <td className="p-4 text-right text-neutral-300 font-bold border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                       {proj.squareFootage.toLocaleString()} <span className="text-neutral-600 font-normal">SF</span>
                     </td>
-                    <td className="p-4 text-right text-neutral-300 font-bold">
+                    <td className="p-4 text-right text-neutral-300 font-bold border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                       {proj.unitCount.toLocaleString()} <span className="text-neutral-600 font-normal">Units</span>
                     </td>
-                    <td className="p-4 text-right text-neutral-400">
+                    <td className="p-4 text-right text-neutral-400 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                       <div className="flex items-center gap-1.5 justify-end">
                         <Calendar size={12} className="text-neutral-500" />
                         {proj.bidDate}
                       </div>
                     </td>
-                    <td className="p-4 text-center">
+                    <td className="p-4 text-center border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                       <div className="flex items-center justify-center gap-2">
                         <Link
                           href={`/projects/${proj.id}`}
-                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-blue-950/40 text-blue-400 hover:text-blue-300 border border-neutral-800 hover:border-blue-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
+                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-blue-955/40 text-blue-400 hover:text-blue-300 border border-neutral-800 hover:border-blue-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm"
                         >
                           Launch <ExternalLink size={12} />
                         </Link>
                         <button
                           onClick={() => handleDeleteProject(proj.id)}
-                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-rose-950/40 text-rose-450 hover:text-rose-350 border border-neutral-800 hover:border-rose-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm cursor-pointer"
+                          className="inline-flex items-center gap-1.5 bg-neutral-900 hover:bg-rose-955/40 text-rose-450 hover:text-rose-350 border border-neutral-800 hover:border-rose-900/60 rounded-md px-3.5 py-1.5 font-bold uppercase transition-all duration-300 shadow-sm cursor-pointer"
                         >
                           Delete <Trash2 size={12} />
                         </button>

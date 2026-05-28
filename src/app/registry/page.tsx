@@ -231,22 +231,22 @@ export default function GlobalRegistryDashboard() {
           {/* Data Table */}
           <div className="bg-neutral-950 border border-neutral-850 rounded-xl overflow-hidden shadow-2xl">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-neutral-800">
                 <thead>
-                  <tr className="bg-neutral-900/80 text-neutral-400 uppercase border-b border-neutral-850 tracking-wider font-semibold">
-                    <th className="p-4">Togal Classification</th>
-                    <th className="p-4">Assigned Suffix Code</th>
-                    <th className="p-4">Item Description Reference</th>
-                    <th className="p-4">Division Code & Scope</th>
-                    <th className="p-4 text-center">Cost Type</th>
-                    <th className="p-4 text-center">UOM</th>
-                    <th className="p-4 text-center">Action</th>
+                  <tr className="bg-neutral-900/80 text-neutral-400 uppercase tracking-wider font-semibold">
+                    <th className="p-4 border-r border-b border-neutral-800">Togal Classification</th>
+                    <th className="p-4 border-r border-b border-neutral-800">Assigned Suffix Code</th>
+                    <th className="p-4 border-r border-b border-neutral-800">Item Description Reference</th>
+                    <th className="p-4 border-r border-b border-neutral-800">Division Code & Scope</th>
+                    <th className="p-4 text-center border-r border-b border-neutral-800">Cost Type</th>
+                    <th className="p-4 text-center border-r border-b border-neutral-800">UOM</th>
+                    <th className="p-4 text-center border-r border-b border-neutral-800">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-900">
+                <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-neutral-500 italic">
+                      <td colSpan={7} className="p-8 text-center text-neutral-500 italic border-r border-b border-neutral-800">
                         No registry items match the query: &quot;{searchQuery}&quot;
                       </td>
                     </tr>
@@ -262,17 +262,17 @@ export default function GlobalRegistryDashboard() {
                       }
 
                       return (
-                        <tr key={row.classification} className="hover:bg-neutral-900/30 transition-colors">
-                          <td className="p-4 font-bold text-white text-sm">
+                        <tr key={row.classification} className="group transition-colors hover:bg-neutral-900/30">
+                          <td className="p-4 font-bold text-white text-sm border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             {row.classification}
                           </td>
-                          <td className="p-4 font-bold text-blue-450 font-mono tracking-widest uppercase">
+                          <td className="p-4 font-bold text-blue-455 font-mono tracking-widest uppercase border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             {row.itemId}
                           </td>
-                          <td className="p-4 text-neutral-300 font-semibold">
+                          <td className="p-4 text-neutral-300 font-semibold border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             {row.description}
                           </td>
-                          <td className="p-4 text-neutral-400">
+                          <td className="p-4 text-neutral-400 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             <div className="flex items-center gap-2">
                               {row.divisionCode ? (
                                 <span className="bg-neutral-900 border border-neutral-800 text-neutral-400 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
@@ -286,18 +286,18 @@ export default function GlobalRegistryDashboard() {
                               <span className="truncate max-w-[150px] font-bold">{row.divisionName}</span>
                             </div>
                           </td>
-                          <td className="p-4 text-center">
+                          <td className="p-4 text-center border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${typeColor}`}>
                               {row.costType}
                             </span>
                           </td>
-                          <td className="p-4 text-center font-bold text-neutral-550">
+                          <td className="p-4 text-center font-bold text-neutral-555 border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             {row.uom}
                           </td>
-                          <td className="p-4 text-center">
+                          <td className="p-4 text-center border-r border-b border-neutral-800 transition-colors group-hover:bg-neutral-900/40">
                             <button
                               onClick={() => handleDeleteRule(row.classification)}
-                              className="inline-flex items-center justify-center p-2 rounded-md bg-neutral-900 hover:bg-rose-950/40 text-neutral-500 hover:text-rose-400 border border-neutral-850 hover:border-rose-900/50 transition-all duration-300 cursor-pointer shadow-sm"
+                              className="inline-flex items-center justify-center p-2 rounded-md bg-neutral-900 hover:bg-rose-955/40 text-neutral-500 hover:text-rose-400 border border-neutral-850 hover:border-rose-900/50 transition-all duration-300 cursor-pointer shadow-sm"
                               title="Delete individual mapping rule"
                             >
                               <Trash2 size={14} />
