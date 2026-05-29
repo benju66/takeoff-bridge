@@ -1,0 +1,532 @@
+"use client";
+
+import React from "react";
+import Link from "next/link";
+import { flexRender } from "@tanstack/react-table";
+import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
+import { Upload, AlertTriangle, Activity, RotateCcw, Grid } from "lucide-react";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
+import { Project } from "@/types/db";
+import { DIVISION_NAMES } from "@/lib/constants";
+import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
+import { DivisionAggregation, CostTypeAggregation } from "@/types";
+
+// ---------------------------------------------------------------------------
+// TakeoffIngestionStep — Step 4 Panel
+// Takeoff Workbook Spreadsheet Matrix + Summary Analytics
+// ---------------------------------------------------------------------------
+
+interface TakeoffIngestionStepProps {
+  project: Project;
+  projectDurationMonths: number;
+  squareFootage: number;
+  unitCount: number;
+
+  // Workbook grid state
+  rows: ProcessedTakeoffRow[];
+  columnDefs: ColumnDefinition[];
+  lockedCells: Record<string, boolean>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  table: any;
+  dragActive: boolean;
+  appendData: boolean;
+  setAppendData: (v: boolean) => void;
+  contextMenu: ContextMenuState;
+  setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
+  unmappedTakeoffClassifications: string[];
+  historyStackLength: number;
+
+  // Handlers
+  handleAddCustomColumn: () => void;
+  handleDeleteColumn: (id: string) => void;
+  handleRenameColumn: (id: string, name: string) => void;
+  handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleDrag: (e: React.DragEvent) => void;
+  handleDrop: (e: React.DragEvent) => void;
+  handleUndo: () => void;
+
+  // Summary data
+  takeoffSummary: TakeoffSummary;
+  divisionBreakdown: DivisionAggregation[];
+  costTypeBreakdown: CostTypeAggregation[];
+}
+
+export function TakeoffIngestionStep({
+  project,
+  projectDurationMonths,
+  squareFootage,
+  unitCount,
+  rows,
+  columnDefs,
+  table,
+  dragActive,
+  appendData,
+  setAppendData,
+  setContextMenu,
+  unmappedTakeoffClassifications,
+  historyStackLength,
+  handleAddCustomColumn,
+  handleDeleteColumn,
+  handleRenameColumn,
+  handleFileUpload,
+  handleDrag,
+  handleDrop,
+  handleUndo,
+  takeoffSummary,
+  divisionBreakdown,
+  costTypeBreakdown,
+}: TakeoffIngestionStepProps) {
+  const { subtotal, generalLiability, contractorFee: fee, totalEstimatedCost, costPerSf, costPerUnit } = takeoffSummary;
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Top Ingestion Module Tray */}
+      <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Left side: Compact Ingest / Drop Takeoff CSV box */}
+        <div
+          onDragEnter={handleDrag}
+          onDragOver={handleDrag}
+          onDragLeave={handleDrag}
+          onDrop={handleDrop}
+          className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
+            dragActive
+              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]"
+              : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
+          }`}
+        >
+          <label className="flex flex-col items-center justify-center cursor-pointer select-none">
+            <div className="flex items-center gap-2 text-foreground">
+              <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
+              <span className="text-xs font-bold uppercase tracking-wider">Ingest / Drop Takeoff CSV</span>
+            </div>
+            <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+          </label>
+        </div>
+
+        {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
+            <input
+              id="append-checkbox-step4"
+              type="checkbox"
+              checked={appendData}
+              onChange={(e) => setAppendData(e.target.checked)}
+              className="w-4 h-4 rounded border-grid-border text-blue-600 focus:ring-blue-500 bg-transparent cursor-pointer"
+            />
+            <label htmlFor="append-checkbox-step4" className="cursor-pointer font-bold uppercase tracking-wider">
+              Append Data
+            </label>
+          </div>
+
+          <button
+            onClick={handleAddCustomColumn}
+            type="button"
+            className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+          >
+            + Add Custom Column
+          </button>
+
+          <button
+            onClick={handleUndo}
+            disabled={historyStackLength === 0}
+            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+          >
+            <RotateCcw size={14} /> Undo Action ({historyStackLength})
+          </button>
+        </div>
+      </div>
+
+      {/* Unmapped Classifications Warning */}
+      {unmappedTakeoffClassifications.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 rounded-xl p-4 flex flex-col gap-2 font-sans text-xs text-amber-700 dark:text-amber-500 animate-shake">
+          <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+            <AlertTriangle className="text-amber-500 animate-pulse" size={16} />
+            <span>Notice: Unmapped Classifications Detected</span>
+          </div>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed uppercase">
+            The following {unmappedTakeoffClassifications.length} classification(s) from your takeoff CSV were skipped because they are not yet mapped to any corporate code in your registry:
+          </p>
+          <div className="flex flex-wrap gap-2 mt-1">
+            {unmappedTakeoffClassifications.map((cl) => (
+              <span key={cl} className="bg-background dark:bg-slate-900 border border-grid-border text-[10px] text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded font-bold">
+                {cl}
+              </span>
+            ))}
+          </div>
+          <div className="mt-2 text-right">
+            <Link href="/registry" className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400 hover:underline transition-colors">
+              Go to Global Registry to Add Mappings &rarr;
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
+      <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm font-sans text-xs text-card-foreground">
+        <div className="bg-background/80 dark:bg-background/50 border-b border-grid-border px-4 py-2.5 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Grid size={16} className="text-blue-600 dark:text-blue-400" />
+            <span>STEP 4 - COMPANY ESTIMATE WORKBOOK</span>
+          </div>
+          <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 font-semibold">ROWS 2-4</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-grid-border">
+          {/* Row 2 info */}
+          <div className="p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
+              <span className="text-foreground font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
+              <span className="text-foreground font-bold font-mono">{project.expectedStart || "—"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
+              <span className="text-foreground font-bold font-mono">{project.expectedFinish || "—"}</span>
+            </div>
+          </div>
+
+          {/* Row 3 info */}
+          <div className="p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
+              <span className="text-foreground font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
+              <span className="text-foreground font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono">{projectDurationMonths} MONTHS</span>
+            </div>
+          </div>
+
+          {/* Row 4 info */}
+          <div className="p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
+              <span className="text-foreground font-bold">{project.bidDate}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
+              <span className="text-foreground font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-black font-mono">${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Division Summary Analytics Drawer */}
+      {rows.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-grid-border bg-card rounded-xl p-5 shadow-sm font-sans text-xs">
+          {/* Left Column: Divisional Breakdown */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between border-b border-grid-border pb-2 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold">
+              <span>[SYS.ANALYTICS // DIVISIONAL BREAKDOWN]</span>
+              <span>Subtotal Contribution</span>
+            </div>
+            {divisionBreakdown.length === 0 ? (
+              <div className="text-slate-600 dark:text-slate-400 italic py-4">No active divisions mapped.</div>
+            ) : (
+              <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto pr-1">
+                {divisionBreakdown.map((div) => (
+                  <div key={div.code} className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-blue-600 dark:text-blue-400 font-bold w-6 text-right shrink-0">{div.code}</span>
+                      <span className="text-foreground font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3 font-mono shrink-0 ml-auto">
+                      <span className="text-slate-600 dark:text-slate-400 text-[10px] hidden sm:inline font-bold">
+                        [{getTerminalProgressBar(div.percentage)}]
+                      </span>
+                      <span className="text-slate-600 dark:text-slate-400 text-right w-12 font-bold">{div.percentage.toFixed(1)}%</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 text-right w-24 font-bold">
+                        ${div.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Cost Type Breakdown */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center border-b border-grid-border pb-2 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold">
+              <span>[SYS.ANALYTICS // COST TYPE SCOPES]</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {costTypeBreakdown.map((ct) => {
+                let accentColor = "border-grid-border text-slate-600 dark:text-slate-400";
+                let badgeBg = "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-grid-border";
+                if (ct.key === "M") {
+                  accentColor = "border-emerald-200 dark:border-emerald-900/60 hover:border-emerald-300 dark:hover:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/5 text-emerald-700 dark:text-emerald-400";
+                  badgeBg = "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50";
+                } else if (ct.key === "L") {
+                  accentColor = "border-cyan-200 dark:border-cyan-900/60 hover:border-cyan-300 dark:hover:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-950/5 text-cyan-700 dark:text-cyan-400";
+                  badgeBg = "bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/50";
+                } else if (ct.key === "S") {
+                  accentColor = "border-amber-200 dark:border-amber-900/60 hover:border-amber-300 dark:hover:border-amber-800 bg-amber-50/50 dark:bg-amber-950/5 text-amber-700 dark:text-amber-400";
+                  badgeBg = "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50";
+                }
+                return (
+                  <div
+                    key={ct.key}
+                    className={`flex flex-col justify-between p-4 border rounded-xl transition-all ${accentColor}`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="font-extrabold uppercase text-[10px] tracking-wider">{ct.label}</span>
+                      <span className={`text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${badgeBg}`}>
+                        {ct.key}
+                      </span>
+                    </div>
+                    <div className="mt-2">
+                      <h4 className="text-foreground text-base font-black">
+                        ${ct.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </h4>
+                      <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 font-bold">
+                        {ct.percentage.toFixed(1)}% of subtotal
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-Architected workbook template grid */}
+      <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
+        <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+            <Activity size={16} className="text-blue-600 dark:text-blue-400 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
+          </h3>
+          <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
+            Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
+          </span>
+        </div>
+
+        <div className="overflow-x-auto border-t border-l border-grid-border">
+          <table className="w-full text-left text-xs border-separate border-spacing-0">
+            <thead>
+              {table.getHeaderGroups().map((headerGroup: HeaderGroup<ProcessedTakeoffRow>) => (
+                <tr
+                  key={headerGroup.id}
+                  className="bg-[#3057A6] text-white uppercase border-b border-grid-border tracking-wider font-bold font-sans text-[13px]"
+                >
+                  {headerGroup.headers.map((header: Header<ProcessedTakeoffRow, unknown>) => {
+                    const alignClass = "text-center";
+                    const colDef = columnDefs.find(c => c.id === header.column.id);
+                    const isCustom = colDef && colDef.type === "custom";
+
+                    return (
+                      <th
+                        key={header.id}
+                        className={`p-4 border-r border-b border-grid-border relative group/header font-bold text-white text-[13px] sticky top-0 z-10 bg-[#3057A6] ${alignClass}`}
+                        style={{ width: header.getSize() }}
+                      >
+                        {header.isPlaceholder ? null : isCustom ? (
+                          <div className="flex items-center gap-1.5 justify-start">
+                            <input
+                              type="text"
+                              value={colDef.header}
+                              onChange={(e) => handleRenameColumn(colDef.id, e.target.value)}
+                              className="bg-transparent border border-grid-border focus:ring-2 focus:ring-blue-500 focus:z-10 rounded-lg px-2 py-1 text-xs text-foreground font-semibold outline-none uppercase w-28 text-left focus:bg-white dark:focus:bg-slate-900/40"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteColumn(colDef.id)}
+                              title="Delete Column"
+                              className="text-slate-600 dark:text-slate-400 hover:text-red-500 font-bold text-xs p-1 transition-colors cursor-pointer animate-fade-in"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ) : (
+                          flexRender(header.column.columnDef.header, header.getContext())
+                        )}
+                        {header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none transition-opacity ${
+                              header.column.getIsResizing()
+                                ? "bg-blue-600 dark:bg-blue-400 opacity-100 w-1.5"
+                                : "bg-grid-border opacity-0 group-hover/header:opacity-100"
+                            }`}
+                          />
+                        )}
+                      </th>
+                    );
+                  })}
+                </tr>
+              ))}
+            </thead>
+            <tbody className="divide-y divide-grid-border">
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-600 dark:text-slate-400 italic font-sans uppercase tracking-wider">
+                    No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
+                  </td>
+                </tr>
+              ) : (
+                (() => {
+                  let lastDivision = "";
+                  return table.getRowModel().rows.map((row: Row<ProcessedTakeoffRow>, idx: number) => {
+                    const itemId = row.original.itemId || "";
+                    const currentDivision = itemId.split("-")[0] || "";
+
+                    let dividerRow = null;
+                    if (currentDivision && currentDivision !== lastDivision) {
+                      lastDivision = currentDivision;
+                      const divLabel = DIVISION_NAMES[currentDivision] || `DIVISION ${currentDivision}`;
+                      dividerRow = (
+                        <tr key={`div-header-${currentDivision}`} className="bg-[#3057A6] border-y border-grid-border font-sans select-none">
+                          <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-bold text-white uppercase tracking-wider text-[13px]">
+                            {divLabel}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
+
+                    return (
+                      <React.Fragment key={row.original.id || `row-${idx}`}>
+                        {dividerRow}
+                        <tr
+                          className={`group transition-colors ${
+                            !row.original.isMapped
+                              ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500"
+                              : "hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 border-l-transparent"
+                          }`}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setContextMenu({
+                              visible: true,
+                              x: e.clientX,
+                              y: e.clientY,
+                              rowIndex: idx,
+                              columnId: ""
+                            });
+                          }}
+                        >
+                          {row.getVisibleCells().map((cell: Cell<ProcessedTakeoffRow, unknown>) => {
+                            let alignClass = "text-left";
+                            if (["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"].includes(cell.column.id)) alignClass = "text-center";
+
+                            const colDef = columnDefs.find(c => c.id === cell.column.id);
+                            const isCustom = colDef && colDef.type === "custom";
+                            const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
+                            const paddingClass = isEditable ? "p-0" : "p-3";
+
+                            return (
+                              <td
+                                key={cell.id}
+                                className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} transition-colors`}
+                                style={{ width: cell.column.getSize() }}
+                              >
+                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </React.Fragment>
+                    );
+                  });
+                })()
+              )}
+            </tbody>
+
+            {/* Complete Locked-down Summary Row Appendices */}
+            {rows.length > 0 && (
+              <tfoot>
+                {/* Subtotal Row */}
+                <tr className="border-t border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                    let content: React.ReactNode = "";
+                    let alignClass = "text-left font-sans";
+                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "description") { content = "Takeoff Subtotal"; alignClass = "text-left font-sans"; }
+                    else if (column.id === "total") { content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                  })}
+                </tr>
+
+                {/* General Liability Row */}
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                    let content: React.ReactNode = "";
+                    let alignClass = "text-left font-sans";
+                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "description") { content = "General Liability (1%)"; alignClass = "text-left font-sans"; }
+                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "unitPrice") { content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "total") { content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "costPerUnit") { content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "costPerSf") { content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                  })}
+                </tr>
+
+                {/* Contractor Fee Row */}
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                    let content: React.ReactNode = "";
+                    let alignClass = "text-left font-sans";
+                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "description") { content = "Contractor Fee (5%)"; alignClass = "text-left font-sans"; }
+                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
+                    else if (column.id === "unitPrice") { content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "total") { content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "costPerUnit") { content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    else if (column.id === "costPerSf") { content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                  })}
+                </tr>
+
+                {/* Total Estimated Cost Row */}
+                <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans">
+                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                    let content: React.ReactNode = "";
+                    let alignClass = "text-left font-sans";
+                    if (column.id === "costType") { content = "TI"; alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold font-mono"; }
+                    else if (column.id === "description") { content = "Total Estimated Cost"; alignClass = "text-left uppercase tracking-wider font-sans"; }
+                    else if (column.id === "total") { content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
+                    else if (column.id === "costPerUnit") { content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
+                    else if (column.id === "costPerSf") { content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
+                    else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                  })}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Hidden Option Datalist */}
+      <datalist id="estimate-items-options">
+        {Object.keys(ESTIMATE_ITEMS_MASTER).map((key) => (
+          <option key={key} value={key}>
+            {ESTIMATE_ITEMS_MASTER[key].description}
+          </option>
+        ))}
+      </datalist>
+    </div>
+  );
+}

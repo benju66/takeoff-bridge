@@ -1,19 +1,23 @@
 # Antigravity AI Engine Rules
 
 # Type Safety & Architecture
-- Enforce strict, explicit TypeScript compilation typing across all files. No implicit `any` escapes.
-- Isolate server file-processing logic from interactive client UI presentation elements.
-- Utilize the Next.js App Router layer layout conventions (`/src/app`, `/src/components`, `/src/lib`).
+- Enforce strict, explicit TypeScript compilation typing across all files. No implicit `any` escapes[cite: 4].
+- Isolate server file-processing logic from interactive client UI presentation elements[cite: 4].
+- Utilize the Next.js App Router layer layout conventions (`/src/app`, `/src/components`, `/src/lib`)[cite: 4].
 
 # UI Grid Component Execution
-- Optimize data grids to emulate standard Excel spreadsheet behaviors.
-- Implement explicit keyboard event handlers (`ArrowUp`, `ArrowDown`, `Enter`) for fast data entry fields.
-- Wrap inline style rules cleanly using unified TailwindCSS utilities.
-- Context Menus & Portal Overlays: Design floating context structures to match the high-contrast dark terminal color values of the host layout (`bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl`).
-- Dropdown Button Standardization: Force context control items to share uniform utility styles across all columns (`w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider`).
-- Layout Overlay Clean Dismissal: Every context component or popover must hook into a window event listener to clear layout tracking states and close menu popups when a user clicks external coordinates.
+- Optimize data grids to emulate standard Excel spreadsheet behaviors[cite: 4].
+- Implement explicit keyboard event handlers (`ArrowUp`, `ArrowDown`, `Enter`) for fast data entry fields[cite: 4].
+- Wrap inline style rules cleanly using unified TailwindCSS utilities[cite: 4].
+- Context Menus & Portal Overlays: Design floating context structures to match the high-contrast dark terminal color values of the host layout (`bg-neutral-900 border border-neutral-800 p-1.5 shadow-2xl`)[cite: 4].
+- Dropdown Button Standardization: Force context control items to share uniform utility styles across all columns (`w-full text-left px-3 py-2 text-neutral-300 hover:bg-neutral-800 rounded font-mono text-[11px] font-bold uppercase tracking-wider`)[cite: 4].
+- Layout Overlay Clean Dismissal: Every context component or popover must hook into a window event listener to clear layout tracking states and close menu popups when a user clicks external coordinates[cite: 4].
+
+# Implementation Workflow
+- **Plan-First Requirement**: Never write or update application files without first generating an implementation plan evaluated against **`SKILL.md`** guardrails[cite: 2].
+- **Strict Approval Gate**: Stop execution and wait for explicit user validation after presenting the proposed modification matrix[cite: 2].
 
 # Code Integrity & Output Guidelines
-- Provide functional, production-ready code outputs. Never use code blocks containing placeholders or `// TODO` tags.
-- Retain all established type interfaces, utility helper functions, and schema definitions during code refactoring cycles.
-- Keep structural methods brief, direct, and readable. Avoid overly dense formatting blocks.
+- Provide functional, production-ready code outputs. Never use code blocks containing placeholders or `// TODO` tags[cite: 4].
+- Retain all established type interfaces, utility helper functions, and schema definitions during code refactoring cycles[cite: 4].
+- Keep structural methods brief, direct, and readable. Avoid overly dense formatting blocks[cite: 4].

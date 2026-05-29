@@ -1,4 +1,4 @@
-import { ProcessedTakeoffRow } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
 import ExcelJS from "exceljs";
 
@@ -14,18 +14,6 @@ function escapeCSVField(val: unknown): string {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
-}
-
-/**
- * Generates a clean Excel payload CSV string.
- * Formats columns to match the company spreadsheet's Step 4 worksheet columns:
- * Columns: [ "TI", "", itemId, description, "", matchedQty, uom, unitPrice, total ]
- * Incorporates standard markup layers (General Liability 1%, Contractor Fee 5%) cleanly at the bottom.
- */
-export interface ColumnDefinition {
-  id: string;
-  header: string;
-  type: "default" | "custom";
 }
 
 /**

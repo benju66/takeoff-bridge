@@ -13,17 +13,8 @@ import {
   CheckCircle2 
 } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { DIVISION_NAMES } from "@/lib/constants";
 
-const DIVISION_NAMES: Record<string, string> = {
-  "02": "Existing Conditions",
-  "03": "Concrete",
-  "04": "Masonry",
-  "05": "Metals",
-  "06": "Wood & Plastics",
-  "07": "Thermal & Moisture",
-  "08": "Openings",
-  "09": "Finishes"
-};
 
 interface RegistryRow {
   classification: string;

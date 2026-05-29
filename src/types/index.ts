@@ -33,3 +33,45 @@ export interface ProcessedTakeoffRow {
   costType: string;        // Dynamic costType mapped from InternalEstimateItem
   customFields?: Record<string, string | number>;
 }
+
+// ---------------------------------------------------------------------------
+// Shared Workspace Interfaces (canonicalized from page.tsx + exporter.ts)
+// ---------------------------------------------------------------------------
+
+/** Column definition for dynamic workspace grids and export pipeline */
+export interface ColumnDefinition {
+  id: string;
+  header: string;
+  type: "default" | "custom";
+}
+
+/** Context menu floating state for grid right-click interactions */
+export interface ContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  rowIndex: number;
+  columnId: string;
+}
+
+/** Undo history snapshot containing row items and cell lock state */
+export interface WorkbookSnapshot {
+  items: ProcessedTakeoffRow[];
+  locks: Record<string, boolean>;
+}
+
+/** Divisional budget aggregation for analytics display */
+export interface DivisionAggregation {
+  code: string;
+  name: string;
+  total: number;
+  percentage: number;
+}
+
+/** Cost type budget aggregation (Materials/Labor/Subcontract) */
+export interface CostTypeAggregation {
+  key: string;
+  label: string;
+  total: number;
+  percentage: number;
+}
