@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { flexRender } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
-import { Upload, AlertTriangle, Activity, RotateCcw, Grid } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
 import { Project } from "@/types/db";
@@ -35,7 +35,10 @@ interface TakeoffIngestionStepProps {
   contextMenu: ContextMenuState;
   setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
   unmappedTakeoffClassifications: string[];
-  historyStackLength: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  undoStackSize: number;
+  redoStackSize: number;
 
   // Handlers
   handleAddCustomColumn: () => void;
@@ -45,6 +48,7 @@ interface TakeoffIngestionStepProps {
   handleDrag: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
   handleUndo: () => void;
+  handleRedo: () => void;
 
   // Summary data
   takeoffSummary: TakeoffSummary;
@@ -65,7 +69,10 @@ export function TakeoffIngestionStep({
   setAppendData,
   setContextMenu,
   unmappedTakeoffClassifications,
-  historyStackLength,
+  canUndo,
+  canRedo,
+  undoStackSize,
+  redoStackSize,
   handleAddCustomColumn,
   handleDeleteColumn,
   handleRenameColumn,
@@ -73,6 +80,7 @@ export function TakeoffIngestionStep({
   handleDrag,
   handleDrop,
   handleUndo,
+  handleRedo,
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
@@ -130,10 +138,18 @@ export function TakeoffIngestionStep({
 
           <button
             onClick={handleUndo}
-            disabled={historyStackLength === 0}
+            disabled={!canUndo}
             className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
           >
-            <RotateCcw size={14} /> Undo Action ({historyStackLength})
+            <RotateCcw size={14} /> Undo ({undoStackSize})
+          </button>
+
+          <button
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+          >
+            <RotateCw size={14} /> Redo ({redoStackSize})
           </button>
         </div>
       </div>

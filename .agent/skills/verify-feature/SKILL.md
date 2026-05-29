@@ -12,7 +12,7 @@
 * **Overlay Dismissal**: Ensure that any clicking action outside active context panels completely clears layout tracking menus from the DOM.
 
 ## 3. Financial Ledger Precision
-* **Historical State Stack**: Validate that executing a manual row insertion, deletion, or cell modification calls **pushSnapshotToStack** prior to updating state arrays.
+* **Command History Integrity**: Validate that executing a manual row insertion, deletion, or cell modification calls `commandHistory.pushCommand()` with a `WorkbookCommand` payload prior to updating state arrays. Verify that the command captures cascade effects for `itemId`, `description`, and `unitPrice` edits on classified rows.
 * **Compounding Formula Audit**: Confirm that cumulative estimate totals accurately run the following compounding chain:
   * `Itemized Subtotal = Sum(Quantity × Unit Price)`
   * `General Liability Insurance = Itemized Subtotal × 0.01`

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Papa from "papaparse";
 import {
   useReactTable,
@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-table";
 import { parseTogalCSV } from "@/lib/parser";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, TogalRowPayload, ColumnDefinition, ContextMenuState, WorkbookSnapshot } from "@/types";
+import { ProcessedTakeoffRow, TogalRowPayload, ColumnDefinition, ContextMenuState } from "@/types";
 import { Project } from "@/types/db";
 import {
   getEstimateLineItems,
@@ -24,6 +24,7 @@ import {
 } from "@/lib/db";
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
+import { useCommandHistory, WorkbookCommand } from "./useCommandHistory";
 
 // ---------------------------------------------------------------------------
 // useTakeoffWorkbook — Core Step 4 grid state, handlers, and TanStack table
@@ -46,14 +47,19 @@ export interface UseTakeoffWorkbookReturn {
   contextMenu: ContextMenuState;
   setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
   unmappedTakeoffClassifications: string[];
-  historyStack: WorkbookSnapshot[];
+  canUndo: boolean;
+  canRedo: boolean;
+  undoStackSize: number;
+  redoStackSize: number;
   isExportingExcel: boolean;
   exportError: string | null;
   setExportError: React.Dispatch<React.SetStateAction<string | null>>;
 
   // Handlers
   handleCellEdit: (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => void;
+  commitCellEdit: (rowId: string, field: keyof ProcessedTakeoffRow, prevValue: string | number | boolean, nextValue: string | number | boolean) => void;
   handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
+  commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
   handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => void;
   handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string) => void;
   handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
@@ -69,7 +75,11 @@ export interface UseTakeoffWorkbookReturn {
   handleExportProcore: () => void;
   handleExportExcelWorkbook: () => Promise<void>;
   handleUndo: () => void;
+  handleRedo: () => void;
 }
+
+/** Fields that applyCellEditDirect cascades to sibling rows */
+const CASCADE_FIELDS: Set<keyof ProcessedTakeoffRow> = new Set(["itemId", "description", "unitPrice"]);
 
 export function useTakeoffWorkbook(
   projectId: string,
@@ -88,9 +98,6 @@ export function useTakeoffWorkbook(
   // Registry state (project-isolated → global corporate)
   const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
   const [globalRegistry, setGlobalRegistry] = useState<Record<string, string>>({});
-
-  // History stack for undo
-  const [historyStack, setHistoryStack] = useState<WorkbookSnapshot[]>([]);
 
   // Column definitions
   const [columnDefs, setColumnDefs] = useState<ColumnDefinition[]>([
@@ -120,29 +127,333 @@ export function useTakeoffWorkbook(
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  // ---------------------------------------------------------------------------
-  // pushSnapshotToStack — AGENTS.md guardrail: called before every mutation
-  // ---------------------------------------------------------------------------
-  const pushSnapshotToStack = (currentRows: ProcessedTakeoffRow[], currentLocks: Record<string, boolean>) => {
-    setHistoryStack((prev) => [
-      ...prev.slice(-9),
-      {
-        items: JSON.parse(JSON.stringify(currentRows)),
-        locks: JSON.parse(JSON.stringify(currentLocks)),
-      },
-    ]);
-  };
+  // Command Pattern history engine (replaces snapshot deep-clone system)
+  const commandHistory = useCommandHistory();
+
+  // Stable refs for values needed inside useCallback with [] deps
+  const rowsRef = useRef(rows);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+  const userRegistryRef = useRef(userRegistry);
+  useEffect(() => { userRegistryRef.current = userRegistry; }, [userRegistry]);
+  const globalRegistryRef = useRef(globalRegistry);
+  useEffect(() => { globalRegistryRef.current = globalRegistry; }, [globalRegistry]);
+  const columnDefsRef = useRef(columnDefs);
+  useEffect(() => { columnDefsRef.current = columnDefs; }, [columnDefs]);
+  const lockedCellsRef = useRef(lockedCells);
+  useEffect(() => { lockedCellsRef.current = lockedCells; }, [lockedCells]);
+  const unmappedRef = useRef(unmappedTakeoffClassifications);
+  useEffect(() => { unmappedRef.current = unmappedTakeoffClassifications; }, [unmappedTakeoffClassifications]);
+
+  // Focus tracking refs for blur-based commit
+  const focusedCellRef = useRef<{ rowId: string; field: string; initialValue: string | number | boolean } | null>(null);
+  const focusedCustomCellRef = useRef<{ rowId: string; columnId: string; initialValue: string } | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Undo handler
+  // applyCommandForward — Execute a command's FORWARD (next) effect on state
   // ---------------------------------------------------------------------------
-  const handleUndo = () => {
-    if (historyStack.length === 0) return;
-    const lastSnapshot = historyStack[historyStack.length - 1];
-    setHistoryStack((prev) => prev.slice(0, -1));
-    setRows(lastSnapshot.items);
-    setLockedCells(lastSnapshot.locks);
-  };
+  const applyCommandForward = useCallback((cmd: WorkbookCommand) => {
+    switch (cmd.type) {
+      case "EDIT_CELL": {
+        setRows((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((r) => r.id === cmd.rowId);
+          if (idx === -1) return prev;
+          const row = { ...updated[idx] };
+          (row as Record<string, unknown>)[cmd.field] = cmd.nextValue;
+          if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
+            row.total = row.matchedQty * row.unitPrice;
+          }
+          updated[idx] = row;
+          if (cmd.cascadeEffects) {
+            for (const effect of cmd.cascadeEffects) {
+              const si = updated.findIndex((r) => r.id === effect.rowId);
+              if (si !== -1) {
+                updated[si] = { ...updated[si], ...effect.nextFields };
+                if (effect.nextFields.matchedQty !== undefined || effect.nextFields.unitPrice !== undefined) {
+                  updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
+                }
+              }
+            }
+          }
+          return updated;
+        });
+        if (cmd.registryDelta) {
+          if (cmd.registryDelta.projectRegistry) {
+            const rd = cmd.registryDelta.projectRegistry;
+            setUserRegistry((prev) => {
+              const next = { ...prev, [rd.key]: rd.nextValue };
+              saveProjectRegistry(projectId, next);
+              return next;
+            });
+          }
+          if (cmd.registryDelta.globalRegistry) {
+            const rd = cmd.registryDelta.globalRegistry;
+            setGlobalRegistry((prev) => {
+              const next = { ...prev, [rd.key]: rd.nextValue };
+              saveGlobalRegistry(next);
+              return next;
+            });
+          }
+        }
+        break;
+      }
+      case "EDIT_CUSTOM_CELL": {
+        setRows((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((r) => r.id === cmd.rowId);
+          if (idx === -1) return prev;
+          const row = { ...updated[idx] };
+          row.customFields = { ...(row.customFields || {}), [cmd.columnId]: cmd.nextValue };
+          updated[idx] = row;
+          return updated;
+        });
+        break;
+      }
+      case "PASTE": {
+        setRows((prev) => {
+          const updated = [...prev];
+          for (const edit of cmd.edits) {
+            const idx = updated.findIndex((r) => r.id === edit.rowId);
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], ...edit.nextFields };
+              if (edit.nextFields.matchedQty !== undefined || edit.nextFields.unitPrice !== undefined) {
+                updated[idx].total = updated[idx].matchedQty * updated[idx].unitPrice;
+              }
+            }
+          }
+          return updated;
+        });
+        if (cmd.registryDelta) {
+          if (cmd.registryDelta.projectRegistry) {
+            setUserRegistry((prev) => {
+              const next = { ...prev };
+              for (const [key, val] of Object.entries(cmd.registryDelta!.projectRegistry!)) {
+                next[key] = val.next;
+              }
+              saveProjectRegistry(projectId, next);
+              return next;
+            });
+          }
+          if (cmd.registryDelta.globalRegistry) {
+            setGlobalRegistry((prev) => {
+              const next = { ...prev };
+              for (const [key, val] of Object.entries(cmd.registryDelta!.globalRegistry!)) {
+                next[key] = val.next;
+              }
+              saveGlobalRegistry(next);
+              return next;
+            });
+          }
+        }
+        break;
+      }
+      case "INSERT_ROW": {
+        setRows((prev) => {
+          const updated = [...prev];
+          updated.splice(cmd.insertIndex, 0, { ...cmd.rowData });
+          return updated;
+        });
+        break;
+      }
+      case "DELETE_COLUMN": {
+        setColumnDefs((prev) => prev.filter((col) => col.id !== cmd.columnDef.id));
+        break;
+      }
+      case "ADD_COLUMN": {
+        setColumnDefs((prev) => [...prev, cmd.columnDef]);
+        break;
+      }
+      case "TOGGLE_CELL_LOCK": {
+        setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.nextLocked }));
+        break;
+      }
+      case "MERGE_TAKEOFF_DATA": {
+        setRows((prev) => {
+          const updated = [...prev];
+          for (const ns of cmd.nextRowStates) {
+            const idx = updated.findIndex((r) => r.id === ns.rowId);
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], ...ns.fields };
+              if (ns.fields.rawQuantities) {
+                updated[idx].rawQuantities = ns.fields.rawQuantities.map((rq) => ({ ...rq }));
+              }
+            }
+          }
+          return updated;
+        });
+        setUnmappedTakeoffClassifications(cmd.nextUnmapped);
+        break;
+      }
+    }
+  }, [projectId]);
+
+  // ---------------------------------------------------------------------------
+  // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
+  // ---------------------------------------------------------------------------
+  const applyCommandInverse = useCallback((cmd: WorkbookCommand) => {
+    switch (cmd.type) {
+      case "EDIT_CELL": {
+        setRows((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((r) => r.id === cmd.rowId);
+          if (idx === -1) return prev;
+          const row = { ...updated[idx] };
+          (row as Record<string, unknown>)[cmd.field] = cmd.prevValue;
+          if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
+            row.total = row.matchedQty * row.unitPrice;
+          }
+          updated[idx] = row;
+          if (cmd.cascadeEffects) {
+            for (const effect of cmd.cascadeEffects) {
+              const si = updated.findIndex((r) => r.id === effect.rowId);
+              if (si !== -1) {
+                updated[si] = { ...updated[si], ...effect.prevFields };
+                if (effect.prevFields.matchedQty !== undefined || effect.prevFields.unitPrice !== undefined) {
+                  updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
+                }
+              }
+            }
+          }
+          return updated;
+        });
+        if (cmd.registryDelta) {
+          if (cmd.registryDelta.projectRegistry) {
+            const rd = cmd.registryDelta.projectRegistry;
+            setUserRegistry((prev) => {
+              const next = { ...prev, [rd.key]: rd.prevValue };
+              saveProjectRegistry(projectId, next);
+              return next;
+            });
+          }
+          if (cmd.registryDelta.globalRegistry) {
+            const rd = cmd.registryDelta.globalRegistry;
+            setGlobalRegistry((prev) => {
+              const next = { ...prev, [rd.key]: rd.prevValue };
+              saveGlobalRegistry(next);
+              return next;
+            });
+          }
+        }
+        break;
+      }
+      case "EDIT_CUSTOM_CELL": {
+        setRows((prev) => {
+          const updated = [...prev];
+          const idx = updated.findIndex((r) => r.id === cmd.rowId);
+          if (idx === -1) return prev;
+          const row = { ...updated[idx] };
+          row.customFields = { ...(row.customFields || {}), [cmd.columnId]: cmd.prevValue };
+          updated[idx] = row;
+          return updated;
+        });
+        break;
+      }
+      case "PASTE": {
+        setRows((prev) => {
+          const updated = [...prev];
+          // Iterate in reverse for clean undo ordering
+          for (let i = cmd.edits.length - 1; i >= 0; i--) {
+            const edit = cmd.edits[i];
+            const idx = updated.findIndex((r) => r.id === edit.rowId);
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], ...edit.prevFields };
+              if (edit.prevFields.matchedQty !== undefined || edit.prevFields.unitPrice !== undefined) {
+                updated[idx].total = updated[idx].matchedQty * updated[idx].unitPrice;
+              }
+            }
+          }
+          return updated;
+        });
+        if (cmd.registryDelta) {
+          if (cmd.registryDelta.projectRegistry) {
+            setUserRegistry((prev) => {
+              const next = { ...prev };
+              for (const [key, val] of Object.entries(cmd.registryDelta!.projectRegistry!)) {
+                next[key] = val.prev;
+              }
+              saveProjectRegistry(projectId, next);
+              return next;
+            });
+          }
+          if (cmd.registryDelta.globalRegistry) {
+            setGlobalRegistry((prev) => {
+              const next = { ...prev };
+              for (const [key, val] of Object.entries(cmd.registryDelta!.globalRegistry!)) {
+                next[key] = val.prev;
+              }
+              saveGlobalRegistry(next);
+              return next;
+            });
+          }
+        }
+        break;
+      }
+      case "INSERT_ROW": {
+        setRows((prev) => prev.filter((r) => r.id !== cmd.rowId));
+        break;
+      }
+      case "DELETE_COLUMN": {
+        setColumnDefs((prev) => {
+          const updated = [...prev];
+          updated.splice(cmd.columnIndex, 0, cmd.columnDef);
+          return updated;
+        });
+        setRows((prev) => {
+          return prev.map((r) => {
+            const cellVal = cmd.cellValues[r.id];
+            if (cellVal !== undefined) {
+              return { ...r, customFields: { ...(r.customFields || {}), [cmd.columnDef.id]: cellVal } };
+            }
+            return r;
+          });
+        });
+        break;
+      }
+      case "ADD_COLUMN": {
+        setColumnDefs((prev) => prev.filter((col) => col.id !== cmd.columnDef.id));
+        break;
+      }
+      case "TOGGLE_CELL_LOCK": {
+        setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.prevLocked }));
+        break;
+      }
+      case "MERGE_TAKEOFF_DATA": {
+        setRows((prev) => {
+          const updated = [...prev];
+          for (const ps of cmd.prevRowStates) {
+            const idx = updated.findIndex((r) => r.id === ps.rowId);
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], ...ps.fields };
+              if (ps.fields.rawQuantities) {
+                updated[idx].rawQuantities = ps.fields.rawQuantities.map((rq) => ({ ...rq }));
+              }
+            }
+          }
+          return updated;
+        });
+        setUnmappedTakeoffClassifications(cmd.prevUnmapped);
+        break;
+      }
+    }
+  }, [projectId]);
+
+  // ---------------------------------------------------------------------------
+  // handleUndo — Pop from undo stack and apply inverse
+  // ---------------------------------------------------------------------------
+  const handleUndo = useCallback(() => {
+    const cmd = commandHistory.undo();
+    if (!cmd) return;
+    applyCommandInverse(cmd);
+  }, [commandHistory, applyCommandInverse]);
+
+  // ---------------------------------------------------------------------------
+  // handleRedo — Pop from redo stack and apply forward
+  // ---------------------------------------------------------------------------
+  const handleRedo = useCallback(() => {
+    const cmd = commandHistory.redo();
+    if (!cmd) return;
+    applyCommandForward(cmd);
+  }, [commandHistory, applyCommandForward]);
 
   // ---------------------------------------------------------------------------
   // Context menu outside-click dismiss
@@ -283,8 +594,6 @@ export function useTakeoffWorkbook(
   // Merge takeoff CSV data
   // ---------------------------------------------------------------------------
   const mergeTakeoffData = (parsed: ProcessedTakeoffRow[]) => {
-    pushSnapshotToStack(rows, lockedCells);
-
     const unmappedList: string[] = [];
     parsed.forEach((parsedRow) => {
       if (!parsedRow.itemId) {
@@ -293,37 +602,75 @@ export function useTakeoffWorkbook(
         }
       }
     });
-    setUnmappedTakeoffClassifications(unmappedList);
 
-    setRows((prevRows) => {
-      const updatedRows = prevRows.map((r) => {
-        if (!appendData) {
-          return { ...r, matchedQty: 0, total: 0, classification: "", rawQuantities: [] };
-        }
-        return { ...r };
+    // Capture prevRowStates before mutation
+    const currentRows = rowsRef.current;
+    const prevRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }> = [];
+    for (const r of currentRows) {
+      prevRowStates.push({
+        rowId: r.id,
+        fields: {
+          matchedQty: r.matchedQty,
+          total: r.total,
+          classification: r.classification,
+          rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
+          isMapped: r.isMapped,
+        },
       });
+    }
+    const prevUnmapped = [...unmappedRef.current];
 
-      parsed.forEach((parsedRow) => {
-        if (!parsedRow.itemId) return;
-        const targetIdx = updatedRows.findIndex((r) => r.itemId === parsedRow.itemId);
-        if (targetIdx !== -1) {
-          updatedRows[targetIdx].matchedQty += parsedRow.matchedQty;
-          updatedRows[targetIdx].total = updatedRows[targetIdx].matchedQty * updatedRows[targetIdx].unitPrice;
-          updatedRows[targetIdx].classification = parsedRow.classification;
-          updatedRows[targetIdx].rawQuantities = parsedRow.rawQuantities;
-        }
-      });
-
-      return updatedRows;
+    // Compute next state
+    const updatedRows = currentRows.map((r) => {
+      if (!appendData) {
+        return { ...r, matchedQty: 0, total: 0, classification: "", rawQuantities: [] as { qty: number; uom: string }[] };
+      }
+      return { ...r };
     });
+
+    parsed.forEach((parsedRow) => {
+      if (!parsedRow.itemId) return;
+      const targetIdx = updatedRows.findIndex((r) => r.itemId === parsedRow.itemId);
+      if (targetIdx !== -1) {
+        updatedRows[targetIdx].matchedQty += parsedRow.matchedQty;
+        updatedRows[targetIdx].total = updatedRows[targetIdx].matchedQty * updatedRows[targetIdx].unitPrice;
+        updatedRows[targetIdx].classification = parsedRow.classification;
+        updatedRows[targetIdx].rawQuantities = parsedRow.rawQuantities;
+      }
+    });
+
+    // Capture nextRowStates after mutation
+    const nextRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }> = [];
+    for (const r of updatedRows) {
+      nextRowStates.push({
+        rowId: r.id,
+        fields: {
+          matchedQty: r.matchedQty,
+          total: r.total,
+          classification: r.classification,
+          rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
+          isMapped: r.isMapped,
+        },
+      });
+    }
+
+    // pushCommand BEFORE state setters (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "MERGE_TAKEOFF_DATA",
+      prevRowStates,
+      nextRowStates,
+      prevUnmapped,
+      nextUnmapped: unmappedList,
+    });
+
+    setUnmappedTakeoffClassifications(unmappedList);
+    setRows(updatedRows);
   };
 
   // ---------------------------------------------------------------------------
   // Insert manual row
   // ---------------------------------------------------------------------------
   const insertManualRow = (direction: "above" | "below", targetIndex: number) => {
-    pushSnapshotToStack(rows, lockedCells);
-    const updated = [...rows];
     const newRow: ProcessedTakeoffRow = {
       id: `manual-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       classification: "MANUAL ENTRY",
@@ -340,6 +687,16 @@ export function useTakeoffWorkbook(
       customFields: {},
     };
     const insertIdx = direction === "above" ? targetIndex : targetIndex + 1;
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "INSERT_ROW",
+      rowId: newRow.id,
+      insertIndex: insertIdx,
+      rowData: { ...newRow },
+    });
+
+    const updated = [...rows];
     updated.splice(insertIdx, 0, newRow);
     setRows(updated);
   };
@@ -348,8 +705,17 @@ export function useTakeoffWorkbook(
   // Toggle cell lock
   // ---------------------------------------------------------------------------
   const handleToggleCellLock = (rowId: string, columnId: string) => {
-    pushSnapshotToStack(rows, lockedCells);
     const cellKey = `${rowId}::${columnId}`;
+    const prevLocked = !!lockedCells[cellKey];
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "TOGGLE_CELL_LOCK",
+      cellKey,
+      prevLocked,
+      nextLocked: !prevLocked,
+    });
+
     setLockedCells((prev) => ({ ...prev, [cellKey]: !prev[cellKey] }));
     setContextMenu({ visible: false, x: 0, y: 0, rowIndex: -1, columnId: "" });
   };
@@ -511,7 +877,6 @@ export function useTakeoffWorkbook(
     if (pastedText.includes("\t") || pastedText.includes("\n") || pastedText.includes("\r")) {
       e.preventDefault();
 
-      pushSnapshotToStack(rows, lockedCells);
       const columnsList: (keyof ProcessedTakeoffRow)[] = ["itemId", "description", "matchedQty", "unitPrice"];
       const fieldTypes: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
       const startColIdx = fieldTypes.indexOf(type);
@@ -529,6 +894,51 @@ export function useTakeoffWorkbook(
       let currentGlobalRegistry = { ...globalRegistry };
       let globalRegistryChanged = false;
 
+      // Capture prevFields for each affected row BEFORE mutations
+      const pasteEdits: Array<{
+        rowId: string;
+        field: keyof ProcessedTakeoffRow;
+        prevFields: Partial<ProcessedTakeoffRow>;
+        nextFields: Partial<ProcessedTakeoffRow>;
+      }> = [];
+      const prevRegistrySnapshot: Record<string, { prev: string; next: string }> = {};
+      const prevGlobalRegistrySnapshot: Record<string, { prev: string; next: string }> = {};
+
+      // Pre-capture row snapshots for all rows that will be affected
+      const rowSnapshotsBefore: Record<number, Partial<ProcessedTakeoffRow>> = {};
+      for (let i = 0; i < lines.length; i++) {
+        const targetRowIdx = startRowIdx + i;
+        if (targetRowIdx >= updated.length) break;
+        const r = updated[targetRowIdx];
+        rowSnapshotsBefore[targetRowIdx] = {
+          itemId: r.itemId,
+          description: r.description,
+          matchedQty: r.matchedQty,
+          unitPrice: r.unitPrice,
+          total: r.total,
+          isMapped: r.isMapped,
+          procoreParentCode: r.procoreParentCode,
+          uom: r.uom,
+          costType: r.costType,
+        };
+      }
+      // Also snapshot all rows for cascade captures (itemId edits cascade to siblings)
+      const allRowSnapshotsBefore: Record<number, Partial<ProcessedTakeoffRow>> = {};
+      for (let i = 0; i < updated.length; i++) {
+        const r = updated[i];
+        allRowSnapshotsBefore[i] = {
+          itemId: r.itemId,
+          description: r.description,
+          matchedQty: r.matchedQty,
+          unitPrice: r.unitPrice,
+          total: r.total,
+          isMapped: r.isMapped,
+          procoreParentCode: r.procoreParentCode,
+          uom: r.uom,
+          costType: r.costType,
+        };
+      }
+
       for (let i = 0; i < lines.length; i++) {
         const targetRowIdx = startRowIdx + i;
         if (targetRowIdx >= updated.length) break;
@@ -545,17 +955,29 @@ export function useTakeoffWorkbook(
 
           didModify = true;
 
+          // Capture registry key prev values before edit
+          const row = updated[targetRowIdx];
+          const classification = row?.classification;
+          if (field === "itemId" && classification && classification !== "MANUAL ENTRY") {
+            if (!prevRegistrySnapshot[classification]) {
+              prevRegistrySnapshot[classification] = { prev: currentRegistry[classification] || "", next: "" };
+            }
+            if (!prevGlobalRegistrySnapshot[classification]) {
+              prevGlobalRegistrySnapshot[classification] = { prev: currentGlobalRegistry[classification] || "", next: "" };
+            }
+          }
+
           const resultRegistry = applyCellEditDirect(updated, targetRowIdx, field, rawValue, currentRegistry);
           if (resultRegistry) {
             currentRegistry = resultRegistry;
             registryChanged = true;
 
             if (field === "itemId") {
-              const row = updated[targetRowIdx];
-              if (row) {
+              const r = updated[targetRowIdx];
+              if (r) {
                 currentGlobalRegistry = {
                   ...currentGlobalRegistry,
-                  [row.classification]: String(rawValue).trim(),
+                  [r.classification]: String(rawValue).trim(),
                 };
                 globalRegistryChanged = true;
               }
@@ -564,7 +986,80 @@ export function useTakeoffWorkbook(
         }
       }
 
+      // Capture nextFields for all affected rows after mutations
       if (didModify) {
+        // Build edits array from all rows that changed
+        for (let i = 0; i < updated.length; i++) {
+          const before = allRowSnapshotsBefore[i];
+          if (!before) continue;
+          const after = updated[i];
+          // Check if this row was modified
+          if (
+            before.itemId !== after.itemId ||
+            before.description !== after.description ||
+            before.matchedQty !== after.matchedQty ||
+            before.unitPrice !== after.unitPrice ||
+            before.total !== after.total ||
+            before.isMapped !== after.isMapped ||
+            before.procoreParentCode !== after.procoreParentCode ||
+            before.uom !== after.uom ||
+            before.costType !== after.costType
+          ) {
+            // Determine which field to associate — use the first matching direct paste field
+            const directLine = i - startRowIdx;
+            let pasteField: keyof ProcessedTakeoffRow = "itemId";
+            if (directLine >= 0 && directLine < lines.length) {
+              const cells = lines[directLine].split("\t");
+              if (cells.length > 0 && startColIdx < columnsList.length) {
+                pasteField = columnsList[startColIdx];
+              }
+            }
+
+            pasteEdits.push({
+              rowId: after.id,
+              field: pasteField,
+              prevFields: { ...before },
+              nextFields: {
+                itemId: after.itemId,
+                description: after.description,
+                matchedQty: after.matchedQty,
+                unitPrice: after.unitPrice,
+                total: after.total,
+                isMapped: after.isMapped,
+                procoreParentCode: after.procoreParentCode,
+                uom: after.uom,
+                costType: after.costType,
+              },
+            });
+          }
+        }
+
+        // Finalize registry delta next values
+        for (const key of Object.keys(prevRegistrySnapshot)) {
+          prevRegistrySnapshot[key].next = currentRegistry[key] || "";
+        }
+        for (const key of Object.keys(prevGlobalRegistrySnapshot)) {
+          prevGlobalRegistrySnapshot[key].next = currentGlobalRegistry[key] || "";
+        }
+
+        const registryDelta: {
+          projectRegistry?: Record<string, { prev: string; next: string }>;
+          globalRegistry?: Record<string, { prev: string; next: string }>;
+        } = {};
+        if (registryChanged) {
+          registryDelta.projectRegistry = prevRegistrySnapshot;
+        }
+        if (globalRegistryChanged) {
+          registryDelta.globalRegistry = prevGlobalRegistrySnapshot;
+        }
+
+        // pushCommand BEFORE state setters (AGENTS.md guardrail)
+        commandHistory.pushCommand({
+          type: "PASTE",
+          edits: pasteEdits,
+          registryDelta: Object.keys(registryDelta).length > 0 ? registryDelta : undefined,
+        });
+
         if (registryChanged) {
           setUserRegistry(currentRegistry);
           saveProjectRegistry(projectId, currentRegistry);
@@ -579,10 +1074,9 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
-  // Cell edit handler
+  // Cell edit handler — PURE STATE MUTATOR (no history push)
   // ---------------------------------------------------------------------------
   const handleCellEdit = (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => {
-    pushSnapshotToStack(rows, lockedCells);
     const updated = [...rows];
     const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
 
@@ -604,12 +1098,171 @@ export function useTakeoffWorkbook(
     }
     setRows(updated);
   };
+  // ---------------------------------------------------------------------------
+  // commitCellEdit — Build command + push history on blur or direct commit
+  //
+  // C1 FIX (enterprise): applyCellEditDirect cascades three field types to
+  // sibling rows sharing the same classification:
+  //   - itemId:     9 fields (itemId, description, procoreParentCode, unitPrice,
+  //                 uom, costType, matchedQty, total, isMapped)
+  //   - description: 1 field (description)
+  //   - unitPrice:  2 fields (unitPrice, total)
+  //
+  // The cascade may or may not have already been applied to rowsRef.current
+  // depending on the call path (button = pre-cascade, blur = post-cascade).
+  //
+  // To make cascade capture TIMING-INDEPENDENT, we simulate the cascade in
+  // BOTH directions by running applyCellEditDirect on cloned row arrays:
+  //   1. Clone rows → apply prevValue → capture sibling state = prevFields
+  //   2. Clone rows → apply nextValue → capture sibling state = nextFields
+  //
+  // This produces correct prev/next sibling snapshots regardless of whether
+  // the actual mutation has already happened in React state.
+  // ---------------------------------------------------------------------------
+
+
+  const commitCellEdit = useCallback((
+    rowId: string,
+    field: keyof ProcessedTakeoffRow,
+    prevValue: string | number | boolean,
+    nextValue: string | number | boolean
+  ) => {
+    const currentRows = rowsRef.current;
+    const idx = currentRows.findIndex((r) => r.id === rowId);
+    if (idx === -1) return;
+
+    const row = currentRows[idx];
+    const classification = row.classification;
+
+    // Build cascade effects for fields that propagate to sibling rows
+    let cascadeEffects: Array<{
+      rowId: string;
+      prevFields: Partial<ProcessedTakeoffRow>;
+      nextFields: Partial<ProcessedTakeoffRow>;
+    }> | undefined;
+
+    if (CASCADE_FIELDS.has(field) && classification && classification !== "MANUAL ENTRY") {
+      // Deep-clone the rows for simulation. We need two clones:
+      // one to simulate the cascade with prevValue, one with nextValue.
+      const cloneRows = () => currentRows.map((r) => ({
+        ...r,
+        rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
+        customFields: { ...(r.customFields || {}) },
+      }));
+
+      const simRegistry = { ...userRegistryRef.current };
+
+      // Simulate cascade with prevValue → gives us the accurate "before" state
+      const simPrev = cloneRows();
+      applyCellEditDirect(simPrev, idx, field, prevValue as string | number, { ...simRegistry });
+
+      // Simulate cascade with nextValue → gives us the accurate "after" state
+      const simNext = cloneRows();
+      applyCellEditDirect(simNext, idx, field, nextValue as string | number, { ...simRegistry });
+
+      cascadeEffects = [];
+      for (let i = 0; i < currentRows.length; i++) {
+        if (i !== idx && currentRows[i].classification === classification) {
+          const prevSibling = simPrev[i];
+          const nextSibling = simNext[i];
+
+          // Scope captured fields to what the specific cascade actually touches.
+          // This keeps command payloads minimal while ensuring full undo/redo.
+          let prevCapture: Partial<ProcessedTakeoffRow>;
+          let nextCapture: Partial<ProcessedTakeoffRow>;
+
+          if (field === "itemId") {
+            // itemId cascade touches: itemId, description, procoreParentCode,
+            // unitPrice, uom, costType, matchedQty, total, isMapped
+            prevCapture = {
+              itemId: prevSibling.itemId,
+              description: prevSibling.description,
+              procoreParentCode: prevSibling.procoreParentCode,
+              unitPrice: prevSibling.unitPrice,
+              uom: prevSibling.uom,
+              costType: prevSibling.costType,
+              matchedQty: prevSibling.matchedQty,
+              total: prevSibling.total,
+              isMapped: prevSibling.isMapped,
+            };
+            nextCapture = {
+              itemId: nextSibling.itemId,
+              description: nextSibling.description,
+              procoreParentCode: nextSibling.procoreParentCode,
+              unitPrice: nextSibling.unitPrice,
+              uom: nextSibling.uom,
+              costType: nextSibling.costType,
+              matchedQty: nextSibling.matchedQty,
+              total: nextSibling.total,
+              isMapped: nextSibling.isMapped,
+            };
+          } else if (field === "description") {
+            // description cascade touches: description only
+            prevCapture = { description: prevSibling.description };
+            nextCapture = { description: nextSibling.description };
+          } else {
+            // unitPrice cascade touches: unitPrice, total
+            prevCapture = {
+              unitPrice: prevSibling.unitPrice,
+              total: prevSibling.total,
+            };
+            nextCapture = {
+              unitPrice: nextSibling.unitPrice,
+              total: nextSibling.total,
+            };
+          }
+
+          cascadeEffects.push({
+            rowId: currentRows[i].id,
+            prevFields: prevCapture,
+            nextFields: nextCapture,
+          });
+        }
+      }
+      if (cascadeEffects.length === 0) cascadeEffects = undefined;
+    }
+
+    // Build registry delta (only itemId edits write to registries)
+    let registryDelta: {
+      projectRegistry?: { key: string; prevValue: string; nextValue: string };
+      globalRegistry?: { key: string; prevValue: string; nextValue: string };
+    } | undefined;
+
+    if (field === "itemId" && classification && classification !== "MANUAL ENTRY") {
+      const curUserReg = userRegistryRef.current;
+      const curGlobalReg = globalRegistryRef.current;
+      registryDelta = {
+        projectRegistry: {
+          key: classification,
+          prevValue: String(prevValue).trim() || curUserReg[classification] || "",
+          nextValue: String(nextValue).trim(),
+        },
+        globalRegistry: {
+          key: classification,
+          prevValue: String(prevValue).trim() || curGlobalReg[classification] || "",
+          nextValue: String(nextValue).trim(),
+        },
+      };
+    }
+
+    // pushCommand (AGENTS.md guardrail: push before mutation for new edits;
+    // here handleCellEdit already applied the edit on each keystroke,
+    // so we push the full delta for undo/redo)
+    commandHistory.pushCommand({
+      type: "EDIT_CELL",
+      rowId,
+      field,
+      prevValue,
+      nextValue,
+      cascadeEffects,
+      registryDelta,
+    });
+  }, [commandHistory]);
 
   // ---------------------------------------------------------------------------
-  // Custom cell edit
+  // Custom cell edit — PURE STATE MUTATOR (no history push)
   // ---------------------------------------------------------------------------
   const handleCustomCellEdit = (rowIndex: number, columnId: string, value: string) => {
-    pushSnapshotToStack(rows, lockedCells);
     setRows((prev) => {
       const updated = [...prev];
       const row = { ...updated[rowIndex] };
@@ -618,6 +1271,25 @@ export function useTakeoffWorkbook(
       return updated;
     });
   };
+
+  // ---------------------------------------------------------------------------
+  // commitCustomCellEdit — Build command + push history on blur
+  // ---------------------------------------------------------------------------
+  const commitCustomCellEdit = useCallback((
+    rowId: string,
+    columnId: string,
+    prevValue: string,
+    nextValue: string
+  ) => {
+    // pushCommand (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "EDIT_CUSTOM_CELL",
+      rowId,
+      columnId,
+      prevValue,
+      nextValue,
+    });
+  }, [commandHistory]);
 
   // ---------------------------------------------------------------------------
   // Custom column keyboard navigation
@@ -641,14 +1313,42 @@ export function useTakeoffWorkbook(
   // Column management
   // ---------------------------------------------------------------------------
   const handleAddCustomColumn = () => {
-    pushSnapshotToStack(rows, lockedCells);
     const newColId = `custom-${Date.now()}`;
     const newColDef: ColumnDefinition = { id: newColId, header: "NEW COLUMN", type: "custom" };
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "ADD_COLUMN",
+      columnDef: newColDef,
+    });
+
     setColumnDefs((prev) => [...prev, newColDef]);
   };
 
   const handleDeleteColumn = (colId: string) => {
-    pushSnapshotToStack(rows, lockedCells);
+    const currentColDefs = columnDefsRef.current;
+    const colIndex = currentColDefs.findIndex((col) => col.id === colId);
+    if (colIndex === -1) return;
+    const colDef = currentColDefs[colIndex];
+
+    // Capture all cell values for this column across rows
+    const cellValues: Record<string, string | number> = {};
+    const currentRows = rowsRef.current;
+    for (const r of currentRows) {
+      const val = r.customFields?.[colId];
+      if (val !== undefined) {
+        cellValues[r.id] = val;
+      }
+    }
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "DELETE_COLUMN",
+      columnDef: colDef,
+      columnIndex: colIndex,
+      cellValues,
+    });
+
     setColumnDefs((prev) => prev.filter((col) => col.id !== colId));
   };
 
@@ -797,6 +1497,17 @@ export function useTakeoffWorkbook(
                       }`}
                       value={row.itemId}
                       onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
+                      onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "itemId", initialValue: row.itemId }; }}
+                      onBlur={() => {
+                        const fc = focusedCellRef.current;
+                        if (fc && fc.rowId === row.id && fc.field === "itemId") {
+                          const currentVal = row.itemId;
+                          if (currentVal !== fc.initialValue) {
+                            commitCellEdit(fc.rowId, "itemId" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                          }
+                          focusedCellRef.current = null;
+                        }
+                      }}
                       onKeyDown={(e) => handleKeyDown(e, index, "code")}
                       onPaste={(e) => handlePaste(e, index, "code")}
                       onContextMenu={(e) => {
@@ -815,7 +1526,10 @@ export function useTakeoffWorkbook(
                               key={sugg.itemId}
                               type="button"
                               disabled={isCellHardLocked}
-                              onClick={() => handleCellEdit(index, "itemId", sugg.itemId)}
+                              onClick={() => {
+                                commitCellEdit(row.id, "itemId", row.itemId, sugg.itemId);
+                                handleCellEdit(index, "itemId", sugg.itemId);
+                              }}
                               title={sugg.description}
                               className="bg-slate-100 hover:bg-amber-50 dark:bg-slate-800 dark:hover:bg-amber-950/20 text-amber-700 dark:text-amber-400 border border-grid-border hover:border-amber-500/50 rounded px-2 py-0.5 text-[10px] font-sans font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -849,6 +1563,17 @@ export function useTakeoffWorkbook(
                     }`}
                     value={row.description}
                     onChange={(e) => handleCellEdit(index, "description", e.target.value)}
+                    onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "description", initialValue: row.description }; }}
+                    onBlur={() => {
+                      const fc = focusedCellRef.current;
+                      if (fc && fc.rowId === row.id && fc.field === "description") {
+                        const currentVal = row.description;
+                        if (currentVal !== fc.initialValue) {
+                          commitCellEdit(fc.rowId, "description" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                        }
+                        focusedCellRef.current = null;
+                      }
+                    }}
                     onKeyDown={(e) => handleKeyDown(e, index, "desc")}
                     onPaste={(e) => handlePaste(e, index, "desc")}
                     onContextMenu={(e) => {
@@ -879,6 +1604,17 @@ export function useTakeoffWorkbook(
                     }`}
                     value={row.matchedQty}
                     onChange={(e) => handleCellEdit(index, "matchedQty", e.target.value)}
+                    onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "matchedQty", initialValue: row.matchedQty }; }}
+                    onBlur={() => {
+                      const fc = focusedCellRef.current;
+                      if (fc && fc.rowId === row.id && fc.field === "matchedQty") {
+                        const currentVal = row.matchedQty;
+                        if (currentVal !== fc.initialValue) {
+                          commitCellEdit(fc.rowId, "matchedQty" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                        }
+                        focusedCellRef.current = null;
+                      }
+                    }}
                     onKeyDown={(e) => handleKeyDown(e, index, "qty")}
                     onPaste={(e) => handlePaste(e, index, "qty")}
                     onContextMenu={(e) => {
@@ -919,6 +1655,17 @@ export function useTakeoffWorkbook(
                     }`}
                     value={row.unitPrice}
                     onChange={(e) => handleCellEdit(index, "unitPrice", e.target.value)}
+                    onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "unitPrice", initialValue: row.unitPrice }; }}
+                    onBlur={() => {
+                      const fc = focusedCellRef.current;
+                      if (fc && fc.rowId === row.id && fc.field === "unitPrice") {
+                        const currentVal = row.unitPrice;
+                        if (currentVal !== fc.initialValue) {
+                          commitCellEdit(fc.rowId, "unitPrice" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                        }
+                        focusedCellRef.current = null;
+                      }
+                    }}
                     onKeyDown={(e) => handleKeyDown(e, index, "price")}
                     onPaste={(e) => handlePaste(e, index, "price")}
                     onContextMenu={(e) => {
@@ -994,6 +1741,17 @@ export function useTakeoffWorkbook(
                 }`}
                 value={val}
                 onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
+                onFocus={() => { focusedCustomCellRef.current = { rowId: row.id, columnId: def.id, initialValue: String(val) }; }}
+                onBlur={() => {
+                  const fc = focusedCustomCellRef.current;
+                  if (fc && fc.rowId === row.id && fc.columnId === def.id) {
+                    const currentVal = String(row.customFields?.[def.id] ?? "");
+                    if (currentVal !== fc.initialValue) {
+                      commitCustomCellEdit(fc.rowId, fc.columnId, fc.initialValue, currentVal);
+                    }
+                    focusedCustomCellRef.current = null;
+                  }
+                }}
                 onKeyDown={(e) => handleCustomKeyDown(e, index, def.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1008,7 +1766,7 @@ export function useTakeoffWorkbook(
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, lockedCells, unitCount, squareFootage, userRegistry, globalRegistry]);
+  }, [columnDefs, lockedCells, unitCount, squareFootage, userRegistry, globalRegistry, commitCellEdit, commitCustomCellEdit]);
 
   // Instantiate TanStack table (AMENDMENT GAP-4: moved inside hook)
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -1030,12 +1788,17 @@ export function useTakeoffWorkbook(
     contextMenu,
     setContextMenu,
     unmappedTakeoffClassifications,
-    historyStack,
+    canUndo: commandHistory.canUndo,
+    canRedo: commandHistory.canRedo,
+    undoStackSize: commandHistory.undoStackSize,
+    redoStackSize: commandHistory.redoStackSize,
     isExportingExcel,
     exportError,
     setExportError,
     handleCellEdit,
+    commitCellEdit,
     handleCustomCellEdit,
+    commitCustomCellEdit,
     handleKeyDown,
     handleCustomKeyDown,
     handlePaste,
@@ -1051,5 +1814,6 @@ export function useTakeoffWorkbook(
     handleExportProcore,
     handleExportExcelWorkbook,
     handleUndo,
+    handleRedo,
   };
 }

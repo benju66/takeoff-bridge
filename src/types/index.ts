@@ -54,12 +54,6 @@ export interface ContextMenuState {
   columnId: string;
 }
 
-/** Undo history snapshot containing row items and cell lock state */
-export interface WorkbookSnapshot {
-  items: ProcessedTakeoffRow[];
-  locks: Record<string, boolean>;
-}
-
 /** Divisional budget aggregation for analytics display */
 export interface DivisionAggregation {
   code: string;

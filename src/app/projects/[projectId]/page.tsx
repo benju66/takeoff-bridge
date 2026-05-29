@@ -67,7 +67,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
     insertManualRow, handleToggleCellLock,
     handleFileUpload, handleDrag, handleDrop,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
-    handleUndo,
+    handleUndo, handleRedo,
+    canUndo, canRedo, undoStackSize, redoStackSize,
   } = workbook;
 
   // Step 4: Takeoff Summary
@@ -274,7 +275,10 @@ export default function ProjectWorkspace({ params }: PageProps) {
           contextMenu={contextMenu}
           setContextMenu={setContextMenu}
           unmappedTakeoffClassifications={unmappedTakeoffClassifications}
-          historyStackLength={workbook.historyStack.length}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          undoStackSize={undoStackSize}
+          redoStackSize={redoStackSize}
           handleAddCustomColumn={handleAddCustomColumn}
           handleDeleteColumn={handleDeleteColumn}
           handleRenameColumn={handleRenameColumn}
@@ -282,6 +286,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           handleDrag={handleDrag}
           handleDrop={handleDrop}
           handleUndo={handleUndo}
+          handleRedo={handleRedo}
           takeoffSummary={takeoffSummary}
           divisionBreakdown={divisionBreakdown}
           costTypeBreakdown={costTypeBreakdown}

@@ -18,7 +18,7 @@
 ## Structural Manipulation Grid Parameters
 * Manual Structural Grid Modifications: AI agents are permitted to implement features that mutate, insert, delete, or rearrange row items in estimate data sheets, provided those operations are driven explicitly by context menu overrides or clear user action events.
 * Data Interface Integrity Compliance: When appending manual items, the agent must verify that all non-nullable properties within core TypeScript models (such as `ProcessedTakeoffRow`) are initialized with conformant default values to eliminate data format compilation drift.
-* Compounding History Preservation: Agents must never execute a state mutation or row list change without calling the local application history tracking hook (`pushSnapshotToStack`) immediately prior to the execution boundary.
+* Compounding History Preservation: Agents must never execute a state mutation or row list change without calling `commandHistory.pushCommand()` with a properly constructed `WorkbookCommand` payload (defined in `src/hooks/useCommandHistory.ts`) immediately prior to the execution boundary. Each command must capture sufficient inverse data (prev/next values, cascade effects, registry deltas) to enable full undo/redo fidelity.
 
 ## Data Persistence Boundaries
 * **Single Gateway**: All Supabase database access MUST route through `src/lib/db.ts`. No hook, page, or component may import the Supabase client (`src/lib/supabase.ts`) directly.

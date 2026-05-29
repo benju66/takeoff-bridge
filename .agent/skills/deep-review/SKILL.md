@@ -4,12 +4,12 @@
 * Review **AGENTS.md**, **CLAUDE.md**, and the current Implementation Plan[cite: 2].
 * Identify the technical domain of the targeted modifications (e.g., **PapaParse** ingest, **TanStack Table** state, **ExcelJS** mutation, **Procore** grouping).
 * Explicitly identify bugs, logical gaps, unhandled edge cases, and layout regressions before proceeding[cite: 2].
-* Update the plan to mitigate broken user entry flows, lost snapshot states, or incorrect math equations[cite: 2].
+* Update the plan to mitigate broken user entry flows, lost command history states, or incorrect math equations[cite: 2].
 
 ### Step 2: Secondary Sweep & Guardrail Compliance
 * Conduct a structural code sweep prioritizing performance and strict state safety[cite: 2].
 * If editing grid inputs, spreadsheet components, or lookup pipelines, explicitly verify compliance with:
-  * **pushSnapshotToStack**: Enforce calling the historical ledger hook immediately before any layout array or state mutations to protect multi-stage undo rollbacks.
+  * **commandHistory.pushCommand()**: Enforce calling `commandHistory.pushCommand()` with a properly constructed `WorkbookCommand` payload (defined in `src/hooks/useCommandHistory.ts`) immediately before any layout array or state mutations. Each command must capture sufficient inverse data (prev/next values, cascade effects via dual-simulation, registry deltas) to enable full undo/redo fidelity.
   * **Excel-like Controls**: Intercept and bind keyboard events (**ArrowUp**, **ArrowDown**, **Enter**, **Tab**) to explicitly manage focus bounds and prevent native browser scroll overrides.
   * **Relational Fallbacks**: Ensure lookup resolution queries follow the established persistence chain: project-isolated registry (`project_registries` table via `getProjectRegistry`) → global corporate registry (`global_registry` table via `getGlobalRegistry`) → static `ESTIMATE_ITEMS_MASTER` constants. All access must go through `db.ts` async functions.
   * **Parent Code Remapping**: Confirm that fine-grained suffix codes (e.g., `04-0000.001`) combine into clean, valid parent cost codes (e.g., `4-40000.000`) during **Procore Budget** serialization.

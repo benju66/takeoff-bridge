@@ -18,13 +18,13 @@ Trace the complete chronological flow of data for this feature from entry to out
 Conduct a strict structural isolation check for the targeted estimation workflows.
 * Verify relational containerization boundaries: Confirm that target estimate states are uniquely isolated using explicit **projectId** parameters to prevent global scope contamination.
 * Enforce structural grid safeguards: Validate that manual cell entries or list adjustments conform to active **lockedCells** markers and strict **ProcessedTakeoffRow** interface type contracts.
-* Identify memory mutation gates: Verify that list changes or batch spreadsheet modifications trigger the **pushSnapshotToStack** hook right at the execution boundary.
+* Identify memory mutation gates: Verify that list changes or batch spreadsheet modifications trigger `commandHistory.pushCommand()` with a properly constructed `WorkbookCommand` payload (defined in `src/hooks/useCommandHistory.ts`) right at the execution boundary.
 
 **Step 4: Pattern Alignment & Constraint Matching**
 Review **AGENTS.md** alongside all target sub-skills within the repository to extract required layout conventions.
 * Extract reusable patterns: Enforce the use of spreadsheet focus handlers (**ArrowUp**, **ArrowDown**, **Enter**, **Tab**), high-performance cell grids, or custom tab-delimited clipboard text processors.
 * Check for compounding overhead rules: Ensure that final price summary ledgers calculate **General Liability Insurance** factors at exactly **1%** and **Contractor Fees** at exactly **5%**.
-* Scan for forbidden anti-patterns: Flag and block raw numerical mutations bypassing the timeline undo array stack, untyped currency variables, missing client browser checks, or unmapped child suffix line items bypassing parent cost-code grouping filters.
+* Scan for forbidden anti-patterns: Flag and block raw numerical mutations bypassing the `commandHistory.pushCommand()` command pattern, untyped currency variables, missing client browser checks, or unmapped child suffix line items bypassing parent cost-code grouping filters.
 
 **Step 5: Contextual Summary & Blast Radius Profile**
 Provide a concise, scannable technical summary of the system's current data flow for this scope.
