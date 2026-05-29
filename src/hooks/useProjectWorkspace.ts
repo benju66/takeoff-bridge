@@ -23,11 +23,17 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
   // Load project metadata on mount
   useEffect(() => {
     if (!projectId) return;
-    const meta = getProject(projectId);
-    Promise.resolve().then(() => {
-      setProject(meta);
-      setIsLoaded(true);
-    });
+    let cancelled = false;
+
+    (async () => {
+      const meta = await getProject(projectId);
+      if (!cancelled) {
+        setProject(meta);
+        setIsLoaded(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [projectId]);
 
   // Dynamic duration calculation

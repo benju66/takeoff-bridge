@@ -1,21 +1,26 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ProcessedTakeoffRow } from "@/types";
-import { ProjectEstimate } from "@/types/db";
-import { saveProjectEstimate } from "@/lib/db";
+import { saveProjectEstimate, saveEstimateLineItems } from "@/lib/db";
 import { TakeoffSummary } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
-// useEstimatePersistence — Auto-persist ProjectEstimate to localStorage
+// useEstimatePersistence — Auto-persist ProjectEstimate to Supabase
 // ---------------------------------------------------------------------------
 
 /**
- * Central orchestration of the saveProjectEstimate auto-persist useEffect.
- * Consumes outputs from all domain hooks and writes the unified ProjectEstimate.
+ * Central orchestration of the auto-persist pipeline.
+ * Consumes outputs from all domain hooks and writes to Supabase:
  *
- * NOTE: columnDefs and lockedCells are persisted separately inside useTakeoffWorkbook
- * via their own localStorage.setItem calls. This hook only handles the ProjectEstimate shape.
+ * Operation A: UPSERT project_estimates (totals/markups — single row)
+ * Operation B: RPC save_estimate_line_items (atomic DELETE + INSERT)
+ *
+ * Both operations are debounced (1500ms) with AbortController to cancel
+ * stale in-flight requests when new edits arrive.
+ *
+ * NOTE: columnDefs and lockedCells are persisted separately inside
+ * useTakeoffWorkbook via their own debounced Supabase calls.
  */
 export function useEstimatePersistence(
   projectId: string,
@@ -35,24 +40,49 @@ export function useEstimatePersistence(
   const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
   const siteOpsRatesString = JSON.stringify(siteOpsRates);
 
+  // Debounce timer ref
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Active save flag to prevent overlapping saves
+  const isSavingRef = useRef(false);
+
   useEffect(() => {
     if (!isLoaded || !projectId) return;
 
-    const estimate: ProjectEstimate = {
-      projectId,
-      subtotal: takeoffSummary.subtotal,
-      generalLiability: takeoffSummary.generalLiability,
-      fee: takeoffSummary.contractorFee,
-      totalCost: takeoffSummary.totalEstimatedCost,
-      items: rows,
-      generalConditionsTotal: totalGCs,
-      gcUtilization,
-      gcEquipmentOverrides,
-      siteOperationsTotal,
-      siteOpsQuantities,
-      siteOpsRates,
+    // Clear previous debounce timer
+    if (timerRef.current) clearTimeout(timerRef.current);
+
+    timerRef.current = setTimeout(async () => {
+      // Skip if a previous save is still in-flight
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+
+      try {
+        // Operation A: Upsert totals/markups (no items)
+        // Operation B: Atomic RPC line item save
+        await Promise.all([
+          saveProjectEstimate({
+            projectId,
+            subtotal: takeoffSummary.subtotal,
+            generalLiability: takeoffSummary.generalLiability,
+            fee: takeoffSummary.contractorFee,
+            totalCost: takeoffSummary.totalEstimatedCost,
+            generalConditionsTotal: totalGCs,
+            gcUtilization,
+            gcEquipmentOverrides,
+            siteOperationsTotal,
+            siteOpsQuantities,
+            siteOpsRates,
+          }),
+          saveEstimateLineItems(projectId, rows),
+        ]);
+      } finally {
+        isSavingRef.current = false;
+      }
+    }, 1500);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
-    saveProjectEstimate(estimate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     rowsString,

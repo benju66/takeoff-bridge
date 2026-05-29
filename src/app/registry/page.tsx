@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { DIVISION_NAMES } from "@/lib/constants";
+import { getGlobalRegistry, saveGlobalRegistry, deleteGlobalRegistry } from "@/lib/db";
 
 
 interface RegistryRow {
@@ -31,37 +32,33 @@ export default function GlobalRegistryDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load registry from local storage on client load
+  // Load registry from Supabase on client load
   useEffect(() => {
-    const savedGlobalRegistry = localStorage.getItem("takeoff_global_user_registry");
-    if (savedGlobalRegistry) {
-      try {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setRegistry(JSON.parse(savedGlobalRegistry));
-      } catch (e) {
-        console.error("Failed to parse takeoff_global_user_registry", e);
-        setRegistry({});
+    let cancelled = false;
+    (async () => {
+      const loaded = await getGlobalRegistry();
+      if (!cancelled) {
+        setRegistry(loaded);
+        setIsLoaded(true);
       }
-    } else {
-      setRegistry({});
-    }
-    setIsLoaded(true);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  const handleDeleteRule = (classificationToDelete: string) => {
+  const handleDeleteRule = async (classificationToDelete: string) => {
     if (!registry) return;
     
     const updatedRegistry = { ...registry };
     delete updatedRegistry[classificationToDelete];
     
     setRegistry(updatedRegistry);
-    localStorage.setItem("takeoff_global_user_registry", JSON.stringify(updatedRegistry));
+    await saveGlobalRegistry(updatedRegistry);
   };
 
-  const handleFlushCache = () => {
+  const handleFlushCache = async () => {
     if (window.confirm("CRITICAL ADMIN OVERRIDE:\nAre you sure you want to permanently flush the entire global corporate registry cache?\nAll harvested lookup mappings will be permanently erased. This cannot be undone.")) {
       setRegistry({});
-      localStorage.removeItem("takeoff_global_user_registry");
+      await deleteGlobalRegistry();
     }
   };
 

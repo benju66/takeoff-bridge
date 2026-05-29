@@ -10,7 +10,13 @@
 2. **Relational Lookup Utility**: Cross-references Togal string names against `DeterministicMappingRegistry`.
 3. **UOM Filter Loop**: Scans wide-row dimensions to pull out the metric matching the `targetUom` constraint.
 4. **Human-In-The-Loop UI**: Halts processing on missing keys to display an editable data grid for manual assignments.
-5. **Dynamic Dictionary Cache**: Persists newly mapped classification-to-suffix pairs in browser `localStorage` (key: `"takeoff_user_registry"`) to preserve mapping definitions locally across page reloads without database roundtrips.
+5. **Supabase Persistence Layer**: All application state is persisted to a cloud PostgreSQL database via Supabase. The data access layer (`src/lib/db.ts`) serves as the single gateway — no other file imports the Supabase client directly.
+   - **Projects, estimates, registries, column definitions, and cell locks** are stored in dedicated normalized tables with `ON DELETE CASCADE` referential integrity.
+   - **Estimate line items** are saved atomically via a PostgreSQL stored procedure (`save_estimate_line_items`) that wraps DELETE + INSERT in a single transaction to prevent data loss during network interruptions.
+   - **Sort order preservation**: Each line item stores a `sort_order` integer matching its array index. On reload, items are loaded with `ORDER BY sort_order ASC` to preserve the exact visual layout, including manually spliced rows.
+   - **Debounced auto-persist**: All auto-save effects use 1500ms debounce timers to prevent excessive network traffic during rapid keyboard-driven data entry.
+   - **Classification registries** are persisted at two scopes: project-isolated (`project_registries`) and global corporate (`global_registry`). Lookup resolution follows the fallback chain: project registry → global registry → static constants.
+   - **Theme preference** remains in browser `localStorage` for instant FOUC-free rendering before JavaScript executes.
 6. **Export Core Pipeline**: Generates a structured paste-ready Excel CSV and a summarized Procore Budget CSV.
 
 ## Fuzzy Token Matching Engine

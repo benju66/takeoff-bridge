@@ -5,7 +5,7 @@ Execute these steps to build a 360-degree understanding of the target feature. S
 **Step 1: Workspace Indexing & File Discovery**
 Search the repository explicitly to identify every component, utility, type schema, or style layer related to this feature.
 * Group discoveries by application workspace layers: Next.js frontend pages (`src/app/`), interface components (`src/components/`), and structural data libraries (`src/lib/`).
-* Identify the exact file paths for browser storage caching actions: local storage keys, data retrieval handlers, or registry synchronization hooks.
+* Identify the exact file paths for persistent data access actions: Supabase table interactions via `src/lib/db.ts`, async registry retrieval handlers, or debounced auto-persist hooks.
 * Output: A structured Markdown table of "Primary Impact Files" (direct state adjustments) and "Secondary Impact Files" (import/export compilation modules).
 
 **Step 2: Data Lifecycle & Core State Boundaries**

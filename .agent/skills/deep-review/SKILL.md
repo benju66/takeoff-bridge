@@ -11,7 +11,7 @@
 * If editing grid inputs, spreadsheet components, or lookup pipelines, explicitly verify compliance with:
   * **pushSnapshotToStack**: Enforce calling the historical ledger hook immediately before any layout array or state mutations to protect multi-stage undo rollbacks.
   * **Excel-like Controls**: Intercept and bind keyboard events (**ArrowUp**, **ArrowDown**, **Enter**, **Tab**) to explicitly manage focus bounds and prevent native browser scroll overrides.
-  * **Relational Fallbacks**: Ensure lookup resolution queries scan project-isolated overrides (`"takeoff_user_registry_[projectId]"`) before falling back to global `localStorage` keys or static constants.
+  * **Relational Fallbacks**: Ensure lookup resolution queries follow the established persistence chain: project-isolated registry (`project_registries` table via `getProjectRegistry`) → global corporate registry (`global_registry` table via `getGlobalRegistry`) → static `ESTIMATE_ITEMS_MASTER` constants. All access must go through `db.ts` async functions.
   * **Parent Code Remapping**: Confirm that fine-grained suffix codes (e.g., `04-0000.001`) combine into clean, valid parent cost codes (e.g., `4-40000.000`) during **Procore Budget** serialization.
 
 ### Step 3: Impact Analysis & Topological Sorting

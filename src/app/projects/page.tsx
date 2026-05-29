@@ -16,13 +16,17 @@ export default function ProjectsDashboard() {
   const [unitCount, setUnitCount] = useState("");
   const [bidDate, setBidDate] = useState("");
 
-  // Load projects from local storage on client load
+  // Load projects from Supabase on client load
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setProjects(getProjects());
+    let cancelled = false;
+    (async () => {
+      const loaded = await getProjects();
+      if (!cancelled) setProjects(loaded);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  const handleCreateProject = (e: React.FormEvent) => {
+  const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
@@ -41,8 +45,9 @@ export default function ProjectsDashboard() {
       createdAt: new Date().toISOString(),
     };
 
-    saveProject(newProject);
-    setProjects(getProjects());
+    await saveProject(newProject);
+    const updated = await getProjects();
+    setProjects(updated);
 
     // Reset Form Fields
     setName("");
@@ -53,10 +58,11 @@ export default function ProjectsDashboard() {
     setIsModalOpen(false);
   };
 
-  const handleDeleteProject = (projectId: string) => {
+  const handleDeleteProject = async (projectId: string) => {
     if (window.confirm("Are you sure you want to permanently erase this project and all associated estimate matrices?")) {
-      deleteProjectData(projectId);
-      setProjects(getProjects());
+      await deleteProjectData(projectId);
+      const updated = await getProjects();
+      setProjects(updated);
     }
   };
 

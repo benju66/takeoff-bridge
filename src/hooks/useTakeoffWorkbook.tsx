@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Papa from "papaparse";
 import {
   useReactTable,
@@ -11,7 +11,17 @@ import { parseTogalCSV } from "@/lib/parser";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, TogalRowPayload, ColumnDefinition, ContextMenuState, WorkbookSnapshot } from "@/types";
 import { Project } from "@/types/db";
-import { getProjectEstimate } from "@/lib/db";
+import {
+  getEstimateLineItems,
+  getProjectRegistry,
+  getGlobalRegistry,
+  getProjectColumnDefs,
+  getProjectLockedCells,
+  saveProjectRegistry,
+  saveGlobalRegistry,
+  saveProjectColumnDefs,
+  saveProjectLockedCells,
+} from "@/lib/db";
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
 
@@ -173,85 +183,99 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
-  // Load estimate + registries + columns + locks on mount
+  // Load estimate + registries + columns + locks on mount (async Supabase)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!projectId) return;
+    let cancelled = false;
 
-    // Load project-isolated mapping registry
-    const savedRegistry = localStorage.getItem(`takeoff_user_registry_${projectId}`);
-    if (savedRegistry) {
-      try { setUserRegistry(JSON.parse(savedRegistry)); } catch (e) { console.error("Failed to parse project userRegistry", e); }
-    }
+    (async () => {
+      // Load all data sources in parallel
+      const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks] =
+        await Promise.all([
+          getEstimateLineItems(projectId),
+          getProjectRegistry(projectId),
+          getGlobalRegistry(),
+          getProjectColumnDefs(projectId),
+          getProjectLockedCells(projectId),
+        ]);
 
-    // Load global corporate registry
-    const savedGlobalRegistry = localStorage.getItem("takeoff_global_user_registry");
-    if (savedGlobalRegistry) {
-      try { setGlobalRegistry(JSON.parse(savedGlobalRegistry)); } catch (e) { console.error("Failed to parse global userRegistry", e); }
-    }
+      if (cancelled) return;
 
-    // Load estimate items
-    const savedEstimate = getProjectEstimate(projectId);
-    if (savedEstimate) {
-      if (savedEstimate.items && savedEstimate.items.length > 0) {
+      // Apply registries
+      setUserRegistry(savedRegistry);
+      setGlobalRegistry(savedGlobalReg);
+
+      // Apply line items — honor sort_order from DB
+      if (savedLineItems.length > 0) {
         // Automatically merge any newly harvested master cost codes
         const masterItems = initializeDefaultEstimateRows();
-        const merged = [...savedEstimate.items];
-        
+        const merged = [...savedLineItems];
+
         masterItems.forEach((masterItem) => {
-          const exists = savedEstimate.items.some((savedItem) => savedItem.itemId === masterItem.itemId);
+          const exists = savedLineItems.some(
+            (savedItem) => savedItem.itemId === masterItem.itemId
+          );
           if (!exists) {
+            // Append new master codes to TAIL — do NOT re-sort
             merged.push(masterItem);
           }
         });
-        
+
         // Normalize all standard row IDs to be row-${itemId} to prevent collisions
         merged.forEach((row) => {
           if (row.itemId && row.id && row.id.startsWith("row-")) {
             row.id = `row-${row.itemId}`;
           }
         });
-        
-        // Sort items by itemId to keep them organized by division
-        merged.sort((a, b) => (a.itemId || "").localeCompare(b.itemId || ""));
+
+        // DO NOT sort — honor sort_order from DB to preserve manual row positions
         setRows(merged);
       } else {
-        setRows(initializeDefaultEstimateRows());
+        // First initialization — sort by itemId for clean divisional ordering
+        const defaultRows = initializeDefaultEstimateRows();
+        setRows(defaultRows);
       }
-    } else {
-      setRows(initializeDefaultEstimateRows());
-    }
 
-    // Load column definitions
-    const savedColumnDefs = localStorage.getItem(`takeoff_column_defs_${projectId}`);
-    if (savedColumnDefs) {
-      try { setColumnDefs(JSON.parse(savedColumnDefs)); } catch (e) { console.error("Failed to parse project columnDefs", e); }
-    }
+      // Apply column definitions
+      if (savedColDefs) {
+        setColumnDefs(savedColDefs);
+      }
 
-    // Load cell locks
-    const savedLockedCells = localStorage.getItem(`takeoff_locked_cells_${projectId}`);
-    if (savedLockedCells) {
-      try { setLockedCells(JSON.parse(savedLockedCells)); } catch (e) { console.error("Failed to parse project lockedCells", e); }
-    }
+      // Apply cell locks
+      setLockedCells(savedLocks);
+    })();
+
+    return () => { cancelled = true; };
   }, [projectId]);
 
   // ---------------------------------------------------------------------------
-  // Auto-persist column definitions
+  // Auto-persist column definitions (debounced 1500ms)
   // ---------------------------------------------------------------------------
   const columnDefsString = JSON.stringify(columnDefs);
+  const colDefsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isLoaded || !projectId) return;
-    localStorage.setItem(`takeoff_column_defs_${projectId}`, JSON.stringify(columnDefs));
+    if (colDefsTimerRef.current) clearTimeout(colDefsTimerRef.current);
+    colDefsTimerRef.current = setTimeout(() => {
+      saveProjectColumnDefs(projectId, columnDefs);
+    }, 1500);
+    return () => { if (colDefsTimerRef.current) clearTimeout(colDefsTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnDefsString, isLoaded, projectId]);
 
   // ---------------------------------------------------------------------------
-  // Auto-persist cell locks
+  // Auto-persist cell locks (debounced 1500ms)
   // ---------------------------------------------------------------------------
   const lockedCellsString = JSON.stringify(lockedCells);
+  const locksTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isLoaded || !projectId) return;
-    localStorage.setItem(`takeoff_locked_cells_${projectId}`, JSON.stringify(lockedCells));
+    if (locksTimerRef.current) clearTimeout(locksTimerRef.current);
+    locksTimerRef.current = setTimeout(() => {
+      saveProjectLockedCells(projectId, lockedCells);
+    }, 1500);
+    return () => { if (locksTimerRef.current) clearTimeout(locksTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedCellsString, isLoaded, projectId]);
 
@@ -543,11 +567,11 @@ export function useTakeoffWorkbook(
       if (didModify) {
         if (registryChanged) {
           setUserRegistry(currentRegistry);
-          localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(currentRegistry));
+          saveProjectRegistry(projectId, currentRegistry);
         }
         if (globalRegistryChanged) {
           setGlobalRegistry(currentGlobalRegistry);
-          localStorage.setItem("takeoff_global_user_registry", JSON.stringify(currentGlobalRegistry));
+          saveGlobalRegistry(currentGlobalRegistry);
         }
         setRows(updated);
       }
@@ -566,7 +590,7 @@ export function useTakeoffWorkbook(
     if (classification !== "MANUAL ENTRY") {
       if (newRegistry) {
         setUserRegistry(newRegistry);
-        localStorage.setItem(`takeoff_user_registry_${projectId}`, JSON.stringify(newRegistry));
+        saveProjectRegistry(projectId, newRegistry);
 
         if (classification && field === "itemId") {
           const newGlobalRegistry = {
@@ -574,7 +598,7 @@ export function useTakeoffWorkbook(
             [classification]: String(value).trim(),
           };
           setGlobalRegistry(newGlobalRegistry);
-          localStorage.setItem("takeoff_global_user_registry", JSON.stringify(newGlobalRegistry));
+          saveGlobalRegistry(newGlobalRegistry);
         }
       }
     }
