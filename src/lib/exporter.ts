@@ -269,58 +269,63 @@ export async function generateExcelWorkbook(
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
 
+  // Retrieve worksheet "STEP 1 - PROJECT DATA" and update project metadata
+  const projectDataSheet = workbook.getWorksheet("STEP 1 - PROJECT DATA");
+  if (projectDataSheet && projectMetadata) {
+    // Project Name
+    const nameCell = projectDataSheet.getCell('D5');
+    if (nameCell) nameCell.value = projectMetadata.name || "";
+
+    // Location / Address
+    const locCell = projectDataSheet.getCell('D8');
+    if (locCell) locCell.value = projectMetadata.location || "";
+
+    // Bid Date
+    const dateCell = projectDataSheet.getCell('G9');
+    if (dateCell) dateCell.value = projectMetadata.bidDate || "";
+
+    // Expected Start & Finish
+    const startCell = projectDataSheet.getCell('D10');
+    if (startCell) startCell.value = projectMetadata.expectedStart || "";
+
+    const finishCell = projectDataSheet.getCell('D11');
+    if (finishCell) finishCell.value = projectMetadata.expectedFinish || "";
+
+    // Gross SF (Project Size)
+    const sfCell = projectDataSheet.getCell('D12');
+    if (sfCell) sfCell.value = Number(projectMetadata.squareFootage) || 0;
+
+    // Unit Count (# of Units)
+    const unitsCell = projectDataSheet.getCell('D58');
+    if (unitsCell) unitsCell.value = Number(projectMetadata.unitCount) || 0;
+
+    // Optional physical specs
+    if (projectMetadata.buildingPerimeter !== undefined) {
+      const cell = projectDataSheet.getCell('E63');
+      if (cell) cell.value = Number(projectMetadata.buildingPerimeter) || 0;
+    }
+    if (projectMetadata.buildingFootprint !== undefined) {
+      const cell = projectDataSheet.getCell('E65');
+      if (cell) cell.value = Number(projectMetadata.buildingFootprint) || 0;
+    }
+    if (projectMetadata.podiumArea !== undefined) {
+      const cell = projectDataSheet.getCell('E66');
+      if (cell) cell.value = Number(projectMetadata.podiumArea) || 0;
+    }
+    if (projectMetadata.woodframedArea !== undefined) {
+      const cell = projectDataSheet.getCell('E67');
+      if (cell) cell.value = Number(projectMetadata.woodframedArea) || 0;
+    }
+    if (projectMetadata.levelsAbovePodium !== undefined) {
+      const cell = projectDataSheet.getCell('E72');
+      if (cell) cell.value = Number(projectMetadata.levelsAbovePodium) || 0;
+    }
+  }
+
   // Retrieve worksheet "STEP 4 - ESTIMATE"
   const worksheet = workbook.getWorksheet("STEP 4 - ESTIMATE");
   if (!worksheet) {
     throw new Error('Worksheet "STEP 4 - ESTIMATE" not found in the template');
-  }
-
-  // Update Project Metadata if metadata is available
-  if (projectMetadata) {
-    const projNameCell = worksheet.getCell('B4');
-    if (projNameCell) projNameCell.value = projectMetadata.name || "";
-    
-    const locCell = worksheet.getCell('F4');
-    if (locCell) locCell.value = projectMetadata.location || "";
-    
-    const dateCell = worksheet.getCell('I4');
-    if (dateCell) dateCell.value = projectMetadata.bidDate || "";
-  }
-
-  // Scan worksheet to find pre-existing tracking rows (General Liability and Fee)
-  // in Column D so we can extract their styles and then remove/clear them.
-  let glStyle: Partial<ExcelJS.Style> | null = null;
-  let feeStyle: Partial<ExcelJS.Style> | null = null;
-  
-  // We scan from Row 10 to 100 to locate tracking row placeholders
-  for (let r = 10; r <= 100; r++) {
-    const cellD = worksheet.getCell(`D${r}`);
-    if (cellD && cellD.value) {
-      const valStr = String(cellD.value).trim();
-      if (valStr.includes("General Liability")) {
-        // Capture cell styles
-        glStyle = {
-          font: worksheet.getRow(r).getCell('D').font,
-          fill: worksheet.getRow(r).getCell('D').fill,
-          alignment: worksheet.getRow(r).getCell('D').alignment,
-        };
-        // Clear this placeholder row cell values while preserving styles to prevent layout gaps
-        worksheet.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
-          cell.value = null;
-        });
-      } else if (valStr.includes("Fee (5%)") || valStr.includes("Contractor Fee")) {
-        // Capture cell styles
-        feeStyle = {
-          font: worksheet.getRow(r).getCell('D').font,
-          fill: worksheet.getRow(r).getCell('D').fill,
-          alignment: worksheet.getRow(r).getCell('D').alignment,
-        };
-        // Clear this placeholder row cell values while preserving styles
-        worksheet.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
-          cell.value = null;
-        });
-      }
-    }
   }
 
   // Determine spreadsheet column indices for each column definition
@@ -359,200 +364,173 @@ export async function generateExcelWorkbook(
     }
   }
 
-  // Write active estimate grid rows starting at Row 10
-  let currentRawRow = 10;
-  let subtotal = 0;
+  // Scan worksheet to locate SUBTOTAL row and build a map of pre-populated item row indexes
+  let subtotalRowIdx = -1;
+  const prepopulatedRowsMap: Record<string, number> = {}; // itemCode -> rowNumber
 
-  for (const row of rows) {
-    const qty = Number(row.matchedQty) || 0;
-    const price = Number(row.unitPrice) || 0;
-    const total = qty * price;
-    subtotal += total;
-
-    const excelRow = worksheet.getRow(currentRawRow);
-    
-    for (const col of columnDefs) {
-      const colIdx = colIndexMap[col.id];
-      if (!colIdx) continue;
-
-      if (col.type === 'default') {
-        switch (col.id) {
-          case "costType":
-            excelRow.getCell(colIdx).value = row.costType || "TI";
-            excelRow.getCell(colIdx).alignment = { horizontal: 'center' };
-            break;
-          case "itemId":
-            excelRow.getCell(colIdx).value = row.itemId || "";
-            excelRow.getCell(colIdx).alignment = { horizontal: 'center' };
-            break;
-          case "description":
-            excelRow.getCell(colIdx).value = row.description || "";
-            break;
-          case "matchedQty":
-            excelRow.getCell(colIdx).value = qty;
-            excelRow.getCell(colIdx).numFmt = '#,##0.00';
-            excelRow.getCell(colIdx).alignment = { horizontal: 'right' };
-            break;
-          case "uom":
-            excelRow.getCell(colIdx).value = row.uom || "";
-            excelRow.getCell(colIdx).alignment = { horizontal: 'center' };
-            break;
-          case "unitPrice":
-            excelRow.getCell(colIdx).value = price;
-            excelRow.getCell(colIdx).numFmt = '$#,##0.00';
-            excelRow.getCell(colIdx).alignment = { horizontal: 'right' };
-            break;
-          case "total":
-            const qtyLetter = getColumnLetter(colIndexMap["matchedQty"] || 6);
-            const priceLetter = getColumnLetter(colIndexMap["unitPrice"] || 8);
-            excelRow.getCell(colIdx).value = { formula: `${qtyLetter}${currentRawRow}*${priceLetter}${currentRawRow}` };
-            excelRow.getCell(colIdx).numFmt = '$#,##0.00';
-            excelRow.getCell(colIdx).alignment = { horizontal: 'right' };
-            break;
-          case "costPerUnit":
-            const cpu = total / (projectMetadata?.unitCount || 1);
-            excelRow.getCell(colIdx).value = cpu;
-            excelRow.getCell(colIdx).numFmt = '$#,##0.00';
-            excelRow.getCell(colIdx).alignment = { horizontal: 'right' };
-            break;
-          case "costPerSf":
-            const cpsf = total / (projectMetadata?.squareFootage || 1);
-            excelRow.getCell(colIdx).value = cpsf;
-            excelRow.getCell(colIdx).numFmt = '$#,##0.00';
-            excelRow.getCell(colIdx).alignment = { horizontal: 'right' };
-            break;
-        }
-      } else {
-        // Custom Column
-        excelRow.getCell(colIdx).value = row.customFields?.[col.id] ?? "";
+  const maxRow = worksheet.actualRowCount || 350;
+  for (let r = 10; r <= maxRow + 50; r++) {
+    const cellH = worksheet.getCell(`H${r}`);
+    if (cellH && cellH.value) {
+      const valStr = String(cellH.value).trim();
+      if (valStr.toUpperCase() === "SUBTOTAL") {
+        subtotalRowIdx = r;
+        break;
       }
     }
 
-    currentRawRow++;
-  }
-
-  // Determine the exact end row of the inserted data block
-  const endRowIdx = currentRawRow - 1;
-
-  // Cleanly write visual spacing rows step-by-step
-  for (let i = 0; i < 2; i++) {
-    const spacerRow = worksheet.getRow(currentRawRow);
-    spacerRow.eachCell({ includeEmpty: true }, (cell) => {
-      cell.value = null;
-    });
-    currentRawRow++;
-  }
-
-  // Append dynamic tracking rows at the bottom
-  const generalLiability = subtotal * 0.01;
-  const fee = subtotal * 0.05;
-  const totalColLetter = getColumnLetter(colIndexMap["total"] || 9);
-
-  // 1. General Liability Row (defensive clearing first)
-  const glRow = worksheet.getRow(currentRawRow);
-  glRow.eachCell({ includeEmpty: true }, (cell) => {
-    cell.value = null;
-  });
-  
-  glRow.getCell(colIndexMap["costType"] || 1).value = "TI";
-  glRow.getCell(colIndexMap["description"] || 4).value = "General Liability (1%)";
-  glRow.getCell(colIndexMap["matchedQty"] || 6).value = 1;
-  glRow.getCell(colIndexMap["uom"] || 7).value = "LS";
-  glRow.getCell(colIndexMap["unitPrice"] || 8).value = generalLiability;
-  glRow.getCell(colIndexMap["total"] || 9).value = { formula: `SUM(${totalColLetter}10:${totalColLetter}${endRowIdx})*0.01` };
-
-  // Apply original style or premium default
-  glRow.eachCell((cell) => {
-    if (glStyle) {
-      if (glStyle.font) cell.font = glStyle.font;
-      if (glStyle.fill) cell.fill = glStyle.fill;
-      if (glStyle.alignment) cell.alignment = glStyle.alignment;
-    } else {
-      cell.font = { bold: true, color: { argb: 'FF2563EB' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+    const cellC = worksheet.getCell(`C${r}`);
+    if (cellC && cellC.value) {
+      const codeStr = String(cellC.value).trim();
+      if (codeStr && codeStr.length >= 6 && codeStr.includes("-")) {
+        prepopulatedRowsMap[codeStr] = r;
+      }
     }
-  });
-
-  const glTotalCell = glRow.getCell(colIndexMap["total"] || 9);
-  glTotalCell.numFmt = '$#,##0.00';
-  glTotalCell.alignment = { horizontal: 'right' };
-
-  const glQtyCell = glRow.getCell(colIndexMap["matchedQty"] || 6);
-  glQtyCell.numFmt = '#,##0.00';
-
-  const glPriceCell = glRow.getCell(colIndexMap["unitPrice"] || 8);
-  glPriceCell.numFmt = '$#,##0.00';
-
-  glRow.getCell(colIndexMap["costType"] || 1).alignment = { horizontal: 'center' };
-  glRow.getCell(colIndexMap["uom"] || 7).alignment = { horizontal: 'center' };
-
-  currentRawRow++;
-
-  // 2. Contractor Fee Row (defensive clearing first)
-  const feeRow = worksheet.getRow(currentRawRow);
-  feeRow.eachCell({ includeEmpty: true }, (cell) => {
-    cell.value = null;
-  });
-
-  feeRow.getCell(colIndexMap["costType"] || 1).value = "TI";
-  feeRow.getCell(colIndexMap["description"] || 4).value = "Fee (5%)";
-  feeRow.getCell(colIndexMap["matchedQty"] || 6).value = 1;
-  feeRow.getCell(colIndexMap["uom"] || 7).value = "LS";
-  feeRow.getCell(colIndexMap["unitPrice"] || 8).value = fee;
-  feeRow.getCell(colIndexMap["total"] || 9).value = { formula: `SUM(${totalColLetter}10:${totalColLetter}${endRowIdx})*0.05` };
-
-  feeRow.eachCell((cell) => {
-    if (feeStyle) {
-      if (feeStyle.font) cell.font = feeStyle.font;
-      if (feeStyle.fill) cell.fill = feeStyle.fill;
-      if (feeStyle.alignment) cell.alignment = feeStyle.alignment;
-    } else {
-      cell.font = { bold: true, color: { argb: 'FF4F46E5' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
-    }
-  });
-
-  const feeTotalCell = feeRow.getCell(colIndexMap["total"] || 9);
-  feeTotalCell.numFmt = '$#,##0.00';
-  feeTotalCell.alignment = { horizontal: 'right' };
-
-  const feeQtyCell = feeRow.getCell(colIndexMap["matchedQty"] || 6);
-  feeQtyCell.numFmt = '#,##0.00';
-
-  const feePriceCell = feeRow.getCell(colIndexMap["unitPrice"] || 8);
-  feePriceCell.numFmt = '$#,##0.00';
-
-  feeRow.getCell(colIndexMap["costType"] || 1).alignment = { horizontal: 'center' };
-  feeRow.getCell(colIndexMap["uom"] || 7).alignment = { horizontal: 'center' };
-
-  // Cleanly write visual spacing rows step-by-step
-  for (let i = 0; i < 2; i++) {
-    const spacerRow = worksheet.getRow(currentRawRow);
-    spacerRow.eachCell({ includeEmpty: true }, (cell) => {
-      cell.value = null;
-    });
-    currentRawRow++;
   }
 
-  // 3. Grand Total Row (defensive clearing first)
-  const grandTotalRow = worksheet.getRow(currentRawRow);
-  grandTotalRow.eachCell({ includeEmpty: true }, (cell) => {
-    cell.value = null;
-  });
+  if (subtotalRowIdx === -1) {
+    throw new Error('Failed to find "SUBTOTAL" row in "STEP 4 - ESTIMATE" sheet');
+  }
 
-  grandTotalRow.getCell(colIndexMap["costType"] || 1).value = "TI";
-  grandTotalRow.getCell(colIndexMap["description"] || 4).value = "TOTAL ESTIMATED COST";
-  grandTotalRow.getCell(colIndexMap["total"] || 9).value = { formula: `SUM(${totalColLetter}10:${totalColLetter}${currentRawRow - 1})` };
+  const unmappedRows: ProcessedTakeoffRow[] = [];
 
-  grandTotalRow.eachCell((cell) => {
-    cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } };
-  });
+  // Update pre-populated rows
+  for (const row of rows) {
+    const code = (row.itemId || "").trim();
+    const qty = Number(row.matchedQty) || 0;
+    const price = Number(row.unitPrice) || 0;
 
-  const grandTotalCell = grandTotalRow.getCell(colIndexMap["total"] || 9);
-  grandTotalCell.numFmt = '$#,##0.00';
-  grandTotalCell.alignment = { horizontal: 'right' };
-  grandTotalRow.getCell(colIndexMap["costType"] || 1).alignment = { horizontal: 'center' };
+    const rIdx = prepopulatedRowsMap[code];
+    if (rIdx !== undefined) {
+      const excelRow = worksheet.getRow(rIdx);
+      
+      excelRow.getCell(colIndexMap["description"] || 4).value = row.description || "";
+      
+      const qtyCell = excelRow.getCell(colIndexMap["matchedQty"] || 6);
+      qtyCell.value = qty;
+      qtyCell.numFmt = '#,##0.00';
+      qtyCell.alignment = { horizontal: 'right' };
+
+      const uomCell = excelRow.getCell(colIndexMap["uom"] || 7);
+      uomCell.value = row.uom || "";
+      uomCell.alignment = { horizontal: 'center' };
+
+      const priceCell = excelRow.getCell(colIndexMap["unitPrice"] || 8);
+      priceCell.value = price;
+      priceCell.numFmt = '$#,##0.00';
+      priceCell.alignment = { horizontal: 'right' };
+
+      for (const col of columnDefs) {
+        if (col.type === 'custom') {
+          const colIdx = colIndexMap[col.id];
+          if (colIdx) {
+            excelRow.getCell(colIdx).value = row.customFields?.[col.id] ?? "";
+          }
+        }
+      }
+    } else {
+      unmappedRows.push(row);
+    }
+  }
+
+  // Copy styles helper
+  const baseGCsRow = worksheet.getRow(12);
+
+  function copyCellStyles(fromCell: ExcelJS.Cell, toCell: ExcelJS.Cell) {
+    if (fromCell.font) toCell.font = JSON.parse(JSON.stringify(fromCell.font));
+    if (fromCell.fill) toCell.fill = JSON.parse(JSON.stringify(fromCell.fill));
+    if (fromCell.border) toCell.border = JSON.parse(JSON.stringify(fromCell.border));
+    if (fromCell.alignment) toCell.alignment = JSON.parse(JSON.stringify(fromCell.alignment));
+    if (fromCell.numFmt) toCell.numFmt = fromCell.numFmt;
+  }
+
+  // Insert unmapped/manual rows above the SUBTOTAL row
+  let insertedCount = 0;
+  for (const row of unmappedRows) {
+    worksheet.insertRow(subtotalRowIdx, []);
+    const excelRow = worksheet.getRow(subtotalRowIdx);
+
+    // Apply baseline styles cell-by-cell from Row 12
+    for (let c = 1; c <= 20; c++) {
+      const fromCell = baseGCsRow.getCell(c);
+      const toCell = excelRow.getCell(c);
+      copyCellStyles(fromCell, toCell);
+    }
+
+    const qty = Number(row.matchedQty) || 0;
+    const price = Number(row.unitPrice) || 0;
+
+    excelRow.getCell(colIndexMap["costType"] || 1).value = row.costType || "TI";
+    excelRow.getCell(colIndexMap["costType"] || 1).alignment = { horizontal: 'center' };
+
+    excelRow.getCell(colIndexMap["itemId"] || 3).value = row.itemId || "";
+    excelRow.getCell(colIndexMap["itemId"] || 3).alignment = { horizontal: 'center' };
+
+    excelRow.getCell(colIndexMap["description"] || 4).value = row.description || "";
+
+    const qtyCell = excelRow.getCell(colIndexMap["matchedQty"] || 6);
+    qtyCell.value = qty;
+    qtyCell.numFmt = '#,##0.00';
+    qtyCell.alignment = { horizontal: 'right' };
+
+    const uomCell = excelRow.getCell(colIndexMap["uom"] || 7);
+    uomCell.value = row.uom || "";
+    uomCell.alignment = { horizontal: 'center' };
+
+    const priceCell = excelRow.getCell(colIndexMap["unitPrice"] || 8);
+    priceCell.value = price;
+    priceCell.numFmt = '$#,##0.00';
+    priceCell.alignment = { horizontal: 'right' };
+
+    const totalCell = excelRow.getCell(colIndexMap["total"] || 9);
+    totalCell.value = { formula: `IF(ISNUMBER(F${subtotalRowIdx}), F${subtotalRowIdx} * H${subtotalRowIdx}, 0)` };
+    totalCell.numFmt = '$#,##0.00';
+    totalCell.alignment = { horizontal: 'right' };
+
+    const cpuCell = excelRow.getCell(colIndexMap["costPerUnit"] || 10);
+    cpuCell.value = { formula: `IF($J$8=0, 0, I${subtotalRowIdx}/$J$8)` };
+    cpuCell.numFmt = '$#,##0.00';
+    cpuCell.alignment = { horizontal: 'right' };
+
+    const cpsfCell = excelRow.getCell(colIndexMap["costPerSf"] || 11);
+    cpsfCell.value = { formula: `IF($K$8=0, 0, I${subtotalRowIdx}/$K$8)` };
+    cpsfCell.numFmt = '$#,##0.00';
+    cpsfCell.alignment = { horizontal: 'right' };
+
+    for (const col of columnDefs) {
+      if (col.type === 'custom') {
+        const colIdx = colIndexMap[col.id];
+        if (colIdx) {
+          excelRow.getCell(colIdx).value = row.customFields?.[col.id] ?? "";
+        }
+      }
+    }
+
+    subtotalRowIdx++;
+    insertedCount++;
+  }
+
+  // Update SUBTOTAL formula (SUM from Row 10 to row before the new subtotal)
+  const subtotalCell = worksheet.getCell(`I${subtotalRowIdx}`);
+  subtotalCell.value = { formula: `SUM(I10:I${subtotalRowIdx - 1})` };
+
+  // Rewrite shifted formulas to match their new row coordinates
+  if (insertedCount > 0) {
+    for (let offset = 2; offset <= 8; offset++) {
+      const r = subtotalRowIdx + offset;
+      const excelRow = worksheet.getRow(r);
+      excelRow.getCell(9).value = { formula: `F${r}*$I$${subtotalRowIdx}` };
+      excelRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${r}/$J$8)` };
+      excelRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${r}/$K$8)` };
+    }
+
+    // Rewrite Grand Total row formulas
+    const totalRowIdx = subtotalRowIdx + 10;
+    const totalRow = worksheet.getRow(totalRowIdx);
+    totalRow.getCell(9).value = { formula: `SUM(I${subtotalRowIdx}:I${subtotalRowIdx + 9})` };
+    totalRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${totalRowIdx}/$J$8)` };
+    totalRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${totalRowIdx}/$K$8)` };
+  }
 
   // Write to buffer
   const outBuffer = await workbook.xlsx.writeBuffer();

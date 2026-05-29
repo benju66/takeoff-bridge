@@ -152,10 +152,10 @@ export function useTakeoffWorkbook(
   // ---------------------------------------------------------------------------
   const initializeDefaultEstimateRows = (): ProcessedTakeoffRow[] => {
     const sortedKeys = Object.keys(ESTIMATE_ITEMS_MASTER).sort();
-    return sortedKeys.map((key, idx) => {
+    return sortedKeys.map((key) => {
       const item = ESTIMATE_ITEMS_MASTER[key];
       return {
-        id: `row-${idx}`,
+        id: `row-${item.itemId}`,
         classification: "",
         itemId: item.itemId,
         procoreParentCode: item.procoreParentCode,
@@ -194,7 +194,27 @@ export function useTakeoffWorkbook(
     const savedEstimate = getProjectEstimate(projectId);
     if (savedEstimate) {
       if (savedEstimate.items && savedEstimate.items.length > 0) {
-        setRows(savedEstimate.items);
+        // Automatically merge any newly harvested master cost codes
+        const masterItems = initializeDefaultEstimateRows();
+        const merged = [...savedEstimate.items];
+        
+        masterItems.forEach((masterItem) => {
+          const exists = savedEstimate.items.some((savedItem) => savedItem.itemId === masterItem.itemId);
+          if (!exists) {
+            merged.push(masterItem);
+          }
+        });
+        
+        // Normalize all standard row IDs to be row-${itemId} to prevent collisions
+        merged.forEach((row) => {
+          if (row.itemId && row.id && row.id.startsWith("row-")) {
+            row.id = `row-${row.itemId}`;
+          }
+        });
+        
+        // Sort items by itemId to keep them organized by division
+        merged.sort((a, b) => (a.itemId || "").localeCompare(b.itemId || ""));
+        setRows(merged);
       } else {
         setRows(initializeDefaultEstimateRows());
       }
