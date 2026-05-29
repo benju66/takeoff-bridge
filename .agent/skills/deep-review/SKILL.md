@@ -23,6 +23,7 @@
 
 ### Step 4: Verification Integration
 * Define rigid testing criteria for every isolated adjustment introduced[cite: 2].
+* **Automated Test Gate**: If `npm run test` is available, execute the full test suite and confirm all tests pass. New logic affecting parser output, grid state, or calculation pipelines must include corresponding test coverage in the regression suite (`src/lib/__tests__/`).
 * Provide testing verifications checking:
   * Raw file payload mapping accuracy against **TogalRowPayload** schemas.
   * Grid performance and layout response during high-speed, keyboard-only data inputs.

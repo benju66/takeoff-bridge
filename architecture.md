@@ -7,7 +7,12 @@
 
 ## Processing Execution Pipeline
 1. **File Ingestion Engine**: Client-side browser file parsing of raw Togal CSV files via `PapaParse`, initiated dynamically by drag-and-drop or manual upload directly in the client context.
-2. **Relational Lookup Utility**: Cross-references Togal string names against `DeterministicMappingRegistry`.
+2. **Pre-compiled Lookup Maps** (`src/lib/parser.ts`): Before the row-iteration loop begins, the parser pre-compiles three `Map<string, string>` structures with normalized (lowercased/trimmed) keys for O(1) classification resolution:
+   - `userMap` — from the project-isolated `userRegistry` parameter (built per parse call).
+   - `globalMap` — from the corporate `globalRegistry` parameter (built per parse call).
+   - `initialMap` — from the static `INITIAL_MAPPING_REGISTRY` constant (built once at module load).
+   - **Resolution priority**: Exact-case direct lookup first (`userRegistry[classification]` → `globalRegistry[classification]` → `INITIAL_MAPPING_REGISTRY[classification]`), then normalized fallback (`userMap.get(norm)` → `globalMap.get(norm)` → `initialMap.get(norm)`).
+   - Row column headers are also normalized once per row via `normalizeRowKeys()` → `Map<string, unknown>`, replacing per-column `Object.keys().find()` scans with single `Map.get()` calls.
 3. **UOM Filter Loop**: Scans wide-row dimensions to pull out the metric matching the `targetUom` constraint.
 4. **Human-In-The-Loop UI**: Halts processing on missing keys to display an editable data grid for manual assignments.
 5. **Supabase Persistence Layer**: All application state is persisted to a cloud PostgreSQL database via Supabase. The data access layer (`src/lib/db.ts`) serves as the single gateway — no other file imports the Supabase client directly.
@@ -18,6 +23,11 @@
    - **Classification registries** are persisted at two scopes: project-isolated (`project_registries`) and global corporate (`global_registry`). Lookup resolution follows the fallback chain: project registry → global registry → static constants.
    - **Theme preference** remains in browser `localStorage` for instant FOUC-free rendering before JavaScript executes.
 6. **Export Core Pipeline**: Generates a structured paste-ready Excel CSV and a summarized Procore Budget CSV.
+
+## Automated Test Infrastructure
+The project uses **Vitest** (`vitest.config.ts`) for unit and regression testing. Test files live in `src/lib/__tests__/` and are executed via `npm run test` (single run) or `npm run test:watch` (interactive).
+* **Parser regression suite** (`src/lib/__tests__/parser.test.ts`): 7 test cases validating exact-case matching, case-insensitive fallback, registry priority chain, unmapped classification defaults, empty classification filtering, missing quantity column defaults, and duplicate normalized key detection.
+* **Test gate**: All agents must execute `npm run test` and confirm zero failures before presenting work for user review (enforced via `AGENTS.md` and `SKILL.md`).
 
 ## Fuzzy Token Matching Engine
 To assist users in reconciling unmapped classifications, `src/lib/similarity.ts` generates interactive user suggestion badges using a hybrid token-distance scoring engine:

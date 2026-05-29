@@ -2,14 +2,37 @@ import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
 
 /**
- * Safely fetches a property from an object regardless of case-casing in the keys.
+ * Converts a Record<string, string> registry into a Map<string, string>
+ * with pre-lowercased and trimmed keys for O(1) normalized lookups.
+ * Called once before the row-iteration loop, not per-row.
  */
-function getCaseInsensitiveProp(obj: unknown, targetKey: string): unknown {
-  if (!obj || typeof obj !== "object") return undefined;
-  const typedObj = obj as Record<string, unknown>;
-  const targetLower = targetKey.toLowerCase().trim();
-  const foundKey = Object.keys(typedObj).find((key) => key.toLowerCase().trim() === targetLower);
-  return foundKey ? typedObj[foundKey] : undefined;
+function buildNormalizedMap(
+  registry: Record<string, string>
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const key of Object.keys(registry)) {
+    const normalized = key.trim().toLowerCase();
+    if (map.has(normalized)) {
+      console.warn(`Duplicate normalized key detected in registry: ${normalized}`);
+    }
+    map.set(normalized, registry[key]);
+  }
+  return map;
+}
+
+/**
+ * One-pass row-key normalizer — converts a raw CSV row object's keys into
+ * a Map<string, unknown> so that column access is a single O(1) .get() call.
+ * Called once per row, replacing 7× getCaseInsensitiveProp scans.
+ */
+function normalizeRowKeys(
+  obj: Record<string, unknown>
+): Map<string, unknown> {
+  const map = new Map<string, unknown>();
+  for (const key of Object.keys(obj)) {
+    map.set(key.toLowerCase().trim(), obj[key]);
+  }
+  return map;
 }
 
 /**
@@ -22,55 +45,42 @@ function parseCleanFloat(val: unknown): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
+// Module-level — built once at import time since INITIAL_MAPPING_REGISTRY is a static constant
+const initialMap: Map<string, string> = buildNormalizedMap(INITIAL_MAPPING_REGISTRY);
+
 export function parseTogalCSV(
   rawRows: TogalRowPayload[],
   userRegistry: Record<string, string> = {},
   globalRegistry: Record<string, string> = {}
 ): ProcessedTakeoffRow[] {
+  // Pre-compile O(1) normalized lookup Maps — built once per parse call (parameters vary)
+  const userMap: Map<string, string> = buildNormalizedMap(userRegistry);
+  const globalMap: Map<string, string> = buildNormalizedMap(globalRegistry);
+
   return rawRows.map((row, index) => {
-    const rawClassification = getCaseInsensitiveProp(row, "Classification");
+    // Normalize all row keys once for O(1) column access (Deep Review E1: explicit cast)
+    const normalizedRow = normalizeRowKeys(row as unknown as Record<string, unknown>);
+
+    const rawClassification = normalizedRow.get("classification");
     const classification = typeof rawClassification === "string" ? rawClassification.trim() : String(rawClassification || "").trim();
     if (!classification) return null;
 
     // Direct match first: userRegistry override has priority over globalRegistry override and INITIAL_MAPPING_REGISTRY constant
     let itemId = userRegistry[classification] || globalRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
-    
-    // Fallback: trimmed, case-insensitive mapping lookup to be highly robust
+
+    // Normalized fallback — single .get() per registry instead of O(N) .find() scans
     if (!itemId) {
       const normalizedClassification = classification.toLowerCase();
-      
-      // Attempt to match row classifications against userRegistry overrides first
-      const userMatchedKey = Object.keys(userRegistry).find(
-        (key) => key.trim().toLowerCase() === normalizedClassification
-      );
-      if (userMatchedKey) {
-        itemId = userRegistry[userMatchedKey];
-      } else {
-        // Attempt to match row classifications against globalRegistry overrides second
-        const globalMatchedKey = Object.keys(globalRegistry).find(
-          (key) => key.trim().toLowerCase() === normalizedClassification
-        );
-        if (globalMatchedKey) {
-          itemId = globalRegistry[globalMatchedKey];
-        } else {
-          // Fallback to INITIAL_MAPPING_REGISTRY constants
-          const initialMatchedKey = Object.keys(INITIAL_MAPPING_REGISTRY).find(
-            (key) => key.trim().toLowerCase() === normalizedClassification
-          );
-          if (initialMatchedKey) {
-            itemId = INITIAL_MAPPING_REGISTRY[initialMatchedKey];
-          }
-        }
-      }
+      itemId = userMap.get(normalizedClassification) || globalMap.get(normalizedClassification) || initialMap.get(normalizedClassification) || "";
     }
 
     const masterItem = itemId ? ESTIMATE_ITEMS_MASTER[itemId] : null;
 
     // Normalize Togal wide columns into accessible lookup blocks with clean float parsing
     const measurements = [
-      { qty: parseCleanFloat(getCaseInsensitiveProp(row, "Quantity 1")), uom: String(getCaseInsensitiveProp(row, "Quantity1 UOM") || "SF") },
-      { qty: parseCleanFloat(getCaseInsensitiveProp(row, "Quantity 2")), uom: String(getCaseInsensitiveProp(row, "Quantity2 UOM") || "") },
-      { qty: parseCleanFloat(getCaseInsensitiveProp(row, "Quantity 3")), uom: String(getCaseInsensitiveProp(row, "Quantity3 UOM") || "") },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 1")), uom: String(normalizedRow.get("quantity1 uom") || "SF") },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 2")), uom: String(normalizedRow.get("quantity2 uom") || "") },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 3")), uom: String(normalizedRow.get("quantity3 uom") || "") },
     ];
 
     const targetUom = masterItem?.targetUom || "SF";
