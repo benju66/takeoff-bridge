@@ -9,6 +9,14 @@ import {
   OPERATIONAL_EXPENSE_DEFAULTS,
   HOURS_PER_MONTH,
   DIVISION_NAMES,
+  GL_RATE,
+  FEE_RATE,
+  SAFETY_RATE_PER_MONTH,
+  TEMP_PROTECTION_RATE_PER_SF,
+  MATERIAL_HOIST_RATE_PER_MONTH,
+  KNOX_BOX_UNIT_COST,
+  PAYROLL_CLEANING_RATE_PER_EA,
+  HIRED_CLEANING_RATE_PER_EA,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -121,15 +129,15 @@ export function computeSiteOperations(
   rates: { soilBorings: number }
 ): SiteOpsCalcResult {
   const dynamicLines = [
-    { code: "01-3000", desc: "Safety", unit: "mo", rate: 500, qty: durationMonths, total: durationMonths * 500 },
-    { code: "01-5000", desc: "Temporary Protection", unit: "sf", rate: 0.25, qty: squareFootage, total: squareFootage * 0.25 },
-    { code: "01-5400", desc: "Material Hoist", unit: "mo", rate: 6500, qty: durationMonths, total: durationMonths * 6500 },
+    { code: "01-3000", desc: "Safety", unit: "mo", rate: SAFETY_RATE_PER_MONTH, qty: durationMonths, total: durationMonths * SAFETY_RATE_PER_MONTH },
+    { code: "01-5000", desc: "Temporary Protection", unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, qty: squareFootage, total: squareFootage * TEMP_PROTECTION_RATE_PER_SF },
+    { code: "01-5400", desc: "Material Hoist", unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, qty: durationMonths, total: durationMonths * MATERIAL_HOIST_RATE_PER_MONTH },
   ];
 
   const manualLines = [
-    { code: "01-5200", desc: "Knox Boxes", unit: "ea", rate: 650, qty: quantities.knox, total: quantities.knox * 650 },
-    { code: "01-5300", desc: "Payroll Cleaning", unit: "ea", rate: 74, qty: quantities.payrollCleaning, total: quantities.payrollCleaning * 74 },
-    { code: "01-5310", desc: "Hired Cleaning", unit: "ea", rate: 54, qty: quantities.hiredCleaning, total: quantities.hiredCleaning * 54 },
+    { code: "01-5200", desc: "Knox Boxes", unit: "ea", rate: KNOX_BOX_UNIT_COST, qty: quantities.knox, total: quantities.knox * KNOX_BOX_UNIT_COST },
+    { code: "01-5300", desc: "Payroll Cleaning", unit: "ea", rate: PAYROLL_CLEANING_RATE_PER_EA, qty: quantities.payrollCleaning, total: quantities.payrollCleaning * PAYROLL_CLEANING_RATE_PER_EA },
+    { code: "01-5310", desc: "Hired Cleaning", unit: "ea", rate: HIRED_CLEANING_RATE_PER_EA, qty: quantities.hiredCleaning, total: quantities.hiredCleaning * HIRED_CLEANING_RATE_PER_EA },
     { code: "01-5600", desc: "Soil Borings", unit: "ea", rate: rates.soilBorings, qty: quantities.soilBorings, total: quantities.soilBorings * rates.soilBorings },
   ];
 
@@ -166,8 +174,8 @@ export function computeTakeoffSummary(
   unitCount: number
 ): TakeoffSummary {
   const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
-  const generalLiability = subtotal * 0.01;
-  const contractorFee = subtotal * 0.05;
+  const generalLiability = subtotal * GL_RATE;
+  const contractorFee = subtotal * FEE_RATE;
   const totalEstimatedCost = subtotal + generalLiability + contractorFee;
   const costPerSf = totalEstimatedCost / (squareFootage || 1);
   const costPerUnit = totalEstimatedCost / (unitCount || 1);
@@ -191,7 +199,7 @@ export function computeDivisionBreakdown(
   rows.forEach((row) => {
     const code = row.itemId && row.itemId.length >= 2 ? row.itemId.substring(0, 2) : "";
     const division = /^\d{2}$/.test(code) ? code : "Unmapped";
-    divisionTotals[division] = (divisionTotals[division] || 0) + row.total;
+    divisionTotals[division] = (divisionTotals[division] || 0) + (row.matchedQty * row.unitPrice);
   });
 
   return Object.entries(divisionTotals)
@@ -220,9 +228,9 @@ export function computeCostTypeBreakdown(
   rows.forEach((row) => {
     const type = (row.costType || "M").toUpperCase();
     if (type in costTotals) {
-      costTotals[type] += row.total;
+      costTotals[type] += (row.matchedQty * row.unitPrice);
     } else {
-      costTotals.M += row.total;
+      costTotals.M += (row.matchedQty * row.unitPrice);
     }
   });
 

@@ -12,6 +12,7 @@ import { getMonthsBetween } from "@/lib/calculations";
 export interface UseProjectWorkspaceReturn {
   project: Project | null;
   isLoaded: boolean;
+  error: string | null;
   projectDurationMonths: number;
   handleProjectParamChange: (field: keyof Project, value: string | number) => void;
 }
@@ -19,6 +20,7 @@ export interface UseProjectWorkspaceReturn {
 export function useProjectWorkspace(projectId: string): UseProjectWorkspaceReturn {
   const [project, setProject] = useState<Project | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Load project metadata on mount
   useEffect(() => {
@@ -26,10 +28,17 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
     let cancelled = false;
 
     (async () => {
-      const meta = await getProject(projectId);
-      if (!cancelled) {
-        setProject(meta);
-        setIsLoaded(true);
+      try {
+        const meta = await getProject(projectId);
+        if (!cancelled) {
+          setProject(meta);
+          setIsLoaded(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load project');
+          setIsLoaded(true);
+        }
       }
     })();
 
@@ -46,12 +55,16 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
     if (!project) return;
     const updated = { ...project, [field]: value };
     setProject(updated);
-    saveProject(updated);
+    saveProject(updated).catch((err) => {
+      console.error('Failed to save project parameter:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save project');
+    });
   };
 
   return {
     project,
     isLoaded,
+    error,
     projectDurationMonths,
     handleProjectParamChange,
   };

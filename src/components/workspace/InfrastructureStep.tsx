@@ -1,6 +1,14 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { SiteOpsCalcResult } from "@/lib/calculations";
+import {
+  SAFETY_RATE_PER_MONTH,
+  TEMP_PROTECTION_RATE_PER_SF,
+  MATERIAL_HOIST_RATE_PER_MONTH,
+  KNOX_BOX_UNIT_COST,
+  PAYROLL_CLEANING_RATE_PER_EA,
+  HIRED_CLEANING_RATE_PER_EA,
+} from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // InfrastructureStep — Step 3 Panel
@@ -36,15 +44,15 @@ export function InfrastructureStep({
   siteOperationsTotal,
 }: InfrastructureStepProps) {
   const dynamicRows = [
-    { code: "02-9015", desc: "Safety (Rate $500/mo, Quantity defaults to schedule duration)", unit: "mo", rate: 500, qty: durationMonths },
-    { code: "02-9020", desc: "Temp Protection (Rate $0.25/sf, Quantity defaults to project square footage)", unit: "sf", rate: 0.25, qty: squareFootage },
-    { code: "02-9405", desc: "Material Hoist / Trash Chute (Rate $6,500/mo, Quantity defaults to duration)", unit: "mo", rate: 6500, qty: durationMonths },
+    { code: "02-9015", desc: `Safety (Rate $${SAFETY_RATE_PER_MONTH}/mo, Quantity defaults to schedule duration)`, unit: "mo", rate: SAFETY_RATE_PER_MONTH, qty: durationMonths },
+    { code: "02-9020", desc: `Temp Protection (Rate $${TEMP_PROTECTION_RATE_PER_SF}/sf, Quantity defaults to project square footage)`, unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, qty: squareFootage },
+    { code: "02-9405", desc: `Material Hoist / Trash Chute (Rate $${MATERIAL_HOIST_RATE_PER_MONTH.toLocaleString()}/mo, Quantity defaults to duration)`, unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, qty: durationMonths },
   ];
 
   const manualRows = [
-    { code: "02-9307", desc: "Knox Box (Rate $650/ea)", unit: "ea", rate: 650, val: quantities.knox, field: "knox" as const, isRateEditable: false },
-    { code: "02-9010", desc: "Progress Cleaning - Payroll (Rate $74/hr)", unit: "hr", rate: 74, val: quantities.payrollCleaning, field: "payroll" as const, isRateEditable: false },
-    { code: "02-9010", desc: "Progress Cleaning - Hired (Rate $54/hr)", unit: "hr", rate: 54, val: quantities.hiredCleaning, field: "hired" as const, isRateEditable: false },
+    { code: "02-9307", desc: `Knox Box (Rate $${KNOX_BOX_UNIT_COST}/ea)`, unit: "ea", rate: KNOX_BOX_UNIT_COST, val: quantities.knox, field: "knox" as const, isRateEditable: false },
+    { code: "02-9010", desc: `Progress Cleaning - Payroll (Rate $${PAYROLL_CLEANING_RATE_PER_EA}/hr)`, unit: "hr", rate: PAYROLL_CLEANING_RATE_PER_EA, val: quantities.payrollCleaning, field: "payroll" as const, isRateEditable: false },
+    { code: "02-9010", desc: `Progress Cleaning - Hired (Rate $${HIRED_CLEANING_RATE_PER_EA}/hr)`, unit: "hr", rate: HIRED_CLEANING_RATE_PER_EA, val: quantities.hiredCleaning, field: "hired" as const, isRateEditable: false },
     { code: "02-3200", desc: "Soil Borings (Lump Sum custom overrides)", unit: "ls", rate: rates.soilBorings, val: quantities.soilBorings, field: "soilQty" as const, isRateEditable: true },
   ];
 

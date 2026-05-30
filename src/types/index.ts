@@ -69,3 +69,112 @@ export interface CostTypeAggregation {
   total: number;
   percentage: number;
 }
+
+// ---------------------------------------------------------------------------
+// Constrained String Unions
+// ---------------------------------------------------------------------------
+
+/** Known cost type codes used in the estimation engine */
+export type CostType = 'M' | 'L' | 'S';
+
+/** Known units of measure — union with string to accept unknown UOMs from CSVs */
+export type UnitOfMeasure = 'SF' | 'LF' | 'EA' | 'LS' | 'CF' | 'CY' | 'SY' | 'GAL' | 'TON' | 'HR' | 'MO' | 'DAY' | 'WK';
+
+// ---------------------------------------------------------------------------
+// WorkbookCommand — Discriminated union of all undoable commands
+// (Canonical location — imported by useCommandHistory.ts)
+// ---------------------------------------------------------------------------
+
+export interface EditCellCommand {
+  type: "EDIT_CELL";
+  rowId: string;
+  field: keyof ProcessedTakeoffRow;
+  prevValue: string | number | boolean;
+  nextValue: string | number | boolean;
+  /** Cascade side-effects for itemId edits that propagate to sibling rows */
+  cascadeEffects?: Array<{
+    rowId: string;
+    prevFields: Partial<ProcessedTakeoffRow>;
+    nextFields: Partial<ProcessedTakeoffRow>;
+  }>;
+  /** Registry write side-effects for undo/redo persistence */
+  registryDelta?: {
+    projectRegistry?: { key: string; prevValue: string; nextValue: string };
+    globalRegistry?: { key: string; prevValue: string; nextValue: string };
+  };
+}
+
+export interface EditCustomCellCommand {
+  type: "EDIT_CUSTOM_CELL";
+  rowId: string;
+  columnId: string;
+  prevValue: string;
+  nextValue: string;
+}
+
+export interface PasteCommand {
+  type: "PASTE";
+  /** Ordered list of atomic sub-edits grouped as a single undo unit */
+  edits: Array<{
+    rowId: string;
+    field: keyof ProcessedTakeoffRow;
+    prevFields: Partial<ProcessedTakeoffRow>;
+    nextFields: Partial<ProcessedTakeoffRow>;
+  }>;
+  registryDelta?: {
+    projectRegistry?: Record<string, { prev: string; next: string }>;
+    globalRegistry?: Record<string, { prev: string; next: string }>;
+  };
+}
+
+export interface InsertRowCommand {
+  type: "INSERT_ROW";
+  rowId: string;
+  insertIndex: number;
+  rowData: ProcessedTakeoffRow;
+}
+
+export interface DeleteColumnCommand {
+  type: "DELETE_COLUMN";
+  columnDef: ColumnDefinition;
+  columnIndex: number;
+  /** Snapshot of all custom field values for this column across rows */
+  cellValues: Record<string, string | number>;
+}
+
+export interface AddColumnCommand {
+  type: "ADD_COLUMN";
+  columnDef: ColumnDefinition;
+}
+
+export interface ToggleCellLockCommand {
+  type: "TOGGLE_CELL_LOCK";
+  cellKey: string;
+  prevLocked: boolean;
+  nextLocked: boolean;
+}
+
+export interface MergeTakeoffDataCommand {
+  type: "MERGE_TAKEOFF_DATA";
+  /** Full row-level diff: previous field values for all rows that changed */
+  prevRowStates: Array<{
+    rowId: string;
+    fields: Partial<ProcessedTakeoffRow>;
+  }>;
+  nextRowStates: Array<{
+    rowId: string;
+    fields: Partial<ProcessedTakeoffRow>;
+  }>;
+  prevUnmapped: string[];
+  nextUnmapped: string[];
+}
+
+export type WorkbookCommand =
+  | EditCellCommand
+  | EditCustomCellCommand
+  | PasteCommand
+  | InsertRowCommand
+  | DeleteColumnCommand
+  | AddColumnCommand
+  | ToggleCellLockCommand
+  | MergeTakeoffDataCommand;

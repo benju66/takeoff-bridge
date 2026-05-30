@@ -62,9 +62,11 @@ function mapLineItemFromRow(row: Record<string, unknown>): ProcessedTakeoffRow {
     unitPrice: Number(row.unit_price) || 0,
     total: Number(row.total) || 0,
     isMapped: row.is_mapped === true,
-    rawQuantities: (row.raw_quantities as { qty: number; uom: string }[]) || [],
+    rawQuantities: Array.isArray(row.raw_quantities) ? (row.raw_quantities as { qty: number; uom: string }[]) : [],
     costType: (row.cost_type as string) || "M",
-    customFields: (row.custom_fields as Record<string, string | number>) || {},
+    customFields: (row.custom_fields != null && typeof row.custom_fields === "object" && !Array.isArray(row.custom_fields))
+      ? (row.custom_fields as Record<string, string | number>)
+      : {},
   };
 }
 
@@ -76,11 +78,19 @@ function mapEstimateFromRow(row: Record<string, unknown>): Omit<ProjectEstimate,
     fee: Number(row.fee) || 0,
     totalCost: Number(row.total_cost) || 0,
     generalConditionsTotal: Number(row.general_conditions_total) || 0,
-    gcUtilization: (row.gc_utilization as Record<string, number>) || {},
-    gcEquipmentOverrides: (row.gc_equipment_overrides as Record<string, number>) || {},
+    gcUtilization: (row.gc_utilization != null && typeof row.gc_utilization === "object" && !Array.isArray(row.gc_utilization))
+      ? (row.gc_utilization as Record<string, number>)
+      : {},
+    gcEquipmentOverrides: (row.gc_equipment_overrides != null && typeof row.gc_equipment_overrides === "object" && !Array.isArray(row.gc_equipment_overrides))
+      ? (row.gc_equipment_overrides as Record<string, number>)
+      : {},
     siteOperationsTotal: Number(row.site_operations_total) || 0,
-    siteOpsQuantities: (row.site_ops_quantities as Record<string, number>) || {},
-    siteOpsRates: (row.site_ops_rates as Record<string, number>) || {},
+    siteOpsQuantities: (row.site_ops_quantities != null && typeof row.site_ops_quantities === "object" && !Array.isArray(row.site_ops_quantities))
+      ? (row.site_ops_quantities as Record<string, number>)
+      : {},
+    siteOpsRates: (row.site_ops_rates != null && typeof row.site_ops_rates === "object" && !Array.isArray(row.site_ops_rates))
+      ? (row.site_ops_rates as Record<string, number>)
+      : {},
   };
 }
 
@@ -99,7 +109,7 @@ export async function getProjects(): Promise<Project[]> {
 
   if (error) {
     console.error("Failed to fetch projects from Supabase", error);
-    return [];
+    throw new Error(`Failed to fetch projects: ${error.message}`);
   }
   return (data || []).map(mapProjectFromRow);
 }
@@ -116,7 +126,7 @@ export async function getProject(projectId: string): Promise<Project | null> {
 
   if (error) {
     console.error(`Failed to fetch project ${projectId}`, error);
-    return null;
+    throw new Error(`Failed to fetch project ${projectId}: ${error.message}`);
   }
   return data ? mapProjectFromRow(data) : null;
 }
@@ -132,6 +142,7 @@ export async function saveProject(project: Project): Promise<void> {
 
   if (error) {
     console.error("Failed to save project to Supabase", error);
+    throw new Error(`Failed to save project: ${error.message}`);
   }
 }
 
@@ -148,6 +159,7 @@ export async function deleteProjectData(projectId: string): Promise<void> {
 
   if (error) {
     console.error(`Failed to delete project ${projectId}`, error);
+    throw new Error(`Failed to delete project ${projectId}: ${error.message}`);
   }
 }
 
@@ -170,7 +182,7 @@ export async function getProjectEstimate(
 
   if (error) {
     console.error(`Failed to fetch estimate for project ${projectId}`, error);
-    return null;
+    throw new Error(`Failed to fetch estimate for project ${projectId}: ${error.message}`);
   }
   return data ? mapEstimateFromRow(data) : null;
 }
@@ -202,6 +214,7 @@ export async function saveProjectEstimate(
 
   if (error) {
     console.error("Failed to save project estimate", error);
+    throw new Error(`Failed to save project estimate: ${error.message}`);
   }
 }
 
@@ -224,7 +237,7 @@ export async function getEstimateLineItems(
 
   if (error) {
     console.error(`Failed to fetch line items for project ${projectId}`, error);
-    return [];
+    throw new Error(`Failed to fetch line items for project ${projectId}: ${error.message}`);
   }
   return (data || []).map(mapLineItemFromRow);
 }
@@ -262,6 +275,7 @@ export async function saveEstimateLineItems(
 
   if (error) {
     console.error("Failed to save estimate line items via RPC", error);
+    throw new Error(`Failed to save estimate line items: ${error.message}`);
   }
 }
 
@@ -283,7 +297,7 @@ export async function getProjectRegistry(
 
   if (error) {
     console.error(`Failed to fetch registry for project ${projectId}`, error);
-    return {};
+    throw new Error(`Failed to fetch registry for project ${projectId}: ${error.message}`);
   }
   return (data?.registry as Record<string, string>) || {};
 }
@@ -302,6 +316,7 @@ export async function saveProjectRegistry(
 
   if (error) {
     console.error("Failed to save project registry", error);
+    throw new Error(`Failed to save project registry: ${error.message}`);
   }
 }
 
@@ -321,7 +336,7 @@ export async function getGlobalRegistry(): Promise<Record<string, string>> {
 
   if (error) {
     console.error("Failed to fetch global registry", error);
-    return {};
+    throw new Error(`Failed to fetch global registry: ${error.message}`);
   }
   return (data?.registry as Record<string, string>) || {};
 }
@@ -339,6 +354,7 @@ export async function saveGlobalRegistry(
 
   if (error) {
     console.error("Failed to save global registry", error);
+    throw new Error(`Failed to save global registry: ${error.message}`);
   }
 }
 
@@ -353,6 +369,7 @@ export async function deleteGlobalRegistry(): Promise<void> {
 
   if (error) {
     console.error("Failed to clear global registry", error);
+    throw new Error(`Failed to clear global registry: ${error.message}`);
   }
 }
 
@@ -374,7 +391,7 @@ export async function getProjectColumnDefs(
 
   if (error) {
     console.error(`Failed to fetch column defs for project ${projectId}`, error);
-    return null;
+    throw new Error(`Failed to fetch column defs for project ${projectId}: ${error.message}`);
   }
   return data ? (data.column_defs as ColumnDefinition[]) : null;
 }
@@ -393,6 +410,7 @@ export async function saveProjectColumnDefs(
 
   if (error) {
     console.error("Failed to save project column defs", error);
+    throw new Error(`Failed to save project column defs: ${error.message}`);
   }
 }
 
@@ -414,7 +432,7 @@ export async function getProjectLockedCells(
 
   if (error) {
     console.error(`Failed to fetch locked cells for project ${projectId}`, error);
-    return {};
+    throw new Error(`Failed to fetch locked cells for project ${projectId}: ${error.message}`);
   }
   return (data?.locked_cells as Record<string, boolean>) || {};
 }
@@ -433,5 +451,6 @@ export async function saveProjectLockedCells(
 
   if (error) {
     console.error("Failed to save project locked cells", error);
+    throw new Error(`Failed to save project locked cells: ${error.message}`);
   }
 }

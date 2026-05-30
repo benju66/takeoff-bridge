@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-table";
 import { parseTogalCSV } from "@/lib/parser";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, TogalRowPayload, ColumnDefinition, ContextMenuState } from "@/types";
+import { ProcessedTakeoffRow, TogalRowPayload, ColumnDefinition, ContextMenuState, WorkbookCommand } from "@/types";
 import { Project } from "@/types/db";
 import {
   getEstimateLineItems,
@@ -19,12 +19,13 @@ import {
   getProjectLockedCells,
   saveProjectRegistry,
   saveGlobalRegistry,
-  saveProjectColumnDefs,
-  saveProjectLockedCells,
 } from "@/lib/db";
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
 import { getFuzzySuggestions } from "@/lib/similarity";
-import { useCommandHistory, WorkbookCommand } from "./useCommandHistory";
+import { useCommandHistory } from "./useCommandHistory";
+import { useLockedCells } from "./useLockedCells";
+import { useColumnDefinitions } from "./useColumnDefinitions";
+import { useKeyboardNavigation } from "./useKeyboardNavigation";
 
 // ---------------------------------------------------------------------------
 // useTakeoffWorkbook — Core Step 4 grid state, handlers, and TanStack table
@@ -37,8 +38,7 @@ export interface UseTakeoffWorkbookReturn {
   lockedCells: Record<string, boolean>;
 
   // TanStack table instance (AMENDMENT GAP-4)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  table: any;
+  table: ReturnType<typeof useReactTable<ProcessedTakeoffRow>>;
 
   // UI state
   dragActive: boolean;
@@ -86,7 +86,6 @@ export function useTakeoffWorkbook(
   isLoaded: boolean,
   project: Project | null
 ): UseTakeoffWorkbookReturn {
-  // Derived project metrics needed by TanStack column renderers
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
 
@@ -99,26 +98,10 @@ export function useTakeoffWorkbook(
   const [userRegistry, setUserRegistry] = useState<Record<string, string>>({});
   const [globalRegistry, setGlobalRegistry] = useState<Record<string, string>>({});
 
-  // Column definitions
-  const [columnDefs, setColumnDefs] = useState<ColumnDefinition[]>([
-    { id: "costType", header: "TYPE", type: "default" },
-    { id: "itemId", header: "Code", type: "default" },
-    { id: "description", header: "Description", type: "default" },
-    { id: "matchedQty", header: "Quantity", type: "default" },
-    { id: "uom", header: "Unit", type: "default" },
-    { id: "unitPrice", header: "Rate", type: "default" },
-    { id: "total", header: "Total", type: "default" },
-    { id: "costPerUnit", header: "Cost/Unit", type: "default" },
-    { id: "costPerSf", header: "Cost/S.F.", type: "default" },
-  ]);
-
   // Context menu
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false, x: 0, y: 0, rowIndex: -1, columnId: "",
   });
-
-  // Cell locks
-  const [lockedCells, setLockedCells] = useState<Record<string, boolean>>({});
 
   // Unmapped classifications
   const [unmappedTakeoffClassifications, setUnmappedTakeoffClassifications] = useState<string[]>([]);
@@ -130,19 +113,29 @@ export function useTakeoffWorkbook(
   // Command Pattern history engine (replaces snapshot deep-clone system)
   const commandHistory = useCommandHistory();
 
-  // Stable refs for values needed inside useCallback with [] deps
+  // Stable refs — must be declared before hooks that consume them
   const rowsRef = useRef(rows);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  // --- Extracted hooks ---
+  const {
+    lockedCells, setLockedCells, handleToggleCellLock,
+  } = useLockedCells(projectId, isLoaded, commandHistory);
+
+  const {
+    columnDefs, setColumnDefs,
+    handleAddCustomColumn, handleDeleteColumn, handleRenameColumn,
+  } = useColumnDefinitions(projectId, isLoaded, commandHistory, rowsRef);
+
+  // Remaining stable refs
   const userRegistryRef = useRef(userRegistry);
   useEffect(() => { userRegistryRef.current = userRegistry; }, [userRegistry]);
   const globalRegistryRef = useRef(globalRegistry);
   useEffect(() => { globalRegistryRef.current = globalRegistry; }, [globalRegistry]);
-  const columnDefsRef = useRef(columnDefs);
-  useEffect(() => { columnDefsRef.current = columnDefs; }, [columnDefs]);
-  const lockedCellsRef = useRef(lockedCells);
-  useEffect(() => { lockedCellsRef.current = lockedCells; }, [lockedCells]);
   const unmappedRef = useRef(unmappedTakeoffClassifications);
   useEffect(() => { unmappedRef.current = unmappedTakeoffClassifications; }, [unmappedTakeoffClassifications]);
+
+  const { handleKeyDown, handleCustomKeyDown } = useKeyboardNavigation(rowsRef);
 
   // Focus tracking refs for blur-based commit
   const focusedCellRef = useRef<{ rowId: string; field: string; initialValue: string | number | boolean } | null>(null);
@@ -182,7 +175,7 @@ export function useTakeoffWorkbook(
             const rd = cmd.registryDelta.projectRegistry;
             setUserRegistry((prev) => {
               const next = { ...prev, [rd.key]: rd.nextValue };
-              saveProjectRegistry(projectId, next);
+              saveProjectRegistry(projectId, next).catch((err) => console.error('Registry persist failed:', err));
               return next;
             });
           }
@@ -190,7 +183,7 @@ export function useTakeoffWorkbook(
             const rd = cmd.registryDelta.globalRegistry;
             setGlobalRegistry((prev) => {
               const next = { ...prev, [rd.key]: rd.nextValue };
-              saveGlobalRegistry(next);
+              saveGlobalRegistry(next).catch((err) => console.error('Global registry persist failed:', err));
               return next;
             });
           }
@@ -230,7 +223,7 @@ export function useTakeoffWorkbook(
               for (const [key, val] of Object.entries(cmd.registryDelta!.projectRegistry!)) {
                 next[key] = val.next;
               }
-              saveProjectRegistry(projectId, next);
+              saveProjectRegistry(projectId, next).catch((err) => console.error('Registry persist failed:', err));
               return next;
             });
           }
@@ -240,7 +233,7 @@ export function useTakeoffWorkbook(
               for (const [key, val] of Object.entries(cmd.registryDelta!.globalRegistry!)) {
                 next[key] = val.next;
               }
-              saveGlobalRegistry(next);
+              saveGlobalRegistry(next).catch((err) => console.error('Global registry persist failed:', err));
               return next;
             });
           }
@@ -285,7 +278,7 @@ export function useTakeoffWorkbook(
         break;
       }
     }
-  }, [projectId]);
+  }, [projectId, setColumnDefs, setLockedCells]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -321,7 +314,7 @@ export function useTakeoffWorkbook(
             const rd = cmd.registryDelta.projectRegistry;
             setUserRegistry((prev) => {
               const next = { ...prev, [rd.key]: rd.prevValue };
-              saveProjectRegistry(projectId, next);
+              saveProjectRegistry(projectId, next).catch((err) => console.error('Registry persist failed:', err));
               return next;
             });
           }
@@ -329,7 +322,7 @@ export function useTakeoffWorkbook(
             const rd = cmd.registryDelta.globalRegistry;
             setGlobalRegistry((prev) => {
               const next = { ...prev, [rd.key]: rd.prevValue };
-              saveGlobalRegistry(next);
+              saveGlobalRegistry(next).catch((err) => console.error('Global registry persist failed:', err));
               return next;
             });
           }
@@ -371,7 +364,7 @@ export function useTakeoffWorkbook(
               for (const [key, val] of Object.entries(cmd.registryDelta!.projectRegistry!)) {
                 next[key] = val.prev;
               }
-              saveProjectRegistry(projectId, next);
+              saveProjectRegistry(projectId, next).catch((err) => console.error('Registry persist failed:', err));
               return next;
             });
           }
@@ -381,7 +374,7 @@ export function useTakeoffWorkbook(
               for (const [key, val] of Object.entries(cmd.registryDelta!.globalRegistry!)) {
                 next[key] = val.prev;
               }
-              saveGlobalRegistry(next);
+              saveGlobalRegistry(next).catch((err) => console.error('Global registry persist failed:', err));
               return next;
             });
           }
@@ -435,7 +428,7 @@ export function useTakeoffWorkbook(
         break;
       }
     }
-  }, [projectId]);
+  }, [projectId, setColumnDefs, setLockedCells]);
 
   // ---------------------------------------------------------------------------
   // handleUndo — Pop from undo stack and apply inverse
@@ -501,94 +494,78 @@ export function useTakeoffWorkbook(
     let cancelled = false;
 
     (async () => {
-      // Load all data sources in parallel
-      const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks] =
-        await Promise.all([
-          getEstimateLineItems(projectId),
-          getProjectRegistry(projectId),
-          getGlobalRegistry(),
-          getProjectColumnDefs(projectId),
-          getProjectLockedCells(projectId),
-        ]);
+      try {
+        // Load all data sources in parallel
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks] =
+          await Promise.all([
+            getEstimateLineItems(projectId),
+            getProjectRegistry(projectId),
+            getGlobalRegistry(),
+            getProjectColumnDefs(projectId),
+            getProjectLockedCells(projectId),
+          ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      // Apply registries
-      setUserRegistry(savedRegistry);
-      setGlobalRegistry(savedGlobalReg);
+        // Apply registries
+        setUserRegistry(savedRegistry);
+        setGlobalRegistry(savedGlobalReg);
 
-      // Apply line items — honor sort_order from DB
-      if (savedLineItems.length > 0) {
-        // Automatically merge any newly harvested master cost codes
-        const masterItems = initializeDefaultEstimateRows();
-        const merged = [...savedLineItems];
+        // Apply line items — honor sort_order from DB
+        if (savedLineItems.length > 0) {
+          // Automatically merge any newly harvested master cost codes
+          const masterItems = initializeDefaultEstimateRows();
+          const merged = [...savedLineItems];
 
-        masterItems.forEach((masterItem) => {
-          const exists = savedLineItems.some(
-            (savedItem) => savedItem.itemId === masterItem.itemId
-          );
-          if (!exists) {
-            // Append new master codes to TAIL — do NOT re-sort
-            merged.push(masterItem);
-          }
-        });
+          masterItems.forEach((masterItem) => {
+            const exists = savedLineItems.some(
+              (savedItem) => savedItem.itemId === masterItem.itemId
+            );
+            if (!exists) {
+              // Append new master codes to TAIL — do NOT re-sort
+              merged.push(masterItem);
+            }
+          });
 
-        // Normalize all standard row IDs to be row-${itemId} to prevent collisions
-        merged.forEach((row) => {
-          if (row.itemId && row.id && row.id.startsWith("row-")) {
-            row.id = `row-${row.itemId}`;
-          }
-        });
+          // Normalize all standard row IDs to be row-${itemId} to prevent collisions
+          merged.forEach((row) => {
+            if (row.itemId && row.id && row.id.startsWith("row-")) {
+              row.id = `row-${row.itemId}`;
+            }
+          });
 
-        // DO NOT sort — honor sort_order from DB to preserve manual row positions
-        setRows(merged);
-      } else {
-        // First initialization — sort by itemId for clean divisional ordering
-        const defaultRows = initializeDefaultEstimateRows();
-        setRows(defaultRows);
+          // DO NOT sort — honor sort_order from DB to preserve manual row positions
+          setRows(merged);
+        } else {
+          // First initialization — sort by itemId for clean divisional ordering
+          const defaultRows = initializeDefaultEstimateRows();
+          setRows(defaultRows);
+        }
+
+        // Apply column definitions
+        if (savedColDefs) {
+          setColumnDefs(savedColDefs);
+        }
+
+        // Apply cell locks
+        setLockedCells(savedLocks);
+      } catch (err) {
+        console.error('Failed to load workbook data:', err);
+        if (!cancelled) {
+          // Graceful degradation: initialize with defaults
+          const defaultRows = initializeDefaultEstimateRows();
+          setRows(defaultRows);
+        }
       }
-
-      // Apply column definitions
-      if (savedColDefs) {
-        setColumnDefs(savedColDefs);
-      }
-
-      // Apply cell locks
-      setLockedCells(savedLocks);
     })();
 
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, setColumnDefs, setLockedCells]);
 
   // ---------------------------------------------------------------------------
-  // Auto-persist column definitions (debounced 1500ms)
+  // Auto-persist column definitions — handled by useColumnDefinitions hook
+  // Auto-persist cell locks — handled by useLockedCells hook
   // ---------------------------------------------------------------------------
-  const columnDefsString = JSON.stringify(columnDefs);
-  const colDefsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!isLoaded || !projectId) return;
-    if (colDefsTimerRef.current) clearTimeout(colDefsTimerRef.current);
-    colDefsTimerRef.current = setTimeout(() => {
-      saveProjectColumnDefs(projectId, columnDefs);
-    }, 1500);
-    return () => { if (colDefsTimerRef.current) clearTimeout(colDefsTimerRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefsString, isLoaded, projectId]);
-
-  // ---------------------------------------------------------------------------
-  // Auto-persist cell locks (debounced 1500ms)
-  // ---------------------------------------------------------------------------
-  const lockedCellsString = JSON.stringify(lockedCells);
-  const locksTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!isLoaded || !projectId) return;
-    if (locksTimerRef.current) clearTimeout(locksTimerRef.current);
-    locksTimerRef.current = setTimeout(() => {
-      saveProjectLockedCells(projectId, lockedCells);
-    }, 1500);
-    return () => { if (locksTimerRef.current) clearTimeout(locksTimerRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedCellsString, isLoaded, projectId]);
 
   // ---------------------------------------------------------------------------
   // Merge takeoff CSV data
@@ -702,23 +679,8 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
-  // Toggle cell lock
+  // Toggle cell lock — delegated to useLockedCells hook
   // ---------------------------------------------------------------------------
-  const handleToggleCellLock = (rowId: string, columnId: string) => {
-    const cellKey = `${rowId}::${columnId}`;
-    const prevLocked = !!lockedCells[cellKey];
-
-    // pushCommand BEFORE state setter (AGENTS.md guardrail)
-    commandHistory.pushCommand({
-      type: "TOGGLE_CELL_LOCK",
-      cellKey,
-      prevLocked,
-      nextLocked: !prevLocked,
-    });
-
-    setLockedCells((prev) => ({ ...prev, [cellKey]: !prev[cellKey] }));
-    setContextMenu({ visible: false, x: 0, y: 0, rowIndex: -1, columnId: "" });
-  };
 
   // ---------------------------------------------------------------------------
   // Cell edit direct (cascading logic)
@@ -828,44 +790,8 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
-  // Keyboard navigation
+  // Keyboard navigation — delegated to useKeyboardNavigation hook
   // ---------------------------------------------------------------------------
-  const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => {
-    const columnsList: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
-    const colIdx = columnsList.indexOf(type);
-
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx - 1}`)?.focus();
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
-    }
-    if (e.key === "Tab") {
-      if (e.shiftKey) {
-        if (colIdx > 0) {
-          e.preventDefault();
-          document.getElementById(`${columnsList[colIdx - 1]}-input-${rIdx}`)?.focus();
-        } else if (rIdx > 0) {
-          e.preventDefault();
-          document.getElementById(`price-input-${rIdx - 1}`)?.focus();
-        }
-      } else {
-        if (colIdx < columnsList.length - 1) {
-          e.preventDefault();
-          document.getElementById(`${columnsList[colIdx + 1]}-input-${rIdx}`)?.focus();
-        } else if (rIdx < rows.length - 1) {
-          e.preventDefault();
-          document.getElementById(`code-input-${rIdx + 1}`)?.focus();
-        }
-      }
-    }
-  };
 
   // ---------------------------------------------------------------------------
   // Paste handler
@@ -1062,11 +988,11 @@ export function useTakeoffWorkbook(
 
         if (registryChanged) {
           setUserRegistry(currentRegistry);
-          saveProjectRegistry(projectId, currentRegistry);
+          saveProjectRegistry(projectId, currentRegistry).catch((err) => console.error('Registry persist failed:', err));
         }
         if (globalRegistryChanged) {
           setGlobalRegistry(currentGlobalRegistry);
-          saveGlobalRegistry(currentGlobalRegistry);
+          saveGlobalRegistry(currentGlobalRegistry).catch((err) => console.error('Global registry persist failed:', err));
         }
         setRows(updated);
       }
@@ -1084,7 +1010,7 @@ export function useTakeoffWorkbook(
     if (classification !== "MANUAL ENTRY") {
       if (newRegistry) {
         setUserRegistry(newRegistry);
-        saveProjectRegistry(projectId, newRegistry);
+        saveProjectRegistry(projectId, newRegistry).catch((err) => console.error('Registry persist failed:', err));
 
         if (classification && field === "itemId") {
           const newGlobalRegistry = {
@@ -1092,7 +1018,7 @@ export function useTakeoffWorkbook(
             [classification]: String(value).trim(),
           };
           setGlobalRegistry(newGlobalRegistry);
-          saveGlobalRegistry(newGlobalRegistry);
+          saveGlobalRegistry(newGlobalRegistry).catch((err) => console.error('Global registry persist failed:', err));
         }
       }
     }
@@ -1292,71 +1218,12 @@ export function useTakeoffWorkbook(
   }, [commandHistory]);
 
   // ---------------------------------------------------------------------------
-  // Custom column keyboard navigation
+  // Custom column keyboard navigation — delegated to useKeyboardNavigation hook
   // ---------------------------------------------------------------------------
-  const handleCustomKeyDown = (e: React.KeyboardEvent, rIdx: number, colId: string) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx - 1}`)?.focus();
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
-    }
-  };
 
   // ---------------------------------------------------------------------------
-  // Column management
+  // Column management — delegated to useColumnDefinitions hook
   // ---------------------------------------------------------------------------
-  const handleAddCustomColumn = () => {
-    const newColId = `custom-${Date.now()}`;
-    const newColDef: ColumnDefinition = { id: newColId, header: "NEW COLUMN", type: "custom" };
-
-    // pushCommand BEFORE state setter (AGENTS.md guardrail)
-    commandHistory.pushCommand({
-      type: "ADD_COLUMN",
-      columnDef: newColDef,
-    });
-
-    setColumnDefs((prev) => [...prev, newColDef]);
-  };
-
-  const handleDeleteColumn = (colId: string) => {
-    const currentColDefs = columnDefsRef.current;
-    const colIndex = currentColDefs.findIndex((col) => col.id === colId);
-    if (colIndex === -1) return;
-    const colDef = currentColDefs[colIndex];
-
-    // Capture all cell values for this column across rows
-    const cellValues: Record<string, string | number> = {};
-    const currentRows = rowsRef.current;
-    for (const r of currentRows) {
-      const val = r.customFields?.[colId];
-      if (val !== undefined) {
-        cellValues[r.id] = val;
-      }
-    }
-
-    // pushCommand BEFORE state setter (AGENTS.md guardrail)
-    commandHistory.pushCommand({
-      type: "DELETE_COLUMN",
-      columnDef: colDef,
-      columnIndex: colIndex,
-      cellValues,
-    });
-
-    setColumnDefs((prev) => prev.filter((col) => col.id !== colId));
-  };
-
-  const handleRenameColumn = (colId: string, newHeader: string) => {
-    setColumnDefs((prev) =>
-      prev.map((col) => (col.id === colId ? { ...col, header: newHeader } : col))
-    );
-  };
 
   // ---------------------------------------------------------------------------
   // File upload & drag/drop

@@ -26,6 +26,7 @@ import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingSte
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { TakeoffIngestionStep } from "@/components/workspace/TakeoffIngestionStep";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -43,6 +44,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const {
     project,
     isLoaded,
+    error,
     projectDurationMonths,
     handleProjectParamChange,
   } = useProjectWorkspace(projectId);
@@ -97,7 +99,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   // ---------------------------------------------------------------------------
   // Persistence Orchestration
   // ---------------------------------------------------------------------------
-  useEstimatePersistence(
+  const { saveStatus, saveError } = useEstimatePersistence(
     projectId,
     isLoaded,
     rows,
@@ -111,14 +113,37 @@ export default function ProjectWorkspace({ params }: PageProps) {
   );
 
   // ---------------------------------------------------------------------------
-  // Guard: Project Not Found
+  // Guards: Loading → Error → Not Found
   // ---------------------------------------------------------------------------
+  if (!isLoaded) {
+    return (
+      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+        <div className="w-10 h-10 border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin mb-4" />
+        <h3 className="text-sm font-bold text-foreground mb-1 uppercase tracking-wider">Loading Project</h3>
+        <p className="text-xs text-slate-600 dark:text-slate-400">Retrieving workspace data…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+        <AlertTriangle className="text-red-500 dark:text-red-400 mb-4" size={48} />
+        <h3 className="text-lg font-bold text-red-700 dark:text-red-300 mb-2">Failed to Load Project</h3>
+        <p className="text-xs text-red-600/80 dark:text-red-400/80 mb-6 max-w-md text-center font-mono break-all">{error}</p>
+        <Link href="/projects" className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-grid-border text-xs px-5 py-2.5 rounded font-bold uppercase transition-colors">
+          Return to Dashboard
+        </Link>
+      </div>
+    );
+  }
+
   if (!project) {
     return (
       <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
         <AlertTriangle className="text-amber-500 mb-4 animate-bounce" size={48} />
-        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Project Database Node Offline</h3>
-        <p className="text-xs text-slate-600 dark:text-slate-400 mb-6">Requested Project ID does not exist in local cache.</p>
+        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Project Not Found</h3>
+        <p className="text-xs text-slate-600 dark:text-slate-400 mb-6">Project ID &quot;{projectId}&quot; does not exist.</p>
         <Link href="/projects" className="bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-grid-border text-xs px-5 py-2.5 rounded font-bold uppercase transition-colors">
           Return to Dashboard
         </Link>
@@ -158,6 +183,29 @@ export default function ProjectWorkspace({ params }: PageProps) {
             <span>Size: {project.squareFootage.toLocaleString()} SF</span>
             <span className="text-slate-400 dark:text-slate-650">|</span>
             <span>Units: {project.unitCount.toLocaleString()}</span>
+            {saveStatus !== 'idle' && (
+              <>
+                <span className="text-slate-400 dark:text-slate-650">|</span>
+                {saveStatus === 'saving' && (
+                  <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Saving…
+                  </span>
+                )}
+                {saveStatus === 'saved' && (
+                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Saved ✓
+                  </span>
+                )}
+                {saveStatus === 'error' && (
+                  <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400" title={saveError || undefined}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    Save failed
+                  </span>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -229,79 +277,89 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
       {/* Step Panels — Single active panel at a time */}
       {activeTab === "step1" && (
-        <ArchitecturalParametersStep
-          project={project}
-          onParamChange={handleProjectParamChange}
-        />
+        <ErrorBoundary>
+          <ArchitecturalParametersStep
+            project={project}
+            onParamChange={handleProjectParamChange}
+          />
+        </ErrorBoundary>
       )}
 
       {activeTab === "step2" && (
-        <PersonnelPricingStep
-          durationMonths={projectDurationMonths}
-          utilizations={personnel.utilizations}
-          onUtilizationChange={personnel.setUtilization}
-          equipment={personnel.equipment}
-          onEquipmentChange={personnel.handleEquipmentChange}
-          calcResult={personnel.calcResult}
-          totalGCs={personnel.totalGCs}
-        />
+        <ErrorBoundary>
+          <PersonnelPricingStep
+            durationMonths={projectDurationMonths}
+            utilizations={personnel.utilizations}
+            onUtilizationChange={personnel.setUtilization}
+            equipment={personnel.equipment}
+            onEquipmentChange={personnel.handleEquipmentChange}
+            calcResult={personnel.calcResult}
+            totalGCs={personnel.totalGCs}
+          />
+        </ErrorBoundary>
       )}
 
       {activeTab === "step3" && (
-        <InfrastructureStep
-          durationMonths={projectDurationMonths}
-          squareFootage={squareFootage}
-          quantities={infrastructure.quantities}
-          rates={infrastructure.rates}
-          onSiteOpsChange={infrastructure.handleSiteOpsChange}
-          calcResult={infrastructure.calcResult}
-          siteOperationsTotal={infrastructure.siteOperationsTotal}
-        />
+        <ErrorBoundary>
+          <InfrastructureStep
+            durationMonths={projectDurationMonths}
+            squareFootage={squareFootage}
+            quantities={infrastructure.quantities}
+            rates={infrastructure.rates}
+            onSiteOpsChange={infrastructure.handleSiteOpsChange}
+            calcResult={infrastructure.calcResult}
+            siteOperationsTotal={infrastructure.siteOperationsTotal}
+          />
+        </ErrorBoundary>
       )}
 
       {activeTab === "step4" && (
-        <TakeoffIngestionStep
-          project={project}
-          projectDurationMonths={projectDurationMonths}
-          squareFootage={squareFootage}
-          unitCount={unitCount}
-          rows={rows}
-          columnDefs={columnDefs}
-          lockedCells={lockedCells}
-          table={table}
-          dragActive={dragActive}
-          appendData={appendData}
-          setAppendData={setAppendData}
-          contextMenu={contextMenu}
-          setContextMenu={setContextMenu}
-          unmappedTakeoffClassifications={unmappedTakeoffClassifications}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          undoStackSize={undoStackSize}
-          redoStackSize={redoStackSize}
-          handleAddCustomColumn={handleAddCustomColumn}
-          handleDeleteColumn={handleDeleteColumn}
-          handleRenameColumn={handleRenameColumn}
-          handleFileUpload={handleFileUpload}
-          handleDrag={handleDrag}
-          handleDrop={handleDrop}
-          handleUndo={handleUndo}
-          handleRedo={handleRedo}
-          takeoffSummary={takeoffSummary}
-          divisionBreakdown={divisionBreakdown}
-          costTypeBreakdown={costTypeBreakdown}
-        />
+        <ErrorBoundary>
+          <TakeoffIngestionStep
+            project={project}
+            projectDurationMonths={projectDurationMonths}
+            squareFootage={squareFootage}
+            unitCount={unitCount}
+            rows={rows}
+            columnDefs={columnDefs}
+            lockedCells={lockedCells}
+            table={table}
+            dragActive={dragActive}
+            appendData={appendData}
+            setAppendData={setAppendData}
+            contextMenu={contextMenu}
+            setContextMenu={setContextMenu}
+            unmappedTakeoffClassifications={unmappedTakeoffClassifications}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            undoStackSize={undoStackSize}
+            redoStackSize={redoStackSize}
+            handleAddCustomColumn={handleAddCustomColumn}
+            handleDeleteColumn={handleDeleteColumn}
+            handleRenameColumn={handleRenameColumn}
+            handleFileUpload={handleFileUpload}
+            handleDrag={handleDrag}
+            handleDrop={handleDrop}
+            handleUndo={handleUndo}
+            handleRedo={handleRedo}
+            takeoffSummary={takeoffSummary}
+            divisionBreakdown={divisionBreakdown}
+            costTypeBreakdown={costTypeBreakdown}
+          />
+        </ErrorBoundary>
       )}
 
       {/* Floating Context Menu Portal */}
-      <ContextMenuPortal
-        contextMenu={contextMenu}
-        rows={rows}
-        lockedCells={lockedCells}
-        onToggleCellLock={handleToggleCellLock}
-        onInsertRow={insertManualRow}
-        onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
-      />
+      <ErrorBoundary>
+        <ContextMenuPortal
+          contextMenu={contextMenu}
+          rows={rows}
+          lockedCells={lockedCells}
+          onToggleCellLock={handleToggleCellLock}
+          onInsertRow={insertManualRow}
+          onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
+        />
+      </ErrorBoundary>
     </div>
   );
 }

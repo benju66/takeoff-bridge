@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { flexRender } from "@tanstack/react-table";
+import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
@@ -27,8 +27,7 @@ interface TakeoffIngestionStepProps {
   rows: ProcessedTakeoffRow[];
   columnDefs: ColumnDefinition[];
   lockedCells: Record<string, boolean>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  table: any;
+  table: ReturnType<typeof useReactTable<ProcessedTakeoffRow>>;
   dragActive: boolean;
   appendData: boolean;
   setAppendData: (v: boolean) => void;

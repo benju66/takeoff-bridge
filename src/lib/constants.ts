@@ -79,3 +79,27 @@ export const OPERATIONAL_EXPENSE_DEFAULTS: OperationalExpenseConfig[] = [
   { code: "01-1200", description: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, quantityDriver: "superintendent" },
   { code: "01-5111", description: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, quantityDriver: "fixed" },
 ];
+
+// ---------------------------------------------------------------------------
+// Financial Markup Rates
+// ---------------------------------------------------------------------------
+
+/** General Liability Insurance — 1% of subtotal */
+export const GL_RATE = 0.01;
+
+/** Contractor Fee — 5% of subtotal */
+export const FEE_RATE = 0.05;
+
+// ---------------------------------------------------------------------------
+// Division 02 — Site Operations Default Rates
+// ---------------------------------------------------------------------------
+
+// Dynamic rates (quantity driven by project duration or square footage)
+export const SAFETY_RATE_PER_MONTH = 500;
+export const TEMP_PROTECTION_RATE_PER_SF = 0.25;
+export const MATERIAL_HOIST_RATE_PER_MONTH = 6500;
+
+// Manual rates (quantity entered by estimator)
+export const KNOX_BOX_UNIT_COST = 650;
+export const PAYROLL_CLEANING_RATE_PER_EA = 74;
+export const HIRED_CLEANING_RATE_PER_EA = 54;

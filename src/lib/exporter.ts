@@ -1,34 +1,11 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
+import { GL_RATE, FEE_RATE } from "./constants";
+import { escapeCSVField } from "./exportUtils";
 import ExcelJS from "exceljs";
 
-
-/**
- * Safely escapes value fields for safe, compliant CSV ingestion.
- * Wraps values containing commas, quotes, or newlines in double quotes, doubling internal quotes.
- */
-function escapeCSVField(val: unknown): string {
-  if (val === undefined || val === null) return "";
-  const str = String(val);
-  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
-/**
- * Safely converts a 1-based column index to an Excel column letter (e.g. 1 -> A, 27 -> AA).
- */
-export function getColumnLetter(colIndex: number): string {
-  let temp = colIndex;
-  let letter = "";
-  while (temp > 0) {
-    const modulo = (temp - 1) % 26;
-    letter = String.fromCharCode(65 + modulo) + letter;
-    temp = Math.floor((temp - modulo) / 26);
-  }
-  return letter;
-}
+// Re-export for backward compatibility
+export { getColumnLetter } from "./exportUtils";
 
 /**
  * Generates a clean Excel payload CSV string.
@@ -107,8 +84,8 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
   // Calculate dynamic subtotal and append standard markup layers
   const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
   if (subtotal > 0) {
-    const generalLiability = subtotal * 0.01;
-    const fee = subtotal * 0.05;
+    const generalLiability = subtotal * GL_RATE;
+    const fee = subtotal * FEE_RATE;
 
     const glRow = columnDefs.map((col) => {
       if (col.type === "default") {
@@ -227,8 +204,8 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
   // Calculate subtotal and append standard markup layers dynamically
   const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
   if (subtotal > 0) {
-    const generalLiability = subtotal * 0.01;
-    const fee = subtotal * 0.05;
+    const generalLiability = subtotal * GL_RATE;
+    const fee = subtotal * FEE_RATE;
 
     csvLines.push([
       "1-10000.000",

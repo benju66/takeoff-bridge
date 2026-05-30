@@ -36,10 +36,18 @@ export default function GlobalRegistryDashboard() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const loaded = await getGlobalRegistry();
-      if (!cancelled) {
-        setRegistry(loaded);
-        setIsLoaded(true);
+      try {
+        const loaded = await getGlobalRegistry();
+        if (!cancelled) {
+          setRegistry(loaded);
+          setIsLoaded(true);
+        }
+      } catch (err) {
+        console.error('Failed to load global registry:', err);
+        if (!cancelled) {
+          setRegistry({});
+          setIsLoaded(true);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -52,13 +60,23 @@ export default function GlobalRegistryDashboard() {
     delete updatedRegistry[classificationToDelete];
     
     setRegistry(updatedRegistry);
-    await saveGlobalRegistry(updatedRegistry);
+    try {
+      await saveGlobalRegistry(updatedRegistry);
+    } catch (err) {
+      console.error('Failed to save registry after rule deletion:', err);
+      alert('Failed to save registry update. Please try again.');
+    }
   };
 
   const handleFlushCache = async () => {
     if (window.confirm("CRITICAL ADMIN OVERRIDE:\nAre you sure you want to permanently flush the entire global corporate registry cache?\nAll harvested lookup mappings will be permanently erased. This cannot be undone.")) {
       setRegistry({});
-      await deleteGlobalRegistry();
+      try {
+        await deleteGlobalRegistry();
+      } catch (err) {
+        console.error('Failed to flush global registry:', err);
+        alert('Failed to flush registry. Please try again.');
+      }
     }
   };
 

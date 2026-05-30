@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { PersonnelCalcResult } from "@/lib/calculations";
+import { STAFF_ROLE_DEFAULTS, OPERATIONAL_EXPENSE_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // PersonnelPricingStep — Step 2 Panel
@@ -27,26 +28,20 @@ const totalCellClass = "p-3 text-center border-b border-grid-border text-emerald
 const inputCellClass = "p-0 border-r border-b border-grid-border";
 const inputClass = "w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-center px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono";
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const staffRoleKeys = ["ex", "srPm", "pm", "pe", "srSu", "su", "asstSu", "pa"] as const;
+// Derived from canonical constants — single source of truth
+const STAFF_DISPLAY = STAFF_ROLE_DEFAULTS.map((role) => ({
+  key: role.key,
+  code: role.code,
+  role: role.label,
+  rate: role.defaultRate,
+}));
 
-// Static role display config
-const STAFF_DISPLAY: Array<{ key: typeof staffRoleKeys[number]; code: string; role: string; rate: number }> = [
-  { key: "ex", code: "01-0310", role: "Project Executive", rate: 175 },
-  { key: "srPm", code: "01-0320", role: "Sr Project Manager", rate: 135 },
-  { key: "pm", code: "01-0330", role: "Project Manager", rate: 120 },
-  { key: "pe", code: "01-0340", role: "Project Engineer", rate: 85 },
-  { key: "srSu", code: "01-0410", role: "Sr Superintendent", rate: 125 },
-  { key: "su", code: "01-0420", role: "Superintendent", rate: 110 },
-  { key: "asstSu", code: "01-0430", role: "Asst. Superintendent", rate: 85 },
-  { key: "pa", code: "01-0510", role: "Project Assistant", rate: 55 },
-];
-
-const OPS_DISPLAY: Array<{ code: string; desc: string; unit: string; rate: number }> = [
-  { code: "01-1000", desc: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500 },
-  { code: "01-1200", desc: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200 },
-  { code: "01-5111", desc: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135 },
-];
+const OPS_DISPLAY = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => ({
+  code: expense.code,
+  desc: expense.description,
+  unit: expense.unit,
+  rate: expense.rate,
+}));
 
 const EQ_DISPLAY: Array<{ code: string; desc: string; field: "dumpsters" | "toilets" | "electric" }> = [
   { code: "01-5130", desc: "Dumpsters (Lump Sum)", field: "dumpsters" },

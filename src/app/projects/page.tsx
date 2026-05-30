@@ -20,8 +20,12 @@ export default function ProjectsDashboard() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const loaded = await getProjects();
-      if (!cancelled) setProjects(loaded);
+      try {
+        const loaded = await getProjects();
+        if (!cancelled) setProjects(loaded);
+      } catch (err) {
+        console.error('Failed to load projects:', err);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -36,7 +40,7 @@ export default function ProjectsDashboard() {
     const bDate = bidDate || new Date().toISOString().split("T")[0];
 
     const newProject: Project = {
-      id: `PRJ-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: crypto.randomUUID(),
       name: name.trim(),
       location: loc,
       squareFootage: sqFt,
@@ -45,9 +49,15 @@ export default function ProjectsDashboard() {
       createdAt: new Date().toISOString(),
     };
 
-    await saveProject(newProject);
-    const updated = await getProjects();
-    setProjects(updated);
+    try {
+      await saveProject(newProject);
+      const updated = await getProjects();
+      setProjects(updated);
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      alert('Failed to create project. Please try again.');
+      return;
+    }
 
     // Reset Form Fields
     setName("");
@@ -60,9 +70,14 @@ export default function ProjectsDashboard() {
 
   const handleDeleteProject = async (projectId: string) => {
     if (window.confirm("Are you sure you want to permanently erase this project and all associated estimate matrices?")) {
-      await deleteProjectData(projectId);
-      const updated = await getProjects();
-      setProjects(updated);
+      try {
+        await deleteProjectData(projectId);
+        const updated = await getProjects();
+        setProjects(updated);
+      } catch (err) {
+        console.error('Failed to delete project:', err);
+        alert('Failed to delete project. Please try again.');
+      }
     }
   };
 
