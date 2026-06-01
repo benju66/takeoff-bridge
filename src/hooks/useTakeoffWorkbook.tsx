@@ -380,15 +380,15 @@ export function useTakeoffWorkbook(
 
   // Default pixel widths for built-in columns. ColumnDefinition.size overrides these.
   const DEFAULT_COLUMN_SIZES: Record<string, { size: number; minSize: number; maxSize?: number }> = {
-    costType:    { size: 55,  minSize: 45,  maxSize: 80  },
-    itemId:      { size: 110, minSize: 80,  maxSize: 200 },
-    description: { size: 300, minSize: 200, maxSize: 600 },
-    matchedQty:  { size: 100, minSize: 70,  maxSize: 160 },
-    uom:         { size: 60,  minSize: 45,  maxSize: 100 },
-    unitPrice:   { size: 110, minSize: 80,  maxSize: 180 },
-    total:       { size: 120, minSize: 90,  maxSize: 200 },
-    costPerUnit: { size: 110, minSize: 80,  maxSize: 180 },
-    costPerSf:   { size: 110, minSize: 80,  maxSize: 180 },
+    costType:    { size: 75,  minSize: 30 },
+    itemId:      { size: 160, minSize: 30 },
+    description: { size: 300, minSize: 30 },
+    matchedQty:  { size: 100, minSize: 30 },
+    uom:         { size: 60,  minSize: 30 },
+    unitPrice:   { size: 110, minSize: 30 },
+    total:       { size: 120, minSize: 30 },
+    costPerUnit: { size: 110, minSize: 30 },
+    costPerSf:   { size: 110, minSize: 30 },
   };
 
   /** Resolve column size from ColumnDefinition overrides or DEFAULT_COLUMN_SIZES. */

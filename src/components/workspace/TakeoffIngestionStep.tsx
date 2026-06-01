@@ -379,8 +379,8 @@ export function TakeoffIngestionStep({
               {table.getHeaderGroups().map((headerGroup: HeaderGroup<ProcessedTakeoffRow>) => (
                 <tr
                   key={headerGroup.id}
-                  className="bg-[#3057A6] text-white uppercase border-b border-grid-border tracking-wider font-bold font-sans text-[13px]"
-                  style={{ display: "flex", width: table.getTotalSize() }}
+                  className="bg-[#3057A6] text-white uppercase border-b border-l-4 border-l-transparent border-grid-border tracking-wider font-bold font-sans text-[13px]"
+                  style={{ display: "flex", minWidth: "100%", width: table.getTotalSize() }}
                 >
                   {headerGroup.headers.map((header: Header<ProcessedTakeoffRow, unknown>) => {
                     const alignClass = "text-center";
@@ -430,6 +430,7 @@ export function TakeoffIngestionStep({
                       </th>
                     );
                   })}
+                  <th className="border-b border-grid-border bg-[#3057A6]" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
               ))}
             </thead>
@@ -451,12 +452,13 @@ export function TakeoffIngestionStep({
                       return (
                         <tr
                           key={`div-header-${item.divisionCode}`}
-                          className="bg-[#3057A6] border-y border-grid-border font-sans select-none"
+                          className="bg-[#3057A6] border-y border-l-4 border-l-transparent border-grid-border font-sans select-none"
                           style={{
                             display: "flex",
                             position: "absolute",
                             top: 0,
                             left: 0,
+                            minWidth: "100%",
                             width: table.getTotalSize(),
                             height: virtualRow.size,
                             transform: `translateY(${virtualRow.start}px)`,
@@ -489,6 +491,7 @@ export function TakeoffIngestionStep({
                           position: "absolute",
                           top: 0,
                           left: 0,
+                          minWidth: "100%",
                           width: table.getTotalSize(),
                           height: virtualRow.size,
                           transform: `translateY(${virtualRow.start}px)`,
@@ -527,6 +530,7 @@ export function TakeoffIngestionStep({
                             </td>
                           );
                         })}
+                        <td className="border-b border-grid-border bg-card group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60 transition-colors" style={{ flex: "1 1 auto", minWidth: 0 }} />
                       </tr>
                     );
                   })}
@@ -538,7 +542,7 @@ export function TakeoffIngestionStep({
             {rows.length > 0 && (
               <tfoot style={{ display: "block" }}>
                 {/* Subtotal Row */}
-                <tr className="border-t border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
+                <tr className="border-t border-l-4 border-l-transparent border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex", minWidth: "100%" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -550,10 +554,11 @@ export function TakeoffIngestionStep({
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
                     return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
+                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
 
                 {/* General Liability Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -567,10 +572,11 @@ export function TakeoffIngestionStep({
                     else if (column.id === "costPerSf") { content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
+                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
 
                 {/* Contractor Fee Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -584,10 +590,11 @@ export function TakeoffIngestionStep({
                     else if (column.id === "costPerSf") { content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
+                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
 
                 {/* Total Estimated Cost Row */}
-                <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans" style={{ display: "flex" }}>
+                <tr className="border-t border-double border-l-4 border-l-transparent border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans" style={{ display: "flex", minWidth: "100%" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -599,6 +606,7 @@ export function TakeoffIngestionStep({
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
                     return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
+                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
               </tfoot>
             )}
