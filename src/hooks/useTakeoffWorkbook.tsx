@@ -67,6 +67,7 @@ export interface UseTakeoffWorkbookReturn {
   handleDeleteColumn: (colId: string) => void;
   handleRenameColumn: (colId: string, newHeader: string) => void;
   insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
+  deleteRow: (rowId: string) => void;
   handleToggleCellLock: (rowId: string, columnId: string) => void;
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleDrag: (e: React.DragEvent) => void;
@@ -248,6 +249,10 @@ export function useTakeoffWorkbook(
         });
         break;
       }
+      case "DELETE_ROW": {
+        setRows((prev) => prev.filter((r) => r.id !== cmd.rowId));
+        break;
+      }
       case "DELETE_COLUMN": {
         setColumnDefs((prev) => prev.filter((col) => col.id !== cmd.columnDef.id));
         break;
@@ -383,6 +388,19 @@ export function useTakeoffWorkbook(
       }
       case "INSERT_ROW": {
         setRows((prev) => prev.filter((r) => r.id !== cmd.rowId));
+        break;
+      }
+      case "DELETE_ROW": {
+        setRows((prev) => {
+          const updated = [...prev];
+          // Re-insert at original position with deep-cloned data
+          updated.splice(cmd.deletedIndex, 0, {
+            ...cmd.rowData,
+            rawQuantities: cmd.rowData.rawQuantities.map((rq) => ({ ...rq })),
+            customFields: { ...(cmd.rowData.customFields || {}) },
+          });
+          return updated;
+        });
         break;
       }
       case "DELETE_COLUMN": {
@@ -527,10 +545,14 @@ export function useTakeoffWorkbook(
             }
           });
 
-          // Normalize all standard row IDs to be row-${itemId} to prevent collisions
+          // Normalize standard row IDs — ensure uniqueness for rows sharing an itemId
+          const seenIds = new Map<string, number>();
           merged.forEach((row) => {
             if (row.itemId && row.id && row.id.startsWith("row-")) {
-              row.id = `row-${row.itemId}`;
+              const baseId = `row-${row.itemId}`;
+              const count = (seenIds.get(baseId) || 0) + 1;
+              seenIds.set(baseId, count);
+              row.id = count === 1 ? baseId : `${baseId}-${count}`;
             }
           });
 
@@ -679,6 +701,31 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
+  // Delete row — GAP-2: uses rowId (not index) for virtualization/sort safety
+  // ---------------------------------------------------------------------------
+  const deleteRow = (rowId: string) => {
+    const idx = rows.findIndex((r) => r.id === rowId);
+    if (idx === -1) return;
+
+    // Deep-clone row data for undo restoration (GAP-3)
+    const rowData: ProcessedTakeoffRow = {
+      ...rows[idx],
+      rawQuantities: rows[idx].rawQuantities.map((rq) => ({ ...rq })),
+      customFields: { ...(rows[idx].customFields || {}) },
+    };
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "DELETE_ROW",
+      rowId,
+      deletedIndex: idx,
+      rowData,
+    });
+
+    setRows((prev) => prev.filter((r) => r.id !== rowId));
+  };
+
+  // ---------------------------------------------------------------------------
   // Toggle cell lock — delegated to useLockedCells hook
   // ---------------------------------------------------------------------------
 
@@ -703,7 +750,7 @@ export function useTakeoffWorkbook(
       row.itemId = newCode;
       const targetItem = ESTIMATE_ITEMS_MASTER[newCode];
 
-      if (classification !== "MANUAL ENTRY") {
+      if (classification && classification !== "MANUAL ENTRY") {
         newRegistry = { ...currentRegistry, [classification]: newCode };
       }
 
@@ -725,7 +772,7 @@ export function useTakeoffWorkbook(
         row.isMapped = true;
 
         // Cascade duplicates
-        if (classification !== "MANUAL ENTRY") {
+        if (classification && classification !== "MANUAL ENTRY") {
           for (let i = 0; i < updated.length; i++) {
             if (i !== index && updated[i].classification === classification) {
               updated[i].itemId = newCode;
@@ -760,7 +807,7 @@ export function useTakeoffWorkbook(
       }
     } else if (field === "description") {
       row.description = String(value);
-      if (classification !== "MANUAL ENTRY") {
+      if (classification && classification !== "MANUAL ENTRY") {
         for (let i = 0; i < updated.length; i++) {
           if (updated[i].classification === classification) {
             updated[i].description = String(value);
@@ -776,7 +823,7 @@ export function useTakeoffWorkbook(
       row.unitPrice = price;
       row.total = row.matchedQty * price;
 
-      if (classification !== "MANUAL ENTRY") {
+      if (classification && classification !== "MANUAL ENTRY") {
         for (let i = 0; i < updated.length; i++) {
           if (updated[i].classification === classification) {
             updated[i].unitPrice = price;
@@ -1007,7 +1054,7 @@ export function useTakeoffWorkbook(
     const newRegistry = applyCellEditDirect(updated, index, field, value, userRegistry);
 
     const classification = updated[index]?.classification;
-    if (classification !== "MANUAL ENTRY") {
+    if (classification && classification !== "MANUAL ENTRY") {
       if (newRegistry) {
         setUserRegistry(newRegistry);
         saveProjectRegistry(projectId, newRegistry).catch((err) => console.error('Registry persist failed:', err));
@@ -1673,6 +1720,7 @@ export function useTakeoffWorkbook(
     handleDeleteColumn,
     handleRenameColumn,
     insertManualRow,
+    deleteRow,
     handleToggleCellLock,
     handleFileUpload,
     handleDrag,

@@ -1,7 +1,7 @@
 "use client";
 "use no compiler";
 
-import React, { use } from "react";
+import React, { use, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -78,7 +78,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
     isExportingExcel, exportError, setExportError,
     handleAddCustomColumn,
     handleDeleteColumn, handleRenameColumn,
-    insertManualRow, handleToggleCellLock,
+    insertManualRow, deleteRow, handleToggleCellLock,
     handleFileUpload, handleDrag, handleDrop,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
     handleUndo, handleRedo,
@@ -123,6 +123,73 @@ export default function ProjectWorkspace({ params }: PageProps) {
     infrastructure.siteOpsQuantities,
     infrastructure.siteOpsRates
   );
+
+  // ---------------------------------------------------------------------------
+  // Global Keyboard Shortcuts — Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo)
+  //
+  // GAP-1 amendment: fires ALWAYS (even when <input> focused) and calls
+  // preventDefault() to suppress native input undo. This matches Excel/Sheets
+  // behavior where Ctrl+Z undoes the last committed workbook action.
+  // ---------------------------------------------------------------------------
+  const handleUndoRef = useRef(handleUndo);
+  const handleRedoRef = useRef(handleRedo);
+  useEffect(() => { handleUndoRef.current = handleUndo; }, [handleUndo]);
+  useEffect(() => { handleRedoRef.current = handleRedo; }, [handleRedo]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndoRef.current();
+      } else if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        handleRedoRef.current();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Unsaved Changes Guard — beforeunload
+  //
+  // GAP-7 amendment: tracks hasPendingChanges from the moment rows change
+  // until saveStatus transitions to 'saved'. Covers both the 1500ms debounce
+  // window AND in-flight saves.
+  // ---------------------------------------------------------------------------
+  const hasPendingChangesRef = useRef(false);
+  const initialLoadRef = useRef(true);
+
+  useEffect(() => {
+    // Skip the initial load — rows haven't been user-edited yet
+    if (initialLoadRef.current) {
+      initialLoadRef.current = false;
+      return;
+    }
+    if (isLoaded) {
+      hasPendingChangesRef.current = true;
+    }
+  }, [rows, isLoaded]);
+
+  useEffect(() => {
+    if (saveStatus === 'saved') {
+      hasPendingChangesRef.current = false;
+    }
+  }, [saveStatus]);
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasPendingChangesRef.current) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Guards: Loading → Error → Not Found
@@ -369,6 +436,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           lockedCells={lockedCells}
           onToggleCellLock={handleToggleCellLock}
           onInsertRow={insertManualRow}
+          onDeleteRow={deleteRow}
           onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
         />
       </ErrorBoundary>

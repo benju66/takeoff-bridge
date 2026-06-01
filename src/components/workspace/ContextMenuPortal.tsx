@@ -11,11 +11,15 @@ interface ContextMenuPortalProps {
   lockedCells: Record<string, boolean>;
   onToggleCellLock: (rowId: string, columnId: string) => void;
   onInsertRow: (direction: "above" | "below", targetIndex: number) => void;
+  onDeleteRow: (rowId: string) => void;
   onDismiss: () => void;
 }
 
 const menuBtnClass =
   "w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer";
+
+const destructiveBtnClass =
+  "w-full text-left px-3 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer";
 
 export function ContextMenuPortal({
   contextMenu,
@@ -23,6 +27,7 @@ export function ContextMenuPortal({
   lockedCells,
   onToggleCellLock,
   onInsertRow,
+  onDeleteRow,
   onDismiss,
 }: ContextMenuPortalProps) {
   if (!contextMenu.visible) return null;
@@ -69,6 +74,23 @@ export function ContextMenuPortal({
       >
         Insert Row Below
       </button>
+      {currentRowId && (
+        <>
+          <div className="border-t border-grid-border my-1" />
+          <button
+            type="button"
+            className={destructiveBtnClass}
+            onClick={() => {
+              if (window.confirm("Delete this row? This action can be undone with Ctrl+Z.")) {
+                onDeleteRow(currentRowId);
+                onDismiss();
+              }
+            }}
+          >
+            🗑️ Delete Row
+          </button>
+        </>
+      )}
     </div>
   );
 }

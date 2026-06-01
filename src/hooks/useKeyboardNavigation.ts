@@ -20,6 +20,10 @@ export function useKeyboardNavigation(
     const columnsList: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
     const colIdx = columnsList.indexOf(type);
 
+    if (e.key === "Escape") {
+      e.preventDefault();
+      (e.target as HTMLElement).blur();
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
@@ -54,6 +58,10 @@ export function useKeyboardNavigation(
   };
 
   const handleCustomKeyDown = (e: React.KeyboardEvent, rIdx: number, colId: string) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      (e.target as HTMLElement).blur();
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();

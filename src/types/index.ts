@@ -169,12 +169,22 @@ export interface MergeTakeoffDataCommand {
   nextUnmapped: string[];
 }
 
+export interface DeleteRowCommand {
+  type: "DELETE_ROW";
+  rowId: string;
+  deletedIndex: number;
+  /** Deep-cloned snapshot of the full row data for undo restoration (GAP-3) */
+  rowData: ProcessedTakeoffRow;
+}
+
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
   | PasteCommand
   | InsertRowCommand
+  | DeleteRowCommand
   | DeleteColumnCommand
   | AddColumnCommand
   | ToggleCellLockCommand
   | MergeTakeoffDataCommand;
+

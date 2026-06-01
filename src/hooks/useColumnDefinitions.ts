@@ -69,6 +69,8 @@ export function useColumnDefinitions(
 
   // Delete custom column (with cell value snapshot for undo)
   const handleDeleteColumn = (colId: string) => {
+    if (!window.confirm("Delete this column? This action can be undone with Ctrl+Z.")) return;
+
     const currentColDefs = columnDefsRef.current;
     const colIndex = currentColDefs.findIndex((col) => col.id === colId);
     if (colIndex === -1) return;
