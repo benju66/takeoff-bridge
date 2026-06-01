@@ -1,10 +1,15 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { WorkbookCommand } from "@/types";
 
 // ---------------------------------------------------------------------------
 // useCommandHistory — Dual-stack undo/redo engine
+//
+// Stacks are stored in refs for synchronous, deterministic access.
+// A lightweight `sizes` state triggers re-renders so that UI elements
+// (canUndo/canRedo) stay in sync without relying on undocumented React
+// state-updater timing.
 // ---------------------------------------------------------------------------
 
 const MAX_HISTORY_DEPTH = 50;
@@ -20,40 +25,47 @@ export interface UseCommandHistoryReturn {
 }
 
 export function useCommandHistory(): UseCommandHistoryReturn {
-  const [undoStack, setUndoStack] = useState<WorkbookCommand[]>([]);
-  const [redoStack, setRedoStack] = useState<WorkbookCommand[]>([]);
+  const undoStackRef = useRef<WorkbookCommand[]>([]);
+  const redoStackRef = useRef<WorkbookCommand[]>([]);
+  const [sizes, setSizes] = useState({ undo: 0, redo: 0 });
 
   const pushCommand = useCallback((cmd: WorkbookCommand) => {
-    setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY_DEPTH - 1)), cmd]);
-    // Any new forward mutation invalidates the redo timeline
-    setRedoStack([]);
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-(MAX_HISTORY_DEPTH - 1)),
+      cmd,
+    ];
+    redoStackRef.current = [];
+    setSizes({ undo: undoStackRef.current.length, redo: 0 });
   }, []);
 
   const undo = useCallback((): WorkbookCommand | null => {
-    let popped: WorkbookCommand | null = null;
-    setUndoStack((prev) => {
-      if (prev.length === 0) return prev;
-      popped = prev[prev.length - 1];
-      return prev.slice(0, -1);
+    const stack = undoStackRef.current;
+    if (stack.length === 0) return null;
+
+    const popped = stack[stack.length - 1];
+    undoStackRef.current = stack.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current, popped];
+    setSizes({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
     });
-    if (popped) {
-      const cmd = popped;
-      setRedoStack((prev) => [...prev, cmd]);
-    }
     return popped;
   }, []);
 
   const redo = useCallback((): WorkbookCommand | null => {
-    let popped: WorkbookCommand | null = null;
-    setRedoStack((prev) => {
-      if (prev.length === 0) return prev;
-      popped = prev[prev.length - 1];
-      return prev.slice(0, -1);
+    const stack = redoStackRef.current;
+    if (stack.length === 0) return null;
+
+    const popped = stack[stack.length - 1];
+    redoStackRef.current = stack.slice(0, -1);
+    undoStackRef.current = [
+      ...undoStackRef.current.slice(-(MAX_HISTORY_DEPTH - 1)),
+      popped,
+    ];
+    setSizes({
+      undo: undoStackRef.current.length,
+      redo: redoStackRef.current.length,
     });
-    if (popped) {
-      const cmd = popped;
-      setUndoStack((prev) => [...prev.slice(-(MAX_HISTORY_DEPTH - 1)), cmd]);
-    }
     return popped;
   }, []);
 
@@ -61,9 +73,10 @@ export function useCommandHistory(): UseCommandHistoryReturn {
     pushCommand,
     undo,
     redo,
-    canUndo: undoStack.length > 0,
-    canRedo: redoStack.length > 0,
-    undoStackSize: undoStack.length,
-    redoStackSize: redoStack.length,
+    canUndo: sizes.undo > 0,
+    canRedo: sizes.redo > 0,
+    undoStackSize: sizes.undo,
+    redoStackSize: sizes.redo,
   };
 }
+

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { computePersonnelCosts, PersonnelCalcResult } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +21,7 @@ export interface UsePersonnelCalculationsReturn {
 
 export function usePersonnelCalculations(
   durationMonths: number,
+  isLoaded: boolean,
   initialUtilizations?: Record<string, number>,
   initialEquipment?: Record<string, number>,
   rateOverrides?: Record<string, number>
@@ -39,6 +40,43 @@ export function usePersonnelCalculations(
   const [eqDumpsters, setEqDumpsters] = useState<number>(initialEquipment?.eqDumpsters ?? 0);
   const [eqToilets, setEqToilets] = useState<number>(initialEquipment?.eqToilets ?? 0);
   const [eqElectric, setEqElectric] = useState<number>(initialEquipment?.eqElectric ?? 0);
+
+  // ---------------------------------------------------------------------------
+  // One-time DB sync: update state once estimate data arrives from the database.
+  // useState only captures the initial value on the first render (before the
+  // async DB query completes), so this effect applies the loaded values once.
+  // ---------------------------------------------------------------------------
+  const hasInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoaded && !hasInitializedRef.current && (initialUtilizations || initialEquipment)) {
+      Promise.resolve().then(() => {
+        if (initialUtilizations) {
+          setUtilEx(initialUtilizations.utilEx ?? 0);
+          setUtilSrPm(initialUtilizations.utilSrPm ?? 0);
+          setUtilPm(initialUtilizations.utilPm ?? 0);
+          setUtilPe(initialUtilizations.utilPe ?? 0);
+          setUtilSrSu(initialUtilizations.utilSrSu ?? 0);
+          setUtilSu(initialUtilizations.utilSu ?? 0);
+          setUtilAsstSu(initialUtilizations.utilAsstSu ?? 0);
+          setUtilPa(initialUtilizations.utilPa ?? 0);
+        }
+        if (initialEquipment) {
+          setEqDumpsters(initialEquipment.eqDumpsters ?? 0);
+          setEqToilets(initialEquipment.eqToilets ?? 0);
+          setEqElectric(initialEquipment.eqElectric ?? 0);
+        }
+        hasInitializedRef.current = true;
+      });
+    }
+  }, [isLoaded, initialUtilizations, initialEquipment]);
+
+  // Reset guard when project changes (isLoaded goes false during navigation)
+  useEffect(() => {
+    if (!isLoaded) {
+      hasInitializedRef.current = false;
+    }
+  }, [isLoaded]);
 
   const utilizations: Record<string, number> = {
     ex: utilEx, srPm: utilSrPm, pm: utilPm, pe: utilPe,

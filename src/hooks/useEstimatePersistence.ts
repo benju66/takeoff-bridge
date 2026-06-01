@@ -54,7 +54,100 @@ export function useEstimatePersistence(
   const dirtyRef = useRef(false);
   // Auto-reset timer for 'saved' → 'idle' transition
   const savedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Unmount guard to prevent post-teardown state updates (database-guardrails §5)
+  const mountedRef = useRef(true);
+  // Stable ref to the latest executeSave closure, used by the deferred
+  // re-queue in the finally block to avoid capturing a stale closure.
+  const executeSaveRef = useRef<(() => Promise<void>) | null>(null);
 
+  // ---------------------------------------------------------------------------
+  // Core save operation — extracted so it can be called both from the debounce
+  // timer and from the dirtyRef re-queue in the finally block.
+  // ---------------------------------------------------------------------------
+  const executeSave = async () => {
+    // Guard against post-unmount saves (database-guardrails §5)
+    if (!mountedRef.current) return;
+
+    isSavingRef.current = true;
+    setSaveStatus('saving');
+
+    // Clear any pending 'saved' → 'idle' reset timer
+    if (savedResetTimerRef.current) {
+      clearTimeout(savedResetTimerRef.current);
+      savedResetTimerRef.current = null;
+    }
+
+    try {
+      // Operation A: Upsert totals/markups (no items)
+      // Operation B: Atomic RPC line item save
+      await Promise.all([
+        saveProjectEstimate({
+          projectId,
+          subtotal: takeoffSummary.subtotal,
+          generalLiability: takeoffSummary.generalLiability,
+          fee: takeoffSummary.contractorFee,
+          totalCost: takeoffSummary.totalEstimatedCost,
+          generalConditionsTotal: totalGCs,
+          gcUtilization,
+          gcEquipmentOverrides,
+          siteOperationsTotal,
+          siteOpsQuantities,
+          siteOpsRates,
+        }),
+        saveEstimateLineItems(projectId, rows),
+      ]);
+
+      if (!mountedRef.current) return;
+      setSaveStatus('saved');
+      setSaveError(null);
+
+      // Auto-reset to 'idle' after 3 seconds
+      savedResetTimerRef.current = setTimeout(() => {
+        setSaveStatus('idle');
+      }, 3000);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      const message = err instanceof Error ? err.message : 'Save failed';
+      console.error('Estimate persistence failed:', err);
+      setSaveStatus('error');
+      setSaveError(message);
+    } finally {
+      isSavingRef.current = false;
+
+      // If edits arrived during this save, re-trigger via deferred setTimeout
+      // to avoid synchronous recursion (which could infinite-loop on immediate
+      // failures).
+      //
+      // Invariant (Amendment C): dirtyRef is only ever set by the useEffect
+      // timer's early-bailout path (when isSavingRef is true and a new debounce
+      // fires). Since this re-queued save does not trigger a useEffect dependency
+      // change, the effect will not fire during the re-queued execution, so
+      // dirtyRef cannot be re-set — preventing infinite loops.
+      if (dirtyRef.current) {
+        dirtyRef.current = false;
+        setTimeout(() => {
+          if (timerRef.current) clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(async () => {
+            await executeSaveRef.current?.();
+          }, 0);
+        }, 0);
+      }
+    }
+  };
+
+  // Update on every render so re-queued saves always use current data.
+  useEffect(() => {
+    executeSaveRef.current = executeSave;
+  });
+
+  // ---------------------------------------------------------------------------
+  // Debounced auto-save effect
+  // ---------------------------------------------------------------------------
+  // Amendment B: The executeSave captured inside the debounce timer is the
+  // closure from the render that scheduled the timer. This is the correct
+  // React pattern — the effect re-fires on dependency changes, creating a
+  // fresh closure each time. The executeSaveRef is only needed for the
+  // finally re-queue path, where the timer fires outside the effect lifecycle.
   useEffect(() => {
     if (!isLoaded || !projectId) return;
 
@@ -67,65 +160,7 @@ export function useEstimatePersistence(
         dirtyRef.current = true;
         return;
       }
-      isSavingRef.current = true;
-      setSaveStatus('saving');
-
-      // Clear any pending 'saved' → 'idle' reset timer
-      if (savedResetTimerRef.current) {
-        clearTimeout(savedResetTimerRef.current);
-        savedResetTimerRef.current = null;
-      }
-
-      try {
-        // Operation A: Upsert totals/markups (no items)
-        // Operation B: Atomic RPC line item save
-        await Promise.all([
-          saveProjectEstimate({
-            projectId,
-            subtotal: takeoffSummary.subtotal,
-            generalLiability: takeoffSummary.generalLiability,
-            fee: takeoffSummary.contractorFee,
-            totalCost: takeoffSummary.totalEstimatedCost,
-            generalConditionsTotal: totalGCs,
-            gcUtilization,
-            gcEquipmentOverrides,
-            siteOperationsTotal,
-            siteOpsQuantities,
-            siteOpsRates,
-          }),
-          saveEstimateLineItems(projectId, rows),
-        ]);
-
-        setSaveStatus('saved');
-        setSaveError(null);
-
-        // Auto-reset to 'idle' after 3 seconds
-        savedResetTimerRef.current = setTimeout(() => {
-          setSaveStatus('idle');
-        }, 3000);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Save failed';
-        console.error('Estimate persistence failed:', err);
-        setSaveStatus('error');
-        setSaveError(message);
-      } finally {
-        isSavingRef.current = false;
-
-        // If edits arrived during this save, re-trigger via deferred setTimeout
-        // to avoid synchronous recursion (which could infinite-loop on immediate failures)
-        if (dirtyRef.current) {
-          dirtyRef.current = false;
-          setTimeout(() => {
-            // Re-dispatch by toggling a no-op to nudge the effect
-            // The effect will re-run on the next dependency change naturally,
-            // but we force it by clearing+re-setting the timer
-            if (timerRef.current) clearTimeout(timerRef.current);
-            timerRef.current = setTimeout(async () => {
-              // The effect body will handle the actual save on next invocation
-            }, 0);
-          }, 0);
-        }
-      }
+      await executeSave();
     }, 1500);
 
     return () => {
@@ -148,9 +183,10 @@ export function useEstimatePersistence(
     siteOpsRatesString,
   ]);
 
-  // Cleanup saved-reset timer on unmount
+  // Cleanup timers and mark unmounted on teardown
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       if (savedResetTimerRef.current) clearTimeout(savedResetTimerRef.current);
     };
   }, []);

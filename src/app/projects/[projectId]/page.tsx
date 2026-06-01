@@ -43,6 +43,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   // Project metadata & duration
   const {
     project,
+    projectEstimate,
     isLoaded,
     error,
     projectDurationMonths,
@@ -50,11 +51,22 @@ export default function ProjectWorkspace({ params }: PageProps) {
   } = useProjectWorkspace(projectId);
 
   // Step 2: Division 01 General Conditions
-  const personnel = usePersonnelCalculations(projectDurationMonths);
+  const personnel = usePersonnelCalculations(
+    projectDurationMonths,
+    isLoaded,
+    projectEstimate?.gcUtilization,
+    projectEstimate?.gcEquipmentOverrides,
+  );
 
   // Step 3: Division 02 Site Operations
   const squareFootage: number = project ? project.squareFootage : 0;
-  const infrastructure = useInfrastructureCalculations(projectDurationMonths, squareFootage);
+  const infrastructure = useInfrastructureCalculations(
+    projectDurationMonths,
+    squareFootage,
+    isLoaded,
+    projectEstimate?.siteOpsQuantities,
+    projectEstimate?.siteOpsRates,
+  );
 
   // Step 4: Takeoff Workbook
   const workbook = useTakeoffWorkbook(projectId, isLoaded, project);

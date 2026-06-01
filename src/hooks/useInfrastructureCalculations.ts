@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { computeSiteOperations, SiteOpsCalcResult } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +21,7 @@ export interface UseInfrastructureCalculationsReturn {
 export function useInfrastructureCalculations(
   durationMonths: number,
   squareFootage: number,
+  isLoaded: boolean,
   initialQuantities?: Record<string, number>,
   initialRates?: Record<string, number>
 ): UseInfrastructureCalculationsReturn {
@@ -29,6 +30,37 @@ export function useInfrastructureCalculations(
   const [qtyHiredCleaning, setQtyHiredCleaning] = useState<number>(initialQuantities?.qtyHiredCleaning ?? 0);
   const [qtySoilBorings, setQtySoilBorings] = useState<number>(initialQuantities?.qtySoilBorings ?? 0);
   const [rateSoilBorings, setRateSoilBorings] = useState<number>(initialRates?.rateSoilBorings ?? 0);
+
+  // ---------------------------------------------------------------------------
+  // One-time DB sync: update state once estimate data arrives from the database.
+  // useState only captures the initial value on the first render (before the
+  // async DB query completes), so this effect applies the loaded values once.
+  // ---------------------------------------------------------------------------
+  const hasInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoaded && !hasInitializedRef.current && (initialQuantities || initialRates)) {
+      Promise.resolve().then(() => {
+        if (initialQuantities) {
+          setQtyKnox(initialQuantities.qtyKnox ?? 0);
+          setQtyPayrollCleaning(initialQuantities.qtyPayrollCleaning ?? 0);
+          setQtyHiredCleaning(initialQuantities.qtyHiredCleaning ?? 0);
+          setQtySoilBorings(initialQuantities.qtySoilBorings ?? 0);
+        }
+        if (initialRates) {
+          setRateSoilBorings(initialRates.rateSoilBorings ?? 0);
+        }
+        hasInitializedRef.current = true;
+      });
+    }
+  }, [isLoaded, initialQuantities, initialRates]);
+
+  // Reset guard when project changes (isLoaded goes false during navigation)
+  useEffect(() => {
+    if (!isLoaded) {
+      hasInitializedRef.current = false;
+    }
+  }, [isLoaded]);
 
   const quantities = { knox: qtyKnox, payrollCleaning: qtyPayrollCleaning, hiredCleaning: qtyHiredCleaning, soilBorings: qtySoilBorings };
   const rates = { soilBorings: rateSoilBorings };

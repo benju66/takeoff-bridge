@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Project } from "@/types/db";
-import { getProject, saveProject } from "@/lib/db";
+import { Project, ProjectEstimate } from "@/types/db";
+import { getProject, getProjectEstimate, saveProject } from "@/lib/db";
 import { getMonthsBetween } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
@@ -11,6 +11,7 @@ import { getMonthsBetween } from "@/lib/calculations";
 
 export interface UseProjectWorkspaceReturn {
   project: Project | null;
+  projectEstimate: Omit<ProjectEstimate, "items"> | null;
   isLoaded: boolean;
   error: string | null;
   projectDurationMonths: number;
@@ -19,6 +20,7 @@ export interface UseProjectWorkspaceReturn {
 
 export function useProjectWorkspace(projectId: string): UseProjectWorkspaceReturn {
   const [project, setProject] = useState<Project | null>(null);
+  const [projectEstimate, setProjectEstimate] = useState<Omit<ProjectEstimate, "items"> | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,11 +29,22 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
     if (!projectId) return;
     let cancelled = false;
 
+    // Reset state for the new project (handles client-side navigation)
+    Promise.resolve().then(() => {
+      setIsLoaded(false);
+      setProjectEstimate(null);
+      setError(null);
+    });
+
     (async () => {
       try {
-        const meta = await getProject(projectId);
+        const [meta, estimate] = await Promise.all([
+          getProject(projectId),
+          getProjectEstimate(projectId),
+        ]);
         if (!cancelled) {
           setProject(meta);
+          setProjectEstimate(estimate);
           setIsLoaded(true);
         }
       } catch (err) {
@@ -63,6 +76,7 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
 
   return {
     project,
+    projectEstimate,
     isLoaded,
     error,
     projectDurationMonths,
