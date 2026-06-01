@@ -13,7 +13,7 @@ import { DIVISION_NAMES } from "@/lib/constants";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
-import { SortableColumnHeader } from "./SortableColumnHeader";
+import { FilterableColumnHeader } from "./FilterableColumnHeader";
 
 // ---------------------------------------------------------------------------
 // TakeoffIngestionStep — Step 4 Panel
@@ -175,8 +175,6 @@ export function TakeoffIngestionStep({
           >
             + Add Custom Column
           </button>
-
-          <SearchBar globalFilter={globalFilter} setGlobalFilter={setGlobalFilter} />
 
           <button
             onClick={handleUndo}
@@ -364,10 +362,13 @@ export function TakeoffIngestionStep({
 
       {/* Re-Architected workbook template grid */}
       <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
-        <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
-          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
-            <Activity size={16} className="text-blue-600 dark:text-blue-400 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
-          </h3>
+        <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+              <Activity size={16} className="text-blue-600 dark:text-blue-400 animate-pulse" /> Takeoff Workbook Spreadsheet Matrix
+            </h3>
+            <SearchBar globalFilter={globalFilter} setGlobalFilter={setGlobalFilter} />
+          </div>
           <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
             Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
           </span>
@@ -411,8 +412,9 @@ export function TakeoffIngestionStep({
                             </button>
                           </div>
                         ) : (
-                          <SortableColumnHeader
+                          <FilterableColumnHeader
                             column={header.column}
+                            table={table}
                             label={flexRender(header.column.columnDef.header, header.getContext())}
                           />
                         )}
@@ -434,11 +436,19 @@ export function TakeoffIngestionStep({
                 </tr>
               ))}
             </thead>
-            <tbody style={{ display: "block", position: "relative", height: rows.length > 0 ? virtualizer.getTotalSize() : undefined }}>
+            <tbody style={{ display: "block", position: "relative", height: rows.length > 0 ? (virtualizer.getTotalSize() || 120) : undefined }}>
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-600 dark:text-slate-400 italic font-sans uppercase tracking-wider">
                     No takeoff items ingested. Drag and drop a Togal.ai CSV to initialize.
+                  </td>
+                </tr>
+              ) : flatItems.length === 0 ? (
+                <tr className="flex w-full" style={{ position: "absolute", top: 0, left: 0, minWidth: "100%", width: table.getTotalSize(), height: 120 }}>
+                  <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-500 dark:text-slate-400 italic font-sans uppercase tracking-wider flex-1 flex items-center justify-center gap-1.5">
+                    <span>No takeoff rows match &quot;</span>
+                    <span className="text-blue-600 dark:text-blue-400 font-bold not-italic font-mono">{globalFilter}</span>
+                    <span>&quot;</span>
                   </td>
                 </tr>
               ) : (

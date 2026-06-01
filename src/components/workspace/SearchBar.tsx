@@ -15,15 +15,13 @@ interface SearchBarProps {
 
 function SearchBarInner({ globalFilter, setGlobalFilter }: SearchBarProps) {
   const [localValue, setLocalValue] = useState(globalFilter);
+  const [prevGlobalFilter, setPrevGlobalFilter] = useState(globalFilter);
 
-  // Sync external → local when cleared from outside
-  useEffect(() => {
-    if (globalFilter === "" && localValue !== "") {
-      Promise.resolve().then(() => {
-        setLocalValue("");
-      });
-    }
-  }, [globalFilter, localValue]);
+  // Sync external → local (e.g. when cleared from outside) using derived state during render
+  if (globalFilter !== prevGlobalFilter) {
+    setPrevGlobalFilter(globalFilter);
+    setLocalValue(globalFilter);
+  }
 
   // Debounce local → external
   useEffect(() => {

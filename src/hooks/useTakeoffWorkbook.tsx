@@ -5,10 +5,10 @@ import { Trash, MessageSquare } from "lucide-react";
 import {
   useReactTable,
   getCoreRowModel,
-  getSortedRowModel,
   getFilteredRowModel,
+  getFacetedRowModel,
+  getFacetedUniqueValues,
   createColumnHelper,
-  SortingState,
   ColumnFiltersState,
 } from "@tanstack/react-table";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
@@ -64,10 +64,9 @@ export interface UseTakeoffWorkbookReturn {
   setExportError: React.Dispatch<React.SetStateAction<string | null>>;
   rowVersion: number;
 
-  // Sort / Filter state (Phase 4)
+  // Filter state (Phase 4)
   globalFilter: string;
   setGlobalFilter: (value: string) => void;
-  sorting: SortingState;
   columnFilters: ColumnFiltersState;
 
   // Handlers
@@ -93,6 +92,7 @@ export interface UseTakeoffWorkbookReturn {
   handleUndo: () => void;
   handleRedo: () => void;
 }
+const multiSelect: any = "multiSelect";
 
 export function useTakeoffWorkbook(
   projectId: string,
@@ -437,6 +437,7 @@ export function useTakeoffWorkbook(
           id: def.id,
           header: def.header,
           ...getSizeConfig(def),
+          filterFn: multiSelect,
           cell: (info) => {
             const index = info.row.index;
             const row = info.row.original;
@@ -569,6 +570,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("costType", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => (
               <div className="text-center text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 {info.getValue()}
@@ -579,6 +581,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("itemId", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
@@ -646,6 +649,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("description", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
@@ -689,6 +693,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("matchedQty", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
@@ -727,6 +732,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("uom", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => (
               <div className="text-center text-slate-600 dark:text-slate-400 font-bold uppercase font-mono">
                 {info.getValue()}
@@ -737,6 +743,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("unitPrice", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
@@ -775,6 +782,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor("total", {
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => (
               <div className="text-center font-black font-mono">
                 <span className={info.getValue() > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}>
@@ -788,6 +796,7 @@ export function useTakeoffWorkbook(
             id: "costPerUnit",
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => (
               <div className="text-center font-bold font-mono text-slate-600 dark:text-slate-300">
                 ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -799,6 +808,7 @@ export function useTakeoffWorkbook(
             id: "costPerSf",
             header: def.header,
             ...getSizeConfig(def),
+            filterFn: multiSelect,
             cell: (info) => (
               <div className="text-center font-bold font-mono text-slate-600 dark:text-slate-300">
                 ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -812,25 +822,31 @@ export function useTakeoffWorkbook(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit]);
 
-  // Sort / Filter state (Phase 4)
-  const [sorting, setSorting] = useState<SortingState>([]);
+  // Filter state (Phase 4)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
 
-  // Instantiate TanStack table with sort/filter pipeline
+  // Instantiate TanStack table with filter pipeline
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: rows,
     columns,
-    state: { sorting, columnFilters, globalFilter },
-    onSortingChange: setSorting,
+    state: { columnFilters, globalFilter },
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     columnResizeMode: "onChange",
     columnResizeDirection: "ltr",
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getFacetedRowModel: getFacetedRowModel(),
+    getFacetedUniqueValues: getFacetedUniqueValues(),
+    filterFns: {
+      multiSelect: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true;
+        const val = row.getValue(columnId);
+        return filterValue.includes(String(val));
+      },
+    },
     meta: {
       editingCellId,
       editingValues,
@@ -872,7 +888,6 @@ export function useTakeoffWorkbook(
     rowVersion,
     globalFilter,
     setGlobalFilter,
-    sorting,
     columnFilters,
     handleCellEdit,
     commitCellEdit,
