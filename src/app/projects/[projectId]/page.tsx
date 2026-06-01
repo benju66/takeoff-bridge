@@ -83,21 +83,35 @@ export default function ProjectWorkspace({ params }: PageProps) {
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
     handleUndo, handleRedo,
     canUndo, canRedo, undoStackSize, redoStackSize,
+    rowVersion,
+    globalFilter, setGlobalFilter,
+    columnFilters,
   } = workbook;
 
   // Step 4: Takeoff Summary
+  // Amendment F: When a filter is active, summaries reflect only visible rows
   const unitCount: number = project ? project.unitCount : 0;
-  const takeoffSummary = computeTakeoffSummary(rows, squareFootage, unitCount);
+  const isFiltered = globalFilter !== "" || columnFilters.length > 0;
+  const filteredRows = React.useMemo(() => {
+    if (!isFiltered) return rows;
+    return table.getFilteredRowModel().rows.map(r => r.original);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFiltered, rows, table, globalFilter, columnFilters]);
+
+  const takeoffSummary = React.useMemo(
+    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount),
+    [filteredRows, squareFootage, unitCount]
+  );
 
   // Divisional & Cost Type Budget Aggregations
   const subtotal = takeoffSummary.subtotal;
   const divisionBreakdown = React.useMemo(
-    () => computeDivisionBreakdown(rows, subtotal),
-    [rows, subtotal]
+    () => computeDivisionBreakdown(filteredRows, subtotal),
+    [filteredRows, subtotal]
   );
   const costTypeBreakdown = React.useMemo(
-    () => computeCostTypeBreakdown(rows, subtotal),
-    [rows, subtotal]
+    () => computeCostTypeBreakdown(filteredRows, subtotal),
+    [filteredRows, subtotal]
   );
 
   // UI Metrics
@@ -115,6 +129,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
     projectId,
     isLoaded,
     rows,
+    rowVersion,
     takeoffSummary,
     personnel.totalGCs,
     personnel.gcUtilization,
@@ -424,6 +439,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
+            globalFilter={globalFilter}
+            setGlobalFilter={setGlobalFilter}
           />
         </ErrorBoundary>
       )}

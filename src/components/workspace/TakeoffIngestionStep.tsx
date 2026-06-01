@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useMemo } from "react";
 import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
@@ -11,6 +12,8 @@ import { Project } from "@/types/db";
 import { DIVISION_NAMES } from "@/lib/constants";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
+import { SearchBar } from "./SearchBar";
+import { SortableColumnHeader } from "./SortableColumnHeader";
 
 // ---------------------------------------------------------------------------
 // TakeoffIngestionStep — Step 4 Panel
@@ -53,6 +56,10 @@ interface TakeoffIngestionStepProps {
   takeoffSummary: TakeoffSummary;
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
+
+  // Search / Filter (Phase 4)
+  globalFilter: string;
+  setGlobalFilter: (value: string) => void;
 }
 
 export function TakeoffIngestionStep({
@@ -83,8 +90,42 @@ export function TakeoffIngestionStep({
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
+  globalFilter,
+  setGlobalFilter,
 }: TakeoffIngestionStepProps) {
   const { subtotal, generalLiability, contractorFee: fee, totalEstimatedCost, costPerSf, costPerUnit } = takeoffSummary;
+
+  // ---------------------------------------------------------------------------
+  // Row Virtualization — Build flat item list interleaving dividers & data rows
+  // ---------------------------------------------------------------------------
+  type VirtualItem = { type: "divider"; divisionCode: string; label: string } | { type: "row"; row: Row<ProcessedTakeoffRow>; dataIndex: number };
+
+  const tableRows = table.getRowModel().rows;
+  const flatItems: VirtualItem[] = useMemo(() => {
+    const items: VirtualItem[] = [];
+    let lastDivision = "";
+    tableRows.forEach((row, idx) => {
+      const itemId = row.original.itemId || "";
+      const currentDivision = itemId.split("-")[0] || "";
+      if (currentDivision && currentDivision !== lastDivision) {
+        lastDivision = currentDivision;
+        const divLabel = DIVISION_NAMES[currentDivision] || `DIVISION ${currentDivision}`;
+        items.push({ type: "divider", divisionCode: currentDivision, label: divLabel });
+      }
+      items.push({ type: "row", row, dataIndex: idx });
+    });
+    return items;
+  }, [tableRows]);
+
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: flatItems.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => (flatItems[index]?.type === "divider" ? 44 : 40),
+    overscan: 10,
+    // React 19 compatibility: prevent flushSync inside lifecycle warnings
+    useFlushSync: false,
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -134,6 +175,8 @@ export function TakeoffIngestionStep({
           >
             + Add Custom Column
           </button>
+
+          <SearchBar globalFilter={globalFilter} setGlobalFilter={setGlobalFilter} />
 
           <button
             onClick={handleUndo}
@@ -330,13 +373,14 @@ export function TakeoffIngestionStep({
           </span>
         </div>
 
-        <div className="overflow-x-auto border-t border-l border-grid-border">
-          <table className="w-full text-left text-xs border-separate border-spacing-0">
-            <thead>
+        <div ref={parentRef} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border" style={{ maxHeight: "70vh" }}>
+          <table className="w-full text-left text-xs border-separate border-spacing-0" style={{ tableLayout: "fixed" }}>
+            <thead style={{ display: "block", position: "sticky", top: 0, zIndex: 10 }}>
               {table.getHeaderGroups().map((headerGroup: HeaderGroup<ProcessedTakeoffRow>) => (
                 <tr
                   key={headerGroup.id}
                   className="bg-[#3057A6] text-white uppercase border-b border-grid-border tracking-wider font-bold font-sans text-[13px]"
+                  style={{ display: "flex" }}
                 >
                   {headerGroup.headers.map((header: Header<ProcessedTakeoffRow, unknown>) => {
                     const alignClass = "text-center";
@@ -346,8 +390,8 @@ export function TakeoffIngestionStep({
                     return (
                       <th
                         key={header.id}
-                        className={`p-4 border-r border-b border-grid-border relative group/header font-bold text-white text-[13px] sticky top-0 z-10 bg-[#3057A6] ${alignClass}`}
-                        style={{ width: header.getSize() }}
+                        className={`p-4 border-r border-b border-grid-border relative group/header font-bold text-white text-[13px] bg-[#3057A6] ${alignClass}`}
+                        style={{ width: header.getSize(), flex: "none" }}
                       >
                         {header.isPlaceholder ? null : isCustom ? (
                           <div className="flex items-center gap-1.5 justify-start">
@@ -367,7 +411,10 @@ export function TakeoffIngestionStep({
                             </button>
                           </div>
                         ) : (
-                          flexRender(header.column.columnDef.header, header.getContext())
+                          <SortableColumnHeader
+                            column={header.column}
+                            label={flexRender(header.column.columnDef.header, header.getContext())}
+                          />
                         )}
                         {header.column.getCanResize() && (
                           <div
@@ -386,7 +433,7 @@ export function TakeoffIngestionStep({
                 </tr>
               ))}
             </thead>
-            <tbody className="divide-y divide-grid-border">
+            <tbody style={{ display: "block", position: "relative", height: rows.length > 0 ? virtualizer.getTotalSize() : undefined }}>
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={table.getVisibleFlatColumns().length} className="p-12 border-r border-b border-grid-border text-center text-slate-600 dark:text-slate-400 italic font-sans uppercase tracking-wider">
@@ -394,79 +441,100 @@ export function TakeoffIngestionStep({
                   </td>
                 </tr>
               ) : (
-                (() => {
-                  let lastDivision = "";
-                  return table.getRowModel().rows.map((row: Row<ProcessedTakeoffRow>, idx: number) => {
-                    const itemId = row.original.itemId || "";
-                    const currentDivision = itemId.split("-")[0] || "";
+                <>
+                  {/* Virtual spacer removed — tbody height handles scroll area */}
+                  {virtualizer.getVirtualItems().map((virtualRow) => {
+                    const item = flatItems[virtualRow.index];
+                    if (!item) return null;
 
-                    let dividerRow = null;
-                    if (currentDivision && currentDivision !== lastDivision) {
-                      lastDivision = currentDivision;
-                      const divLabel = DIVISION_NAMES[currentDivision] || `DIVISION ${currentDivision}`;
-                      dividerRow = (
-                        <tr key={`div-header-${currentDivision}`} className="bg-[#3057A6] border-y border-grid-border font-sans select-none">
-                          <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-bold text-white uppercase tracking-wider text-[13px]">
-                            {divLabel}
+                    if (item.type === "divider") {
+                      return (
+                        <tr
+                          key={`div-header-${item.divisionCode}`}
+                          className="bg-[#3057A6] border-y border-grid-border font-sans select-none"
+                          style={{
+                            display: "flex",
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            width: "100%",
+                            height: virtualRow.size,
+                            transform: `translateY(${virtualRow.start}px)`,
+                          }}
+                        >
+                          <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-bold text-white uppercase tracking-wider text-[13px]" style={{ flex: 1 }}>
+                            {item.label}
                           </td>
                         </tr>
                       );
                     }
 
+                    // Data row
+                    const row = item.row;
+                    const idx = item.dataIndex;
                     const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
 
                     return (
-                      <React.Fragment key={row.original.id || `row-${idx}`}>
-                        {dividerRow}
-                        <tr
-                          className={`group transition-colors ${
-                            !row.original.isMapped
-                              ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500"
-                              : "hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 border-l-transparent"
-                          }`}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            setContextMenu({
-                              visible: true,
-                              x: e.clientX,
-                              y: e.clientY,
-                              rowIndex: idx,
-                              columnId: ""
-                            });
-                          }}
-                        >
-                          {row.getVisibleCells().map((cell: Cell<ProcessedTakeoffRow, unknown>) => {
-                            let alignClass = "text-left";
-                            if (["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"].includes(cell.column.id)) alignClass = "text-center";
+                      <tr
+                        key={row.original.id || `row-${idx}`}
+                        data-index={virtualRow.index}
+                        ref={virtualizer.measureElement}
+                        className={`group transition-colors ${
+                          !row.original.isMapped
+                            ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500"
+                            : "hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 border-l-transparent"
+                        }`}
+                        style={{
+                          display: "flex",
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          height: virtualRow.size,
+                          transform: `translateY(${virtualRow.start}px)`,
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setContextMenu({
+                            visible: true,
+                            x: e.clientX,
+                            y: e.clientY,
+                            rowIndex: idx,
+                            columnId: ""
+                          });
+                        }}
+                      >
+                        {row.getVisibleCells().map((cell: Cell<ProcessedTakeoffRow, unknown>) => {
+                          let alignClass = "text-left";
+                          if (["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"].includes(cell.column.id)) alignClass = "text-center";
 
-                            const colDef = columnDefs.find(c => c.id === cell.column.id);
-                            const isCustom = colDef && colDef.type === "custom";
-                            const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
-                            const paddingClass = isEditable ? "p-0" : "p-3";
+                          const colDef = columnDefs.find(c => c.id === cell.column.id);
+                          const isCustom = colDef && colDef.type === "custom";
+                          const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
+                          const paddingClass = isEditable ? "p-0" : "p-3";
 
-                            return (
-                              <td
-                                key={cell.id}
-                                className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} transition-colors`}
-                                style={{ width: cell.column.getSize() }}
-                              >
-                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      </React.Fragment>
+                          return (
+                            <td
+                              key={cell.id}
+                              className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} transition-colors`}
+                              style={{ width: cell.column.getSize(), flex: "none" }}
+                            >
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          );
+                        })}
+                      </tr>
                     );
-                  });
-                })()
+                  })}
+                </>
               )}
             </tbody>
 
             {/* Complete Locked-down Summary Row Appendices */}
             {rows.length > 0 && (
-              <tfoot>
+              <tfoot style={{ display: "block" }}>
                 {/* Subtotal Row */}
-                <tr className="border-t border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                <tr className="border-t border-grid-border bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -476,12 +544,12 @@ export function TakeoffIngestionStep({
                     else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
                 </tr>
 
                 {/* General Liability Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -493,12 +561,12 @@ export function TakeoffIngestionStep({
                     else if (column.id === "total") { content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
                 </tr>
 
                 {/* Contractor Fee Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans">
+                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans" style={{ display: "flex" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -510,12 +578,12 @@ export function TakeoffIngestionStep({
                     else if (column.id === "total") { content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
                 </tr>
 
                 {/* Total Estimated Cost Row */}
-                <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans">
+                <tr className="border-t border-double border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans" style={{ display: "flex" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
@@ -525,7 +593,7 @@ export function TakeoffIngestionStep({
                     else if (column.id === "costPerUnit") { content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize() }}>{content}</td>);
+                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                   })}
                 </tr>
               </tfoot>

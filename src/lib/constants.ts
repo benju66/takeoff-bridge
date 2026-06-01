@@ -91,6 +91,16 @@ export const GL_RATE = 0.01;
 export const FEE_RATE = 0.05;
 
 // ---------------------------------------------------------------------------
+// Grid Display Defaults
+// ---------------------------------------------------------------------------
+
+/** Default decimal places for currency columns (unitPrice, total, costPerUnit, costPerSf) */
+export const DEFAULT_CURRENCY_DECIMALS = 2;
+
+/** Default decimal places for quantity columns (matchedQty) */
+export const DEFAULT_QTY_DECIMALS = 2;
+
+// ---------------------------------------------------------------------------
 // Division 02 — Site Operations Default Rates
 // ---------------------------------------------------------------------------
 
@@ -103,3 +113,8 @@ export const MATERIAL_HOIST_RATE_PER_MONTH = 6500;
 export const KNOX_BOX_UNIT_COST = 650;
 export const PAYROLL_CLEANING_RATE_PER_EA = 74;
 export const HIRED_CLEANING_RATE_PER_EA = 54;
+
+// ---------------------------------------------------------------------------
+// Search & Filter Defaults
+// ---------------------------------------------------------------------------
+export const SEARCH_DEBOUNCE_MS = 300;

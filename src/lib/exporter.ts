@@ -1,7 +1,7 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
-import { GL_RATE, FEE_RATE } from "./constants";
-import { escapeCSVField } from "./exportUtils";
+import { GL_RATE, FEE_RATE, DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS } from "./constants";
+import { escapeCSVField, buildNumFmt } from "./exportUtils";
 import ExcelJS from "exceljs";
 
 // Re-export for backward compatibility
@@ -385,7 +385,7 @@ export async function generateExcelWorkbook(
       
       const qtyCell = excelRow.getCell(colIndexMap["matchedQty"] || 6);
       qtyCell.value = qty;
-      qtyCell.numFmt = '#,##0.00';
+      qtyCell.numFmt = buildNumFmt(DEFAULT_QTY_DECIMALS, false);
       qtyCell.alignment = { horizontal: 'right' };
 
       const uomCell = excelRow.getCell(colIndexMap["uom"] || 7);
@@ -394,7 +394,7 @@ export async function generateExcelWorkbook(
 
       const priceCell = excelRow.getCell(colIndexMap["unitPrice"] || 8);
       priceCell.value = price;
-      priceCell.numFmt = '$#,##0.00';
+      priceCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
       priceCell.alignment = { horizontal: 'right' };
 
       for (const col of columnDefs) {
@@ -447,7 +447,7 @@ export async function generateExcelWorkbook(
 
     const qtyCell = excelRow.getCell(colIndexMap["matchedQty"] || 6);
     qtyCell.value = qty;
-    qtyCell.numFmt = '#,##0.00';
+    qtyCell.numFmt = buildNumFmt(DEFAULT_QTY_DECIMALS, false);
     qtyCell.alignment = { horizontal: 'right' };
 
     const uomCell = excelRow.getCell(colIndexMap["uom"] || 7);
@@ -456,22 +456,22 @@ export async function generateExcelWorkbook(
 
     const priceCell = excelRow.getCell(colIndexMap["unitPrice"] || 8);
     priceCell.value = price;
-    priceCell.numFmt = '$#,##0.00';
+    priceCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
     priceCell.alignment = { horizontal: 'right' };
 
     const totalCell = excelRow.getCell(colIndexMap["total"] || 9);
     totalCell.value = { formula: `IF(ISNUMBER(F${subtotalRowIdx}), F${subtotalRowIdx} * H${subtotalRowIdx}, 0)` };
-    totalCell.numFmt = '$#,##0.00';
+    totalCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
     totalCell.alignment = { horizontal: 'right' };
 
     const cpuCell = excelRow.getCell(colIndexMap["costPerUnit"] || 10);
     cpuCell.value = { formula: `IF($J$8=0, 0, I${subtotalRowIdx}/$J$8)` };
-    cpuCell.numFmt = '$#,##0.00';
+    cpuCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
     cpuCell.alignment = { horizontal: 'right' };
 
     const cpsfCell = excelRow.getCell(colIndexMap["costPerSf"] || 11);
     cpsfCell.value = { formula: `IF($K$8=0, 0, I${subtotalRowIdx}/$K$8)` };
-    cpsfCell.numFmt = '$#,##0.00';
+    cpsfCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
     cpsfCell.alignment = { horizontal: 'right' };
 
     for (const col of columnDefs) {

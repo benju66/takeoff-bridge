@@ -28,6 +28,7 @@ export function useEstimatePersistence(
   projectId: string,
   isLoaded: boolean,
   rows: ProcessedTakeoffRow[],
+  rowVersion: number,
   takeoffSummary: TakeoffSummary,
   totalGCs: number,
   gcUtilization: Record<string, number>,
@@ -36,7 +37,6 @@ export function useEstimatePersistence(
   siteOpsQuantities: Record<string, number>,
   siteOpsRates: Record<string, number>
 ): { saveStatus: SaveStatus; saveError: string | null } {
-  const rowsString = JSON.stringify(rows);
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
   const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
@@ -168,7 +168,7 @@ export function useEstimatePersistence(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    rowsString,
+    rowVersion,
     projectId,
     takeoffSummary.subtotal,
     takeoffSummary.generalLiability,

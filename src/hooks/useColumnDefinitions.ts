@@ -28,6 +28,7 @@ export interface UseColumnDefinitionsReturn {
   handleAddCustomColumn: () => void;
   handleDeleteColumn: (colId: string) => void;
   handleRenameColumn: (colId: string, newHeader: string) => void;
+  handleUpdateColumnDef: (columnId: string, updates: Partial<ColumnDefinition>) => void;
 }
 
 export function useColumnDefinitions(
@@ -97,11 +98,29 @@ export function useColumnDefinitions(
     setColumnDefs((prev) => prev.filter((col) => col.id !== colId));
   };
 
-  // Rename custom column header
-  const handleRenameColumn = (colId: string, newHeader: string) => {
+  // Update any column definition fields (generic, undoable)
+  const handleUpdateColumnDef = (columnId: string, updates: Partial<ColumnDefinition>) => {
+    const prevDef = columnDefsRef.current.find((col) => col.id === columnId);
+    if (!prevDef) return;
+
+    const nextDef: ColumnDefinition = { ...prevDef, ...updates };
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({
+      type: "UPDATE_COLUMN",
+      columnId,
+      prevDef,
+      nextDef,
+    });
+
     setColumnDefs((prev) =>
-      prev.map((col) => (col.id === colId ? { ...col, header: newHeader } : col))
+      prev.map((col) => (col.id === columnId ? nextDef : col))
     );
+  };
+
+  // Rename custom column header (delegates to handleUpdateColumnDef)
+  const handleRenameColumn = (colId: string, newHeader: string) => {
+    handleUpdateColumnDef(colId, { header: newHeader });
   };
 
   return {
@@ -111,5 +130,6 @@ export function useColumnDefinitions(
     handleAddCustomColumn,
     handleDeleteColumn,
     handleRenameColumn,
+    handleUpdateColumnDef,
   };
 }

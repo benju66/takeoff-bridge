@@ -6,6 +6,7 @@ import { ProcessedTakeoffRow } from "@/types";
 // ---------------------------------------------------------------------------
 // useKeyboardNavigation — Grid keyboard navigation handlers
 // Extracted from useTakeoffWorkbook.tsx (Phase 2, Item 7)
+// Updated in Phase 3 for virtualization: accepts optional scrollToRow callback
 // ---------------------------------------------------------------------------
 
 export interface UseKeyboardNavigationReturn {
@@ -13,8 +14,27 @@ export interface UseKeyboardNavigationReturn {
   handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string) => void;
 }
 
+/**
+ * Focus an element by ID, scrolling it into view first if a scrollToRow callback is provided.
+ * Uses requestAnimationFrame to wait for the virtualizer to render the target row.
+ */
+function focusWithScroll(elementId: string, targetRowIdx: number, scrollToRow?: (index: number) => void) {
+  if (scrollToRow) {
+    scrollToRow(targetRowIdx);
+    // Wait for virtualizer to render the row before focusing
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.getElementById(elementId)?.focus();
+      });
+    });
+  } else {
+    document.getElementById(elementId)?.focus();
+  }
+}
+
 export function useKeyboardNavigation(
-  rowsRef: React.MutableRefObject<ProcessedTakeoffRow[]>
+  rowsRef: React.MutableRefObject<ProcessedTakeoffRow[]>,
+  scrollToRow?: (index: number) => void
 ): UseKeyboardNavigationReturn {
   const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => {
     const columnsList: ("code" | "desc" | "qty" | "price")[] = ["code", "desc", "qty", "price"];
@@ -26,32 +46,32 @@ export function useKeyboardNavigation(
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
+      focusWithScroll(`${type}-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx - 1}`)?.focus();
+      focusWithScroll(`${type}-input-${rIdx - 1}`, rIdx - 1, scrollToRow);
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      document.getElementById(`${type}-input-${rIdx + 1}`)?.focus();
+      focusWithScroll(`${type}-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
     }
     if (e.key === "Tab") {
       if (e.shiftKey) {
         if (colIdx > 0) {
           e.preventDefault();
-          document.getElementById(`${columnsList[colIdx - 1]}-input-${rIdx}`)?.focus();
+          focusWithScroll(`${columnsList[colIdx - 1]}-input-${rIdx}`, rIdx, scrollToRow);
         } else if (rIdx > 0) {
           e.preventDefault();
-          document.getElementById(`price-input-${rIdx - 1}`)?.focus();
+          focusWithScroll(`price-input-${rIdx - 1}`, rIdx - 1, scrollToRow);
         }
       } else {
         if (colIdx < columnsList.length - 1) {
           e.preventDefault();
-          document.getElementById(`${columnsList[colIdx + 1]}-input-${rIdx}`)?.focus();
+          focusWithScroll(`${columnsList[colIdx + 1]}-input-${rIdx}`, rIdx, scrollToRow);
         } else if (rIdx < rowsRef.current.length - 1) {
           e.preventDefault();
-          document.getElementById(`code-input-${rIdx + 1}`)?.focus();
+          focusWithScroll(`code-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
         }
       }
     }
@@ -64,15 +84,15 @@ export function useKeyboardNavigation(
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
+      focusWithScroll(`custom-${colId}-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx - 1}`)?.focus();
+      focusWithScroll(`custom-${colId}-input-${rIdx - 1}`, rIdx - 1, scrollToRow);
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      document.getElementById(`custom-${colId}-input-${rIdx + 1}`)?.focus();
+      focusWithScroll(`custom-${colId}-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
     }
   };
 

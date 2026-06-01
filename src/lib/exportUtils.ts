@@ -31,3 +31,15 @@ export function getColumnLetter(colIndex: number): string {
   }
   return letter;
 }
+
+/**
+ * Build an ExcelJS-compatible number format string.
+ * @param decimalPlaces Number of decimal places (0-6)
+ * @param isCurrency Whether to prepend a $ sign
+ * @returns ExcelJS numFmt string, e.g. '$#,##0.00' or '#,##0.0000'
+ */
+export function buildNumFmt(decimalPlaces: number, isCurrency: boolean): string {
+  const decimals = decimalPlaces > 0 ? '.' + '0'.repeat(decimalPlaces) : '';
+  const base = `#,##0${decimals}`;
+  return isCurrency ? `$${base}` : base;
+}

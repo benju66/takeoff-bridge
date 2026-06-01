@@ -43,6 +43,8 @@ export interface ColumnDefinition {
   id: string;
   header: string;
   type: "default" | "custom";
+  /** Number of decimal places for numeric display. Default: 2 for currency, 2 for quantities. */
+  decimalPlaces?: number;
 }
 
 /** Context menu floating state for grid right-click interactions */
@@ -177,6 +179,13 @@ export interface DeleteRowCommand {
   rowData: ProcessedTakeoffRow;
 }
 
+export interface UpdateColumnCommand {
+  type: "UPDATE_COLUMN";
+  columnId: string;
+  prevDef: ColumnDefinition;
+  nextDef: ColumnDefinition;
+}
+
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
@@ -186,5 +195,6 @@ export type WorkbookCommand =
   | DeleteColumnCommand
   | AddColumnCommand
   | ToggleCellLockCommand
-  | MergeTakeoffDataCommand;
+  | MergeTakeoffDataCommand
+  | UpdateColumnCommand;
 
