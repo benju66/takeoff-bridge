@@ -45,6 +45,12 @@ export interface ColumnDefinition {
   type: "default" | "custom";
   /** Number of decimal places for numeric display. Default: 2 for currency, 2 for quantities. */
   decimalPlaces?: number;
+  /** Column width in pixels. Falls back to DEFAULT_COLUMN_SIZES[id] or 150. */
+  size?: number;
+  /** Minimum column width for resize. */
+  minSize?: number;
+  /** Maximum column width for resize. */
+  maxSize?: number;
 }
 
 /** Context menu floating state for grid right-click interactions */
@@ -198,3 +204,32 @@ export type WorkbookCommand =
   | MergeTakeoffDataCommand
   | UpdateColumnCommand;
 
+// ---------------------------------------------------------------------------
+// TanStack Table Meta — Type augmentation for typed table.options.meta access
+// ---------------------------------------------------------------------------
+
+import type { RowData } from '@tanstack/table-core';
+import type React from 'react';
+
+declare module '@tanstack/table-core' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface TableMeta<TData extends RowData> {
+    editingCellId: string | null;
+    editingValues: Record<string, string>;
+    setEditingCellId: React.Dispatch<React.SetStateAction<string | null>>;
+    setEditingValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+    flushEditingBufferRef: React.MutableRefObject<() => void>;
+    focusedCellRef: React.MutableRefObject<{
+      rowId: string; field: string; initialValue: string | number | boolean;
+    } | null>;
+    lockedCells: Record<string, boolean>;
+    handleCellEdit: (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => void;
+    commitCellEdit: (
+      rowId: string, field: keyof ProcessedTakeoffRow,
+      prev: string | number | boolean, next: string | number | boolean
+    ) => void;
+    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => void;
+    handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
+    setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
+  }
+}

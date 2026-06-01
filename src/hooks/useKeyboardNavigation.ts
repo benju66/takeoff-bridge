@@ -75,6 +75,21 @@ export function useKeyboardNavigation(
         }
       }
     }
+    if (e.key === "F2") {
+      e.preventDefault();
+      // F2 in Excel enters edit mode — here, move cursor to end of input (deselect all)
+      const input = e.target as HTMLInputElement;
+      const len = input.value.length;
+      input.setSelectionRange(len, len);
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      // Clear cell content via native input event so React picks up the change
+      const input = e.target as HTMLInputElement;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      nativeInputValueSetter?.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   };
 
   const handleCustomKeyDown = (e: React.KeyboardEvent, rIdx: number, colId: string) => {
@@ -93,6 +108,19 @@ export function useKeyboardNavigation(
     if (e.key === "Enter") {
       e.preventDefault();
       focusWithScroll(`custom-${colId}-input-${rIdx + 1}`, rIdx + 1, scrollToRow);
+    }
+    if (e.key === "F2") {
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      const len = input.value.length;
+      input.setSelectionRange(len, len);
+    }
+    if (e.key === "Delete") {
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      nativeInputValueSetter?.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
     }
   };
 

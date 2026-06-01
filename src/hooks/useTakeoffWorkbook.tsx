@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS } from "@/lib/constants";
 import {
   useReactTable,
   getCoreRowModel,
@@ -12,7 +11,8 @@ import {
   ColumnFiltersState,
 } from "@tanstack/react-table";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, WorkbookCommand } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
+import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { Project } from "@/types/db";
 import {
   getEstimateLineItems,
@@ -378,7 +378,27 @@ export function useTakeoffWorkbook(
   // ---------------------------------------------------------------------------
   const columnHelper = createColumnHelper<ProcessedTakeoffRow>();
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Default pixel widths for built-in columns. ColumnDefinition.size overrides these.
+  const DEFAULT_COLUMN_SIZES: Record<string, { size: number; minSize: number; maxSize?: number }> = {
+    costType:    { size: 55,  minSize: 45,  maxSize: 80  },
+    itemId:      { size: 110, minSize: 80,  maxSize: 200 },
+    description: { size: 300, minSize: 200, maxSize: 600 },
+    matchedQty:  { size: 100, minSize: 70,  maxSize: 160 },
+    uom:         { size: 60,  minSize: 45,  maxSize: 100 },
+    unitPrice:   { size: 110, minSize: 80,  maxSize: 180 },
+    total:       { size: 120, minSize: 90,  maxSize: 200 },
+    costPerUnit: { size: 110, minSize: 80,  maxSize: 180 },
+    costPerSf:   { size: 110, minSize: 80,  maxSize: 180 },
+  };
+
+  /** Resolve column size from ColumnDefinition overrides or DEFAULT_COLUMN_SIZES. */
+  const getSizeConfig = (def: ColumnDefinition) => {
+    if (def.size != null) {
+      return { size: def.size, minSize: def.minSize ?? 50, maxSize: def.maxSize };
+    }
+    return DEFAULT_COLUMN_SIZES[def.id] ?? { size: 150, minSize: 50 };
+  };
+
   const columns = useMemo(() => {
     return columnDefs.map((def) => {
       if (def.type === "custom") {
@@ -386,10 +406,12 @@ export function useTakeoffWorkbook(
         return columnHelper.accessor((row) => row.customFields?.[def.id] ?? "", {
           id: def.id,
           header: def.header,
+          ...getSizeConfig(def),
           cell: (info) => {
             const index = info.row.index;
             const row = info.row.original;
-            const isCellHardLocked = !!lockedCells[`${row.id}::${def.id}`];
+            const meta = info.table.options.meta!;
+            const isCellHardLocked = !!meta.lockedCells[`${row.id}::${def.id}`];
             const val = row.customFields?.[def.id] ?? "";
             return (
               <input
@@ -403,7 +425,7 @@ export function useTakeoffWorkbook(
                 }`}
                 value={val}
                 onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
-                onFocus={() => { focusedCustomCellRef.current = { rowId: row.id, columnId: def.id, initialValue: String(val) }; }}
+                onFocus={(e) => { e.currentTarget.select(); focusedCustomCellRef.current = { rowId: row.id, columnId: def.id, initialValue: String(val) }; }}
                 onBlur={() => {
                   const fc = focusedCustomCellRef.current;
                   if (fc && fc.rowId === row.id && fc.columnId === def.id) {
@@ -418,7 +440,7 @@ export function useTakeoffWorkbook(
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: def.id });
+                  meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: def.id });
                 }}
                 placeholder="..."
               />
@@ -431,6 +453,7 @@ export function useTakeoffWorkbook(
         case "costType":
           return columnHelper.accessor("costType", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => (
               <div className="text-center text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 {info.getValue()}
@@ -440,10 +463,12 @@ export function useTakeoffWorkbook(
         case "itemId": {
           return columnHelper.accessor("itemId", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
-              const isCellHardLocked = !!lockedCells[`${row.id}::itemId`];
+              const meta = info.table.options.meta!;
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::itemId`];
               const suggestions = getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER);
               return (
                 <div className="flex items-center gap-2 relative">
@@ -459,25 +484,25 @@ export function useTakeoffWorkbook(
                         : "text-slate-900 dark:text-white font-bold"
                     }`}
                     value={row.itemId}
-                    onChange={(e) => handleCellEdit(index, "itemId", e.target.value)}
-                    onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "itemId", initialValue: row.itemId }; }}
+                    onChange={(e) => meta.handleCellEdit(index, "itemId", e.target.value)}
+                    onFocus={(e) => { e.currentTarget.select(); meta.focusedCellRef.current = { rowId: row.id, field: "itemId", initialValue: row.itemId }; }}
                     onBlur={() => {
-                      const fc = focusedCellRef.current;
+                      const fc = meta.focusedCellRef.current;
                       if (fc && fc.rowId === row.id && fc.field === "itemId") {
                         const currentVal = row.itemId;
                         if (currentVal !== fc.initialValue) {
-                          commitCellEdit(fc.rowId, "itemId" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                          meta.commitCellEdit(fc.rowId, "itemId" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
                         }
-                        focusedCellRef.current = null;
+                        meta.focusedCellRef.current = null;
                       }
                     }}
-                    onKeyDown={(e) => handleKeyDown(e, index, "code")}
-                    onPaste={(e) => handlePaste(e, index, "code")}
+                    onKeyDown={(e) => meta.handleKeyDown(e, index, "code")}
+                    onPaste={(e) => meta.handlePaste(e, index, "code")}
                     list={!row.isMapped && row.classification ? `suggestions-${index}` : undefined}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
+                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
                     }}
                   />
                   {!row.isMapped && row.classification && suggestions.length > 0 && (
@@ -487,8 +512,8 @@ export function useTakeoffWorkbook(
                           key={s.itemId}
                           className="text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-200 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 transition-colors"
                           onClick={() => {
-                            handleCellEdit(index, "itemId", s.itemId);
-                            commitCellEdit(row.id, "itemId", row.itemId, s.itemId);
+                            meta.handleCellEdit(index, "itemId", s.itemId);
+                            meta.commitCellEdit(row.id, "itemId", row.itemId, s.itemId);
                           }}
                           title={`${s.itemId}: ${s.description}`}
                         >
@@ -505,10 +530,12 @@ export function useTakeoffWorkbook(
         case "description":
           return columnHelper.accessor("description", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
-              const isCellHardLocked = !!lockedCells[`${row.id}::description`];
+              const meta = info.table.options.meta!;
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::description`];
               return (
                 <input
                   id={`desc-input-${index}`}
@@ -520,87 +547,61 @@ export function useTakeoffWorkbook(
                       : "text-slate-900 dark:text-slate-100 font-medium"
                   }`}
                   value={row.description}
-                  onChange={(e) => handleCellEdit(index, "description", e.target.value)}
-                  onFocus={() => { focusedCellRef.current = { rowId: row.id, field: "description", initialValue: row.description }; }}
+                  onChange={(e) => meta.handleCellEdit(index, "description", e.target.value)}
+                  onFocus={(e) => { e.currentTarget.select(); meta.focusedCellRef.current = { rowId: row.id, field: "description", initialValue: row.description }; }}
                   onBlur={() => {
-                    const fc = focusedCellRef.current;
+                    const fc = meta.focusedCellRef.current;
                     if (fc && fc.rowId === row.id && fc.field === "description") {
                       const currentVal = row.description;
                       if (currentVal !== fc.initialValue) {
-                        commitCellEdit(fc.rowId, "description" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
+                        meta.commitCellEdit(fc.rowId, "description" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
                       }
-                      focusedCellRef.current = null;
+                      meta.focusedCellRef.current = null;
                     }
                   }}
-                  onKeyDown={(e) => handleKeyDown(e, index, "desc")}
-                  onPaste={(e) => handlePaste(e, index, "desc")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "desc")}
+                  onPaste={(e) => meta.handlePaste(e, index, "desc")}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
                   }}
                 />
               );
             },
           });
         case "matchedQty": {
-          const qtyDecimals = def.decimalPlaces ?? DEFAULT_QTY_DECIMALS;
           return columnHelper.accessor("matchedQty", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
-              const isCellHardLocked = !!lockedCells[`${row.id}::matchedQty`];
-              const bufferKey = `${row.id}::matchedQty`;
-              const isEditing = editingCellId === bufferKey;
-              const displayValue = isEditing
-                ? (editingValues[bufferKey] ?? String(row.matchedQty))
-                : row.matchedQty.toLocaleString(undefined, { minimumFractionDigits: qtyDecimals, maximumFractionDigits: qtyDecimals });
+              const meta = info.table.options.meta!;
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::matchedQty`];
               return (
-                <input
+                <NumberCellInput
                   id={`qty-input-${index}`}
-                  type="text"
-                  inputMode="decimal"
+                  value={row.matchedQty}
                   disabled={isCellHardLocked}
                   className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                       : "text-slate-900 dark:text-white"
                   }`}
-                  value={displayValue}
-                  onChange={(e) => {
-                    // String buffer: update only the editing buffer, no parse, no setRows (Fix 1B)
-                    setEditingValues((prev) => ({ ...prev, [bufferKey]: e.target.value }));
+                  onCommit={(numVal) => {
+                    meta.handleCellEdit(index, "matchedQty", numVal);
+                    meta.commitCellEdit(row.id, "matchedQty" as keyof ProcessedTakeoffRow, row.matchedQty, numVal);
                   }}
-                  onFocus={() => {
-                    // Flush any existing active buffer before initializing new one (Amendment E)
-                    flushEditingBufferRef.current();
-                    focusedCellRef.current = { rowId: row.id, field: "matchedQty", initialValue: row.matchedQty };
-                    setEditingCellId(bufferKey);
-                    setEditingValues((prev) => ({ ...prev, [bufferKey]: String(row.matchedQty) }));
+                  onLiveChange={(numVal) => {
+                    meta.handleCellEdit(index, "matchedQty", numVal);
                   }}
-                  onBlur={() => {
-                    const fc = focusedCellRef.current;
-                    const rawStr = editingValues[bufferKey] ?? String(row.matchedQty);
-                    const parsed = parseFloat(rawStr);
-                    const numVal = isNaN(parsed) ? 0 : parsed;
-                    // Apply the parsed value via handleCellEdit
-                    handleCellEdit(info.row.index, "matchedQty", numVal);
-                    if (fc && fc.rowId === row.id && fc.field === "matchedQty") {
-                      if (numVal !== fc.initialValue) {
-                        commitCellEdit(fc.rowId, "matchedQty" as keyof ProcessedTakeoffRow, fc.initialValue, numVal);
-                      }
-                      focusedCellRef.current = null;
-                    }
-                    setEditingCellId(null);
-                    setEditingValues((prev) => { const n = { ...prev }; delete n[bufferKey]; return n; });
-                  }}
-                  onKeyDown={(e) => handleKeyDown(e, index, "qty")}
-                  onPaste={(e) => handlePaste(e, index, "qty")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "qty")}
+                  onPaste={(e) => meta.handlePaste(e, index, "qty")}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
                   }}
                 />
               );
@@ -610,6 +611,7 @@ export function useTakeoffWorkbook(
         case "uom":
           return columnHelper.accessor("uom", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => (
               <div className="text-center text-slate-600 dark:text-slate-400 font-bold uppercase font-mono">
                 {info.getValue()}
@@ -617,64 +619,37 @@ export function useTakeoffWorkbook(
             ),
           });
         case "unitPrice": {
-          const priceDecimals = def.decimalPlaces ?? DEFAULT_CURRENCY_DECIMALS;
           return columnHelper.accessor("unitPrice", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => {
               const index = info.row.index;
               const row = info.row.original;
-              const isCellHardLocked = !!lockedCells[`${row.id}::unitPrice`];
-              const bufferKey = `${row.id}::unitPrice`;
-              const isEditing = editingCellId === bufferKey;
-              // Fix 1C: Currency formatting — display $XX.XX when not editing, raw string when editing
-              const displayValue = isEditing
-                ? (editingValues[bufferKey] ?? String(row.unitPrice))
-                : `$${row.unitPrice.toLocaleString(undefined, { minimumFractionDigits: priceDecimals, maximumFractionDigits: priceDecimals })}`;
+              const meta = info.table.options.meta!;
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::unitPrice`];
               return (
-                <input
+                <NumberCellInput
                   id={`price-input-${index}`}
-                  type="text"
-                  inputMode="decimal"
+                  value={row.unitPrice}
                   disabled={isCellHardLocked}
                   className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                       : "text-slate-900 dark:text-white"
                   }`}
-                  value={displayValue}
-                  onChange={(e) => {
-                    // String buffer: update only the editing buffer, no parse, no setRows (Fix 1B)
-                    setEditingValues((prev) => ({ ...prev, [bufferKey]: e.target.value }));
+                  onCommit={(numVal) => {
+                    meta.handleCellEdit(index, "unitPrice", numVal);
+                    meta.commitCellEdit(row.id, "unitPrice" as keyof ProcessedTakeoffRow, row.unitPrice, numVal);
                   }}
-                  onFocus={() => {
-                    // Flush any existing active buffer before initializing new one (Amendment E)
-                    flushEditingBufferRef.current();
-                    focusedCellRef.current = { rowId: row.id, field: "unitPrice", initialValue: row.unitPrice };
-                    setEditingCellId(bufferKey);
-                    setEditingValues((prev) => ({ ...prev, [bufferKey]: String(row.unitPrice) }));
+                  onLiveChange={(numVal) => {
+                    meta.handleCellEdit(index, "unitPrice", numVal);
                   }}
-                  onBlur={() => {
-                    const fc = focusedCellRef.current;
-                    const rawStr = editingValues[bufferKey] ?? String(row.unitPrice);
-                    const parsed = parseFloat(rawStr);
-                    const numVal = isNaN(parsed) ? 0 : parsed;
-                    // Apply the parsed value via handleCellEdit
-                    handleCellEdit(info.row.index, "unitPrice", numVal);
-                    if (fc && fc.rowId === row.id && fc.field === "unitPrice") {
-                      if (numVal !== fc.initialValue) {
-                        commitCellEdit(fc.rowId, "unitPrice" as keyof ProcessedTakeoffRow, fc.initialValue, numVal);
-                      }
-                      focusedCellRef.current = null;
-                    }
-                    setEditingCellId(null);
-                    setEditingValues((prev) => { const n = { ...prev }; delete n[bufferKey]; return n; });
-                  }}
-                  onKeyDown={(e) => handleKeyDown(e, index, "price")}
-                  onPaste={(e) => handlePaste(e, index, "price")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "price")}
+                  onPaste={(e) => meta.handlePaste(e, index, "price")}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
                   }}
                 />
               );
@@ -684,6 +659,7 @@ export function useTakeoffWorkbook(
         case "total":
           return columnHelper.accessor("total", {
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => (
               <div className="text-center font-black font-mono">
                 <span className={info.getValue() > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}>
@@ -696,6 +672,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor((row) => (unitCount > 0 ? row.total / unitCount : 0), {
             id: "costPerUnit",
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => (
               <div className="text-center font-bold font-mono text-slate-600 dark:text-slate-300">
                 ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -706,6 +683,7 @@ export function useTakeoffWorkbook(
           return columnHelper.accessor((row) => (squareFootage > 0 ? row.total / squareFootage : 0), {
             id: "costPerSf",
             header: def.header,
+            ...getSizeConfig(def),
             cell: (info) => (
               <div className="text-center font-bold font-mono text-slate-600 dark:text-slate-300">
                 ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -713,11 +691,11 @@ export function useTakeoffWorkbook(
             ),
           });
         default:
-          return columnHelper.display({ id: def.id, header: def.header, cell: () => null });
+          return columnHelper.display({ id: def.id, header: def.header, ...getSizeConfig(def), cell: () => null });
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, lockedCells, unitCount, squareFootage, handleCellEdit, handleCustomCellEdit, commitCellEdit, commitCustomCellEdit, editingCellId, editingValues]);
+  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit]);
 
   // Sort / Filter state (Phase 4)
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -738,6 +716,20 @@ export function useTakeoffWorkbook(
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    meta: {
+      editingCellId,
+      editingValues,
+      setEditingCellId,
+      setEditingValues,
+      flushEditingBufferRef,
+      focusedCellRef,
+      lockedCells,
+      handleCellEdit,
+      commitCellEdit,
+      handleKeyDown,
+      handlePaste,
+      setContextMenu,
+    },
   });
 
   return {

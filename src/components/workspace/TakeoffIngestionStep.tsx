@@ -380,7 +380,7 @@ export function TakeoffIngestionStep({
                 <tr
                   key={headerGroup.id}
                   className="bg-[#3057A6] text-white uppercase border-b border-grid-border tracking-wider font-bold font-sans text-[13px]"
-                  style={{ display: "flex" }}
+                  style={{ display: "flex", width: table.getTotalSize() }}
                 >
                   {headerGroup.headers.map((header: Header<ProcessedTakeoffRow, unknown>) => {
                     const alignClass = "text-center";
@@ -390,7 +390,7 @@ export function TakeoffIngestionStep({
                     return (
                       <th
                         key={header.id}
-                        className={`p-4 border-r border-b border-grid-border relative group/header font-bold text-white text-[13px] bg-[#3057A6] ${alignClass}`}
+                        className={`px-1.5 py-2 border-r border-b border-grid-border relative group/header font-bold text-white text-[13px] bg-[#3057A6] ${alignClass}`}
                         style={{ width: header.getSize(), flex: "none" }}
                       >
                         {header.isPlaceholder ? null : isCustom ? (
@@ -457,7 +457,7 @@ export function TakeoffIngestionStep({
                             position: "absolute",
                             top: 0,
                             left: 0,
-                            width: "100%",
+                            width: table.getTotalSize(),
                             height: virtualRow.size,
                             transform: `translateY(${virtualRow.start}px)`,
                           }}
@@ -489,7 +489,7 @@ export function TakeoffIngestionStep({
                           position: "absolute",
                           top: 0,
                           left: 0,
-                          width: "100%",
+                          width: table.getTotalSize(),
                           height: virtualRow.size,
                           transform: `translateY(${virtualRow.start}px)`,
                         }}
@@ -513,10 +513,14 @@ export function TakeoffIngestionStep({
                           const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
                           const paddingClass = isEditable ? "p-0" : "p-3";
 
+                          const editAffordance = isEditable
+                            ? "hover:bg-blue-50/50 dark:hover:bg-blue-950/10 cursor-text"
+                            : "cursor-default";
+
                           return (
                             <td
                               key={cell.id}
-                              className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} transition-colors`}
+                              className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} ${editAffordance} transition-colors`}
                               style={{ width: cell.column.getSize(), flex: "none" }}
                             >
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
