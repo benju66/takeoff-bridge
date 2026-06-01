@@ -10,6 +10,8 @@ import { saveProjectColumnDefs } from "@/lib/db";
 // ---------------------------------------------------------------------------
 
 const DEFAULT_COLUMN_DEFS: ColumnDefinition[] = [
+  { id: "actions", header: "", type: "default" },
+  { id: "validationStatus", header: "", type: "default" },
   { id: "costType", header: "TYPE", type: "default" },
   { id: "itemId", header: "Code", type: "default" },
   { id: "description", header: "Description", type: "default" },
@@ -17,6 +19,7 @@ const DEFAULT_COLUMN_DEFS: ColumnDefinition[] = [
   { id: "uom", header: "Unit", type: "default" },
   { id: "unitPrice", header: "Rate", type: "default" },
   { id: "total", header: "Total", type: "default" },
+  { id: "notes", header: "", type: "default" },
   { id: "costPerUnit", header: "Cost/Unit", type: "default" },
   { id: "costPerSf", header: "Cost/S.F.", type: "default" },
 ];

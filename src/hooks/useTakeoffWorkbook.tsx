@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { Trash, MessageSquare } from "lucide-react";
 import {
   useReactTable,
   getCoreRowModel,
@@ -296,7 +297,33 @@ export function useTakeoffWorkbook(
 
         // Apply column definitions
         if (savedColDefs) {
-          setColumnDefs(savedColDefs);
+          const normalizeColumnDefs = (loaded: ColumnDefinition[]): ColumnDefinition[] => {
+            const merged = [...loaded].filter((col, idx, self) => self.findIndex(c => c.id === col.id) === idx);
+            const actIdx = merged.findIndex(c => c.id === "actions");
+            if (actIdx === -1) {
+              merged.unshift({ id: "actions", header: "", type: "default" });
+            } else if (actIdx > 0) {
+              const [col] = merged.splice(actIdx, 1);
+              merged.unshift(col);
+            }
+            const valIdx = merged.findIndex(c => c.id === "validationStatus");
+            if (valIdx === -1) {
+              merged.splice(1, 0, { id: "validationStatus", header: "", type: "default" });
+            } else if (valIdx !== 1) {
+              const [col] = merged.splice(valIdx, 1);
+              merged.splice(1, 0, col);
+            }
+            if (!merged.some(c => c.id === "notes")) {
+              const totIdx = merged.findIndex(c => c.id === "total");
+              if (totIdx !== -1) {
+                merged.splice(totIdx + 1, 0, { id: "notes", header: "", type: "default" });
+              } else {
+                merged.push({ id: "notes", header: "", type: "default" });
+              }
+            }
+            return merged;
+          };
+          setColumnDefs(normalizeColumnDefs(savedColDefs));
         }
 
         // Apply cell locks
@@ -380,15 +407,18 @@ export function useTakeoffWorkbook(
 
   // Default pixel widths for built-in columns. ColumnDefinition.size overrides these.
   const DEFAULT_COLUMN_SIZES: Record<string, { size: number; minSize: number; maxSize?: number }> = {
-    costType:    { size: 75,  minSize: 30 },
-    itemId:      { size: 160, minSize: 30 },
-    description: { size: 300, minSize: 30 },
-    matchedQty:  { size: 100, minSize: 30 },
-    uom:         { size: 60,  minSize: 30 },
-    unitPrice:   { size: 110, minSize: 30 },
-    total:       { size: 120, minSize: 30 },
-    costPerUnit: { size: 110, minSize: 30 },
-    costPerSf:   { size: 110, minSize: 30 },
+    actions:          { size: 40,  minSize: 40,  maxSize: 40  },
+    validationStatus: { size: 45,  minSize: 45,  maxSize: 45  },
+    costType:    { size: 110, minSize: 30 },
+    itemId:      { size: 220, minSize: 30 },
+    description: { size: 600, minSize: 30 },
+    matchedQty:  { size: 180, minSize: 30 },
+    uom:         { size: 110, minSize: 30 },
+    unitPrice:   { size: 180, minSize: 30 },
+    total:       { size: 200, minSize: 30 },
+    notes:            { size: 55,  minSize: 55,  maxSize: 55  },
+    costPerUnit: { size: 180, minSize: 30 },
+    costPerSf:   { size: 180, minSize: 30 },
   };
 
   /** Resolve column size from ColumnDefinition overrides or DEFAULT_COLUMN_SIZES. */
@@ -450,6 +480,91 @@ export function useTakeoffWorkbook(
       }
 
       switch (def.id) {
+        case "actions":
+          return columnHelper.display({
+            id: "actions",
+            header: "",
+            ...getSizeConfig(def),
+            cell: (info) => {
+              const row = info.row.original;
+              const meta = info.table.options.meta!;
+              return (
+                <div className="flex items-center justify-center h-full w-full">
+                  <button
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-400 hover:text-red-500 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm("Delete this row? This action can be undone with Ctrl+Z.")) {
+                        meta.deleteRow(row.id);
+                      }
+                    }}
+                    title="Delete Row"
+                  >
+                    <Trash className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            },
+          });
+        case "validationStatus":
+          return columnHelper.accessor("isMapped", {
+            id: "validationStatus",
+            header: "",
+            ...getSizeConfig(def),
+            cell: (info) => {
+              const row = info.row.original;
+              const meta = info.table.options.meta!;
+              const hasLockedCell = Object.keys(meta.lockedCells).some(
+                (key) => key.startsWith(`${row.id}::`) && meta.lockedCells[key]
+              );
+              
+              return (
+                <div className="flex items-center justify-center h-full w-full">
+                  {hasLockedCell ? (
+                    <span className="text-blue-500 text-xs select-none" title="Row contains locked values">🔒</span>
+                  ) : !row.isMapped ? (
+                    <span className="text-amber-500 text-xs select-none animate-pulse" title="Item not mapped to corporate registry">⚠️</span>
+                  ) : (
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" title="Verified & Mapped" />
+                  )}
+                </div>
+              );
+            },
+          });
+        case "notes":
+          return columnHelper.display({
+            id: "notes",
+            header: "",
+            ...getSizeConfig(def),
+            cell: (info) => {
+              const row = info.row.original;
+              const meta = info.table.options.meta!;
+              const noteText = String(row.customFields?.notes || "");
+              return (
+                <div className="flex items-center justify-center h-full w-full">
+                  <button
+                    className={`p-1.5 rounded transition-all duration-200 ${
+                      noteText
+                        ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                        : "text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const currentVal = String(row.customFields?.notes || "");
+                      const newVal = window.prompt("Edit Estimator Notes:", currentVal);
+                      if (newVal !== null && newVal !== currentVal) {
+                        meta.handleCustomCellEdit(info.row.index, "notes", newVal);
+                        meta.commitCustomCellEdit(row.id, "notes", currentVal, newVal);
+                      }
+                    }}
+                    title={noteText ? `Notes: ${noteText}` : "Add Notes"}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                  </button>
+                </div>
+              );
+            },
+          });
         case "costType":
           return columnHelper.accessor("costType", {
             header: def.header,
@@ -729,6 +844,10 @@ export function useTakeoffWorkbook(
       handleKeyDown,
       handlePaste,
       setContextMenu,
+      deleteRow,
+      insertManualRow,
+      handleCustomCellEdit,
+      commitCustomCellEdit,
     },
   });
 

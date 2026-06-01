@@ -231,5 +231,9 @@ declare module '@tanstack/table-core' {
     handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => void;
     handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
     setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
+    deleteRow: (rowId: string) => void;
+    insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
+    handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
+    commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
   }
 }

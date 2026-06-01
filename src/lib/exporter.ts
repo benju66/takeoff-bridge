@@ -14,9 +14,10 @@ export { getColumnLetter } from "./exportUtils";
  */
 export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: ColumnDefinition[]): string {
   const csvLines: string[] = [];
+  const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
 
-  // Populate dynamic headers based on columnDefs
-  const headers = columnDefs.map((col) => {
+  // Populate dynamic headers based on activeCols
+  const headers = activeCols.map((col) => {
     if (col.type === "default") {
       switch (col.id) {
         case "costType":
@@ -33,6 +34,8 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
           return "Rate";
         case "total":
           return "Total";
+        case "notes":
+          return "Notes";
         case "costPerUnit":
           return "Cost/Unit";
         case "costPerSf":
@@ -49,7 +52,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
   // Populate each data row dynamically using active user modified grid values
   for (const row of rows) {
     const calculatedTotal = row.matchedQty * row.unitPrice;
-    const rowValues = columnDefs.map((col) => {
+    const rowValues = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
           case "costType":
@@ -66,6 +69,8 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
             return row.unitPrice;
           case "total":
             return calculatedTotal;
+          case "notes":
+            return row.customFields?.notes || "";
           case "costPerUnit":
             return "";
           case "costPerSf":
@@ -87,7 +92,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
     const generalLiability = subtotal * GL_RATE;
     const fee = subtotal * FEE_RATE;
 
-    const glRow = columnDefs.map((col) => {
+    const glRow = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
           case "costType":
@@ -113,7 +118,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
     });
     csvLines.push(glRow.map(escapeCSVField).join(","));
 
-    const feeRow = columnDefs.map((col) => {
+    const feeRow = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
           case "costType":
@@ -305,6 +310,8 @@ export async function generateExcelWorkbook(
     throw new Error('Worksheet "STEP 4 - ESTIMATE" not found in the template');
   }
 
+  const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
+
   // Determine spreadsheet column indices for each column definition
   const colIndexMap: Record<string, number> = {};
   const defaultColPositions: Record<string, number> = {
@@ -320,7 +327,7 @@ export async function generateExcelWorkbook(
   };
 
   let nextCustomColIdx = 12; // Columns L, M, N, ...
-  for (const col of columnDefs) {
+  for (const col of activeCols) {
     if (col.type === 'default') {
       if (defaultColPositions[col.id] !== undefined) {
         colIndexMap[col.id] = defaultColPositions[col.id];
@@ -334,10 +341,10 @@ export async function generateExcelWorkbook(
 
   // Headers Override: Write active column def header text values directly into worksheet.getRow(9)
   const headerRow = worksheet.getRow(9);
-  for (const col of columnDefs) {
+  for (const col of activeCols) {
     const colIdx = colIndexMap[col.id];
     if (colIdx) {
-      headerRow.getCell(colIdx).value = col.header;
+      headerRow.getCell(colIdx).value = col.id === "notes" ? "Notes" : col.header;
     }
   }
 
@@ -397,8 +404,8 @@ export async function generateExcelWorkbook(
       priceCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
       priceCell.alignment = { horizontal: 'right' };
 
-      for (const col of columnDefs) {
-        if (col.type === 'custom') {
+      for (const col of activeCols) {
+        if (col.type === 'custom' || col.id === 'notes') {
           const colIdx = colIndexMap[col.id];
           if (colIdx) {
             excelRow.getCell(colIdx).value = row.customFields?.[col.id] ?? "";
@@ -474,8 +481,8 @@ export async function generateExcelWorkbook(
     cpsfCell.numFmt = buildNumFmt(DEFAULT_CURRENCY_DECIMALS, true);
     cpsfCell.alignment = { horizontal: 'right' };
 
-    for (const col of columnDefs) {
-      if (col.type === 'custom') {
+    for (const col of activeCols) {
+      if (col.type === 'custom' || col.id === 'notes') {
         const colIdx = colIndexMap[col.id];
         if (colIdx) {
           excelRow.getCell(colIdx).value = row.customFields?.[col.id] ?? "";
