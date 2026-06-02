@@ -3,61 +3,57 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
 // ---------------------------------------------------------------------------
-// NumberCellInput — Self-contained numeric cell with local string buffer
-// Upgraded for Strategy A: Excel Reversion (Escape cancels edit)
+// StringCellInput — Excel-grade buffered text editor
+// Localizes cursor focus and state, deferring commits until blur/Enter.
 // ---------------------------------------------------------------------------
 
-interface NumberCellInputProps {
+interface StringCellInputProps {
   id: string;
-  value: number;
+  value: string;
   disabled?: boolean;
   className?: string;
-  /** Called on blur with the final numeric value if it changed. */
-  onCommit: (newValue: number) => void;
-  /** Called on every keystroke (e.g. for live totals preview). */
-  onLiveChange?: (newValue: number) => void;
+  onCommit: (newValue: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLInputElement>) => void;
+  list?: string;
   initialEditChar?: string | null;
 }
 
-export const NumberCellInput = React.memo(function NumberCellInput({
+export const StringCellInput = React.memo(function StringCellInput({
   id,
   value,
   disabled = false,
   className = "",
   onCommit,
-  onLiveChange,
   onKeyDown,
   onPaste,
   onContextMenu,
+  list,
   initialEditChar,
-}: NumberCellInputProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [buffer, setBuffer] = useState("");
+}: StringCellInputProps) {
+  // Initialize with initialEditChar if direct alphanumeric typing triggered this editor
+  const [buffer, setBuffer] = useState(
+    initialEditChar !== undefined && initialEditChar !== null ? initialEditChar : value
+  );
   const initialValueRef = useRef(value);
   const isRevertedRef = useRef(false);
 
-  // Sync the display value when the parent's value changes (e.g. undo/redo,
-  // cascade from sibling edits, external data reload).
-  // Only update when NOT editing to avoid clobbering the user's in-progress input.
+  // Sync state if external change happens (e.g. undo/redo) and we are not focused
   useEffect(() => {
-    if (!isEditing) {
+    if (document.activeElement?.id !== id) {
+      setBuffer(value);
       initialValueRef.current = value;
     }
-  }, [value, isEditing]);
+  }, [value, id]);
 
   const handleFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
-    setIsEditing(true);
     initialValueRef.current = value;
     isRevertedRef.current = false;
     
-    if (initialEditChar !== undefined && initialEditChar !== null) {
-      setBuffer(initialEditChar);
-    } else {
-      setBuffer(String(value));
-      // Select all text so the user can type-to-replace
+    // Select all text if editing was not triggered by direct typing
+    if (initialEditChar === undefined || initialEditChar === null) {
+      setBuffer(value);
       e.currentTarget.select();
     }
   }, [value, initialEditChar]);
@@ -65,32 +61,21 @@ export const NumberCellInput = React.memo(function NumberCellInput({
   const handleBlur = useCallback(() => {
     if (isRevertedRef.current) {
       isRevertedRef.current = false;
-      setIsEditing(false);
       return;
     }
-    const parsed = parseFloat(buffer);
-    const numVal = isNaN(parsed) ? 0 : parsed;
-    setIsEditing(false);
-    if (numVal !== initialValueRef.current) {
-      onCommit(numVal);
+    if (buffer !== initialValueRef.current) {
+      onCommit(buffer);
     }
   }, [buffer, onCommit]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    setBuffer(raw);
-    // Optionally update live totals
-    if (onLiveChange) {
-      const parsed = parseFloat(raw);
-      if (!isNaN(parsed)) onLiveChange(parsed);
-    }
-  }, [onLiveChange]);
+    setBuffer(e.target.value);
+  }, []);
 
   const handleKeyDownInternal = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
       isRevertedRef.current = true;
-      setBuffer(String(initialValueRef.current));
-      setIsEditing(false);
+      setBuffer(initialValueRef.current);
       e.currentTarget.blur();
     }
     if (onKeyDown) {
@@ -98,23 +83,20 @@ export const NumberCellInput = React.memo(function NumberCellInput({
     }
   }, [onKeyDown]);
 
-  // Display value: when editing show the raw buffer; otherwise show the numeric value
-  const displayValue = isEditing ? buffer : value;
-
   return (
     <input
       id={id}
       type="text"
-      inputMode="decimal"
       disabled={disabled}
       className={className}
-      value={displayValue}
+      value={buffer}
       onChange={handleChange}
       onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDownInternal}
       onPaste={onPaste}
       onContextMenu={onContextMenu}
+      list={list}
       autoFocus
     />
   );

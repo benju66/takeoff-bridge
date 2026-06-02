@@ -86,6 +86,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
     rowVersion,
     globalFilter, setGlobalFilter,
     columnFilters,
+    scrollToRowRef,
+    selection,
   } = workbook;
 
   // Step 4: Takeoff Summary
@@ -441,6 +443,8 @@ export default function ProjectWorkspace({ params }: PageProps) {
             costTypeBreakdown={costTypeBreakdown}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
+            selection={selection}
+            scrollToRowRef={scrollToRowRef}
           />
         </ErrorBoundary>
       )}

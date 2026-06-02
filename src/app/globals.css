@@ -55,3 +55,109 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+/* ---------------------------------------------------------------------------
+   Grid Cell Selection & Focus Transitions (Phase 3A)
+   --------------------------------------------------------------------------- */
+
+/* Smooth cell transitions for selection ring and background */
+.cell-transition {
+  transition: outline 0.1s ease, background-color 0.12s ease, box-shadow 0.15s ease;
+}
+
+/* Active cell selection glow */
+.cell-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  z-index: 5;
+  position: relative;
+}
+
+:root[data-theme="dark"] .cell-selected,
+:root:not([data-theme="light"]) .cell-selected {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* Editing cell glow — stronger indicator */
+.cell-editing {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18), inset 0 0 8px rgba(37, 99, 235, 0.04);
+  z-index: 6;
+  position: relative;
+}
+
+/* Sticky header depth shadow */
+.thead-shadow {
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.15), 0 1px 3px -1px rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="dark"] .thead-shadow {
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.4), 0 1px 3px -1px rgba(0, 0, 0, 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+   Custom Scrollbar Styling (Phase 3B)
+   --------------------------------------------------------------------------- */
+
+.grid-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.grid-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.grid-scroll::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.grid-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+:root[data-theme="dark"] .grid-scroll::-webkit-scrollbar-thumb {
+  background-color: #374151;
+}
+
+:root[data-theme="dark"] .grid-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #4b5563;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .grid-scroll::-webkit-scrollbar-thumb {
+    background-color: #374151;
+  }
+  :root:not([data-theme="light"]) .grid-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #4b5563;
+  }
+}
+
+/* Firefox scrollbar */
+.grid-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+:root[data-theme="dark"] .grid-scroll {
+  scrollbar-color: #374151 transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   Status Bar Styling
+   --------------------------------------------------------------------------- */
+
+.status-bar {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-top: 1px solid #334155;
+}
+
+:root[data-theme="light"] .status-bar {
+  background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
+  border-top: 1px solid #cbd5e1;
+}

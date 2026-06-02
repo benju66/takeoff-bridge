@@ -70,8 +70,16 @@ export function useCellEditing(
     value: string | number,
     currentRegistry: Record<string, string>
   ): Record<string, string> | null => {
-    const row = updated[index];
-    if (!row) return null;
+    const originalRow = updated[index];
+    if (!originalRow) return null;
+
+    // Shallow-clone the row to prevent in-place mutation and ensure React/TanStack re-renders
+    const row = {
+      ...originalRow,
+      rawQuantities: originalRow.rawQuantities.map((rq) => ({ ...rq })),
+      customFields: { ...(originalRow.customFields || {}) },
+    };
+    updated[index] = row;
 
     const classification = row.classification;
     let newRegistry: Record<string, string> | null = null;

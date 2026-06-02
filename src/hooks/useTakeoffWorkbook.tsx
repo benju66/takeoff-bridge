@@ -10,10 +10,12 @@ import {
   getFacetedUniqueValues,
   createColumnHelper,
   ColumnFiltersState,
+  Table,
 } from "@tanstack/react-table";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
+import { StringCellInput } from "@/components/workspace/StringCellInput";
 import { Project } from "@/types/db";
 import {
   getEstimateLineItems,
@@ -32,6 +34,7 @@ import { useCellEditing } from "./useCellEditing";
 import { usePasteHandler } from "./usePasteHandler";
 import { useFileIngestion } from "./useFileIngestion";
 import { useExportHandlers } from "./useExportHandlers";
+import { useCopyHandler } from "./useCopyHandler";
 
 // ---------------------------------------------------------------------------
 // useTakeoffWorkbook — Orchestration shell
@@ -74,8 +77,8 @@ export interface UseTakeoffWorkbookReturn {
   commitCellEdit: (rowId: string, field: keyof ProcessedTakeoffRow, prevValue: string | number | boolean, nextValue: string | number | boolean) => void;
   handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
   commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
-  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => void;
-  handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<ProcessedTakeoffRow>) => void;
+  handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<ProcessedTakeoffRow>) => void;
   handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
   handleAddCustomColumn: () => void;
   handleDeleteColumn: (colId: string) => void;
@@ -86,13 +89,16 @@ export interface UseTakeoffWorkbookReturn {
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleDrag: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
+  selection: GridSelectionState;
+  setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
+  scrollToRowRef: React.MutableRefObject<((index: number) => void) | undefined>;
   handleExportExcel: () => void;
   handleExportProcore: () => void;
   handleExportExcelWorkbook: () => Promise<void>;
   handleUndo: () => void;
   handleRedo: () => void;
 }
-const multiSelect: any = "multiSelect";
+const multiSelect = "multiSelect" as "includesString";
 
 export function useTakeoffWorkbook(
   projectId: string,
@@ -131,6 +137,13 @@ export function useTakeoffWorkbook(
   // Unmapped classifications
   const [unmappedTakeoffClassifications, setUnmappedTakeoffClassifications] = useState<string[]>([]);
 
+  // Grid Selection State
+  const [selection, setSelection] = useState<GridSelectionState>({
+    rowId: null,
+    columnId: null,
+    isEditing: false,
+  });
+
   // Command Pattern history engine
   const commandHistory = useCommandHistory();
 
@@ -146,6 +159,8 @@ export function useTakeoffWorkbook(
   useEffect(() => { unmappedRef.current = unmappedTakeoffClassifications; }, [unmappedTakeoffClassifications]);
 
   // --- Extracted hooks ---
+  const scrollToRowRef = useRef<((index: number) => void) | undefined>(undefined);
+
   const {
     lockedCells, setLockedCells, handleToggleCellLock,
   } = useLockedCells(projectId, isLoaded, commandHistory);
@@ -155,7 +170,7 @@ export function useTakeoffWorkbook(
     handleAddCustomColumn, handleDeleteColumn, handleRenameColumn,
   } = useColumnDefinitions(projectId, isLoaded, commandHistory, rowsRef);
 
-  const { handleKeyDown, handleCustomKeyDown } = useKeyboardNavigation(rowsRef);
+  const { handleKeyDown, handleCustomKeyDown } = useKeyboardNavigation(rowsRef, scrollToRowRef);
 
   const {
     editingValues, editingCellId,
@@ -173,6 +188,13 @@ export function useTakeoffWorkbook(
     rows, userRegistry, globalRegistry, projectId,
     commandHistory, applyCellEditDirect,
     setRows, setUserRegistry, setGlobalRegistry,
+  );
+
+  useCopyHandler(
+    rows,
+    selection,
+    project?.squareFootage || 0,
+    project?.unitCount || 0,
   );
 
   const {
@@ -444,37 +466,61 @@ export function useTakeoffWorkbook(
             const meta = info.table.options.meta!;
             const isCellHardLocked = !!meta.lockedCells[`${row.id}::${def.id}`];
             const val = row.customFields?.[def.id] ?? "";
+
+            const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === def.id;
+            const isEditing = isSelected && meta.selection.isEditing;
+
+            if (isEditing) {
+              return (
+                <StringCellInput
+                  id={`custom-${def.id}-input-${index}`}
+                  value={String(val)}
+                  disabled={isCellHardLocked}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                    isCellHardLocked
+                      ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : "text-slate-900 dark:text-slate-100 font-medium"
+                  }`}
+                  onCommit={(newVal) => {
+                    handleCustomCellEdit(index, def.id, newVal);
+                    commitCustomCellEdit(row.id, def.id, String(val), newVal);
+                  }}
+                  onKeyDown={(e) => handleCustomKeyDown(e, index, def.id, info.table)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: def.id });
+                  }}
+                  initialEditChar={meta.selection.initialEditChar}
+                />
+              );
+            }
+
             return (
-              <input
-                id={`custom-${def.id}-input-${index}`}
-                type="text"
-                disabled={isCellHardLocked}
-                className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+              <div
+                id={`cell-${row.id}-${def.id}`}
+                tabIndex={0}
+                className={`w-full h-full min-h-[36px] px-3 py-2 text-left font-sans text-xs transition-all outline-none focus:outline-none ${
                   isCellHardLocked
                     ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                    : isSelected
+                    ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative font-medium text-slate-900 dark:text-slate-100"
                     : "text-slate-900 dark:text-slate-100 font-medium"
                 }`}
-                value={val}
-                onChange={(e) => handleCustomCellEdit(index, def.id, e.target.value)}
-                onFocus={(e) => { e.currentTarget.select(); focusedCustomCellRef.current = { rowId: row.id, columnId: def.id, initialValue: String(val) }; }}
-                onBlur={() => {
-                  const fc = focusedCustomCellRef.current;
-                  if (fc && fc.rowId === row.id && fc.columnId === def.id) {
-                    const currentVal = String(row.customFields?.[def.id] ?? "");
-                    if (currentVal !== fc.initialValue) {
-                      commitCustomCellEdit(fc.rowId, fc.columnId, fc.initialValue, currentVal);
-                    }
-                    focusedCustomCellRef.current = null;
+                onClick={() => {
+                  if (!isCellHardLocked) {
+                    meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: isSelected ? true : false });
                   }
                 }}
-                onKeyDown={(e) => handleCustomKeyDown(e, index, def.id)}
+                onKeyDown={(e) => handleCustomKeyDown(e, index, def.id, info.table)}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  e.stopPropagation();
+                  meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: false });
                   meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: def.id });
                 }}
-                placeholder="..."
-              />
+              >
+                {val || <span className="text-slate-400 dark:text-slate-600">...</span>}
+              </div>
             );
           },
         });
@@ -588,48 +634,95 @@ export function useTakeoffWorkbook(
               const meta = info.table.options.meta!;
               const isCellHardLocked = !!meta.lockedCells[`${row.id}::itemId`];
               const suggestions = getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER);
+
+              const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "itemId";
+              const isEditing = isSelected && meta.selection.isEditing;
+
+              if (isEditing) {
+                return (
+                  <div className="flex items-center gap-2 relative w-full h-full">
+                    <StringCellInput
+                      id={`code-input-${index}`}
+                      value={row.itemId}
+                      disabled={isCellHardLocked}
+                      className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                        isCellHardLocked
+                          ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                          : !row.isMapped && row.classification
+                          ? "text-amber-600 dark:text-amber-400 font-bold"
+                          : "text-slate-900 dark:text-white font-bold"
+                      }`}
+                      onCommit={(newVal) => {
+                        meta.handleCellEdit(index, "itemId", newVal);
+                        meta.commitCellEdit(row.id, "itemId" as keyof ProcessedTakeoffRow, row.itemId, newVal);
+                      }}
+                      onKeyDown={(e) => meta.handleKeyDown(e, index, "code", info.table)}
+                      onPaste={(e) => meta.handlePaste(e, index, "code")}
+                      list={!row.isMapped && row.classification ? `suggestions-${index}` : undefined}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
+                      }}
+                      initialEditChar={meta.selection.initialEditChar}
+                    />
+                    {!row.isMapped && row.classification && suggestions.length > 0 && (
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1 z-20">
+                        {suggestions.slice(0, 2).map((s) => (
+                          <button
+                            key={s.itemId}
+                            className="text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-200 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 transition-colors"
+                            onClick={() => {
+                              meta.handleCellEdit(index, "itemId", s.itemId);
+                              meta.commitCellEdit(row.id, "itemId", row.itemId, s.itemId);
+                            }}
+                            title={`${s.itemId}: ${s.description}`}
+                          >
+                            {s.itemId}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               return (
-                <div className="flex items-center gap-2 relative">
-                  <input
-                    id={`code-input-${index}`}
-                    type="text"
-                    disabled={isCellHardLocked}
-                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
-                      isCellHardLocked
-                        ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
-                        : !row.isMapped && row.classification
-                        ? "text-amber-600 dark:text-amber-400 font-bold"
-                        : "text-slate-900 dark:text-white font-bold"
-                    }`}
-                    value={row.itemId}
-                    onChange={(e) => meta.handleCellEdit(index, "itemId", e.target.value)}
-                    onFocus={(e) => { e.currentTarget.select(); meta.focusedCellRef.current = { rowId: row.id, field: "itemId", initialValue: row.itemId }; }}
-                    onBlur={() => {
-                      const fc = meta.focusedCellRef.current;
-                      if (fc && fc.rowId === row.id && fc.field === "itemId") {
-                        const currentVal = row.itemId;
-                        if (currentVal !== fc.initialValue) {
-                          meta.commitCellEdit(fc.rowId, "itemId" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
-                        }
-                        meta.focusedCellRef.current = null;
-                      }
-                    }}
-                    onKeyDown={(e) => meta.handleKeyDown(e, index, "code")}
-                    onPaste={(e) => meta.handlePaste(e, index, "code")}
-                    list={!row.isMapped && row.classification ? `suggestions-${index}` : undefined}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
-                    }}
-                  />
-                  {!row.isMapped && row.classification && suggestions.length > 0 && (
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+                <div
+                  id={`cell-${row.id}-itemId`}
+                  tabIndex={0}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-between gap-2 font-mono text-xs transition-all outline-none focus:outline-none ${
+                    isCellHardLocked
+                      ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : isSelected
+                      ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative font-bold text-slate-900 dark:text-white"
+                      : !row.isMapped && row.classification
+                      ? "text-amber-600 dark:text-amber-400 font-bold"
+                      : "text-slate-900 dark:text-white font-bold"
+                  }`}
+                  onClick={() => {
+                    if (isSelected && !isCellHardLocked) {
+                      meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: false });
+                    }
+                  }}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "code", info.table)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: false });
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
+                  }}
+                >
+                  <span className="truncate">{row.itemId || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
+                  {!row.isMapped && row.classification && suggestions.length > 0 && (isSelected || isCellHardLocked) && (
+                    <div className="flex gap-1 shrink-0">
                       {suggestions.slice(0, 2).map((s) => (
                         <button
                           key={s.itemId}
-                          className="text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-200 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 transition-colors"
-                          onClick={() => {
+                          className="text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-200 dark:hover:bg-blue-800/60 text-blue-700 dark:text-blue-300 transition-colors z-20"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             meta.handleCellEdit(index, "itemId", s.itemId);
                             meta.commitCellEdit(row.id, "itemId", row.itemId, s.itemId);
                           }}
@@ -655,37 +748,65 @@ export function useTakeoffWorkbook(
               const row = info.row.original;
               const meta = info.table.options.meta!;
               const isCellHardLocked = !!meta.lockedCells[`${row.id}::description`];
+
+              const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "description";
+              const isEditing = isSelected && meta.selection.isEditing;
+
+
+              if (isEditing) {
+                return (
+                  <StringCellInput
+                    id={`desc-input-${index}`}
+                    value={row.description}
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none outline-none text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                      isCellHardLocked
+                        ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-slate-100 font-medium"
+                    }`}
+                    onCommit={(newVal) => {
+                      meta.handleCellEdit(index, "description", newVal);
+                      meta.commitCellEdit(row.id, "description" as keyof ProcessedTakeoffRow, row.description, newVal);
+                    }}
+                    onKeyDown={(e) => meta.handleKeyDown(e, index, "desc", info.table)}
+                    onPaste={(e) => meta.handlePaste(e, index, "desc")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
+                    }}
+                    initialEditChar={meta.selection.initialEditChar}
+                  />
+                );
+              }
+
               return (
-                <input
-                  id={`desc-input-${index}`}
-                  type="text"
-                  disabled={isCellHardLocked}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none outline-none text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                <div
+                  id={`cell-${row.id}-description`}
+                  tabIndex={0}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 text-left font-sans text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : isSelected
+                      ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative font-medium text-slate-900 dark:text-slate-100"
                       : "text-slate-900 dark:text-slate-100 font-medium"
                   }`}
-                  value={row.description}
-                  onChange={(e) => meta.handleCellEdit(index, "description", e.target.value)}
-                  onFocus={(e) => { e.currentTarget.select(); meta.focusedCellRef.current = { rowId: row.id, field: "description", initialValue: row.description }; }}
-                  onBlur={() => {
-                    const fc = meta.focusedCellRef.current;
-                    if (fc && fc.rowId === row.id && fc.field === "description") {
-                      const currentVal = row.description;
-                      if (currentVal !== fc.initialValue) {
-                        meta.commitCellEdit(fc.rowId, "description" as keyof ProcessedTakeoffRow, fc.initialValue, currentVal);
-                      }
-                      meta.focusedCellRef.current = null;
+                  onClick={() => {
+                    if (isSelected && !isCellHardLocked) {
+                      meta.setSelection({ rowId: row.id, columnId: "description", isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: "description", isEditing: false });
                     }
                   }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "desc")}
-                  onPaste={(e) => meta.handlePaste(e, index, "desc")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "desc", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
+                    meta.setSelection({ rowId: row.id, columnId: "description", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
                   }}
-                />
+                >
+                  {row.description || <span className="text-slate-400 dark:text-slate-600">...</span>}
+                </div>
               );
             },
           });
@@ -699,31 +820,64 @@ export function useTakeoffWorkbook(
               const row = info.row.original;
               const meta = info.table.options.meta!;
               const isCellHardLocked = !!meta.lockedCells[`${row.id}::matchedQty`];
+
+              const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "matchedQty";
+              const isEditing = isSelected && meta.selection.isEditing;
+
+              if (isEditing) {
+                return (
+                  <NumberCellInput
+                    id={`qty-input-${index}`}
+                    value={row.matchedQty}
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                      isCellHardLocked
+                        ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-white"
+                    }`}
+                    onCommit={(numVal) => {
+                      meta.handleCellEdit(index, "matchedQty", numVal);
+                      meta.commitCellEdit(row.id, "matchedQty" as keyof ProcessedTakeoffRow, row.matchedQty, numVal);
+                    }}
+                    onKeyDown={(e) => meta.handleKeyDown(e, index, "qty", info.table)}
+                    onPaste={(e) => meta.handlePaste(e, index, "qty")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
+                    }}
+                    initialEditChar={meta.selection.initialEditChar}
+                  />
+                );
+              }
+
               return (
-                <NumberCellInput
-                  id={`qty-input-${index}`}
-                  value={row.matchedQty}
-                  disabled={isCellHardLocked}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                <div
+                  id={`cell-${row.id}-matchedQty`}
+                  tabIndex={0}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : isSelected
+                      ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative text-slate-900 dark:text-white"
                       : "text-slate-900 dark:text-white"
                   }`}
-                  onCommit={(numVal) => {
-                    meta.handleCellEdit(index, "matchedQty", numVal);
-                    meta.commitCellEdit(row.id, "matchedQty" as keyof ProcessedTakeoffRow, row.matchedQty, numVal);
+                  onClick={() => {
+                    if (isSelected && !isCellHardLocked) {
+                      meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: false });
+                    }
                   }}
-                  onLiveChange={(numVal) => {
-                    meta.handleCellEdit(index, "matchedQty", numVal);
-                  }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "qty")}
-                  onPaste={(e) => meta.handlePaste(e, index, "qty")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "qty", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
+                    meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
                   }}
-                />
+                >
+                  {row.matchedQty.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
               );
             },
           });
@@ -749,31 +903,64 @@ export function useTakeoffWorkbook(
               const row = info.row.original;
               const meta = info.table.options.meta!;
               const isCellHardLocked = !!meta.lockedCells[`${row.id}::unitPrice`];
+
+              const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "unitPrice";
+              const isEditing = isSelected && meta.selection.isEditing;
+
+              if (isEditing) {
+                return (
+                  <NumberCellInput
+                    id={`price-input-${index}`}
+                    value={row.unitPrice}
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                      isCellHardLocked
+                        ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-white"
+                    }`}
+                    onCommit={(numVal) => {
+                      meta.handleCellEdit(index, "unitPrice", numVal);
+                      meta.commitCellEdit(row.id, "unitPrice" as keyof ProcessedTakeoffRow, row.unitPrice, numVal);
+                    }}
+                    onKeyDown={(e) => meta.handleKeyDown(e, index, "price", info.table)}
+                    onPaste={(e) => meta.handlePaste(e, index, "price")}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
+                    }}
+                    initialEditChar={meta.selection.initialEditChar}
+                  />
+                );
+              }
+
               return (
-                <NumberCellInput
-                  id={`price-input-${index}`}
-                  value={row.unitPrice}
-                  disabled={isCellHardLocked}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 ${
+                <div
+                  id={`cell-${row.id}-unitPrice`}
+                  tabIndex={0}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : isSelected
+                      ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative text-slate-900 dark:text-white"
                       : "text-slate-900 dark:text-white"
                   }`}
-                  onCommit={(numVal) => {
-                    meta.handleCellEdit(index, "unitPrice", numVal);
-                    meta.commitCellEdit(row.id, "unitPrice" as keyof ProcessedTakeoffRow, row.unitPrice, numVal);
+                  onClick={() => {
+                    if (isSelected && !isCellHardLocked) {
+                      meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: false });
+                    }
                   }}
-                  onLiveChange={(numVal) => {
-                    meta.handleCellEdit(index, "unitPrice", numVal);
-                  }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "price")}
-                  onPaste={(e) => meta.handlePaste(e, index, "price")}
+                  onKeyDown={(e) => meta.handleKeyDown(e, index, "price", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
+                    meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
                   }}
-                />
+                >
+                  ${row.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
               );
             },
           });
@@ -820,7 +1007,7 @@ export function useTakeoffWorkbook(
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit]);
+  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
 
   // Filter state (Phase 4)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -854,16 +1041,20 @@ export function useTakeoffWorkbook(
       setEditingValues,
       flushEditingBufferRef,
       focusedCellRef,
+      focusedCustomCellRef,
       lockedCells,
       handleCellEdit,
       commitCellEdit,
       handleKeyDown,
+      handleCustomKeyDown,
       handlePaste,
       setContextMenu,
       deleteRow,
       insertManualRow,
       handleCustomCellEdit,
       commitCustomCellEdit,
+      selection,
+      setSelection,
     },
   });
 
@@ -905,6 +1096,9 @@ export function useTakeoffWorkbook(
     handleFileUpload,
     handleDrag,
     handleDrop,
+    selection,
+    setSelection,
+    scrollToRowRef,
     handleExportExcel,
     handleExportProcore,
     handleExportExcelWorkbook,

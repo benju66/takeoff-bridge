@@ -204,15 +204,21 @@ export type WorkbookCommand =
   | MergeTakeoffDataCommand
   | UpdateColumnCommand;
 
+export interface GridSelectionState {
+  rowId: string | null;
+  columnId: string | null;
+  isEditing: boolean;
+  initialEditChar?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // TanStack Table Meta — Type augmentation for typed table.options.meta access
 // ---------------------------------------------------------------------------
 
-import type { RowData } from '@tanstack/table-core';
+import type { RowData, Table } from '@tanstack/table-core';
 import type React from 'react';
 
 declare module '@tanstack/table-core' {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface TableMeta<TData extends RowData> {
     editingCellId: string | null;
     editingValues: Record<string, string>;
@@ -222,18 +228,24 @@ declare module '@tanstack/table-core' {
     focusedCellRef: React.MutableRefObject<{
       rowId: string; field: string; initialValue: string | number | boolean;
     } | null>;
+    focusedCustomCellRef: React.MutableRefObject<{
+      rowId: string; columnId: string; initialValue: string;
+    } | null>;
     lockedCells: Record<string, boolean>;
     handleCellEdit: (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => void;
     commitCellEdit: (
       rowId: string, field: keyof ProcessedTakeoffRow,
       prev: string | number | boolean, next: string | number | boolean
     ) => void;
-    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price") => void;
+    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<TData>) => void;
+    handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TData>) => void;
     handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
     setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
     deleteRow: (rowId: string) => void;
     insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
     handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
     commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
+    selection: GridSelectionState;
+    setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
   }
 }

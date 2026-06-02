@@ -1,13 +1,14 @@
 "use client";
+"use no compiler";
 
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project } from "@/types/db";
 import { DIVISION_NAMES } from "@/lib/constants";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
@@ -57,9 +58,14 @@ interface TakeoffIngestionStepProps {
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
 
+  // Selection state (for active cell styling + click-outside-deselect)
+  selection: GridSelectionState;
+
   // Search / Filter (Phase 4)
   globalFilter: string;
   setGlobalFilter: (value: string) => void;
+
+  scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
 }
 
 export function TakeoffIngestionStep({
@@ -90,10 +96,31 @@ export function TakeoffIngestionStep({
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
+  selection,
   globalFilter,
   setGlobalFilter,
+  scrollToRowRef,
 }: TakeoffIngestionStepProps) {
   const { subtotal, generalLiability, contractorFee: fee, totalEstimatedCost, costPerSf, costPerUnit } = takeoffSummary;
+
+  // ---------------------------------------------------------------------------
+  // Click-outside-to-deselect (E2)
+  // ---------------------------------------------------------------------------
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    if (gridContainerRef.current && !gridContainerRef.current.contains(e.target as Node)) {
+      const meta = table.options.meta;
+      if (meta?.selection?.rowId) {
+        meta.setSelection({ rowId: null, columnId: null, isEditing: false });
+      }
+    }
+  }, [table]);
+
+  useEffect(() => {
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [handleClickOutside]);
+
 
   // ---------------------------------------------------------------------------
   // Row Virtualization — Build flat item list interleaving dividers & data rows
@@ -126,6 +153,11 @@ export function TakeoffIngestionStep({
     // React 19 compatibility: prevent flushSync inside lifecycle warnings
     useFlushSync: false,
   });
+
+  // Bind virtualizer scrollTo index to the shared Ref so that keyboard navigation can scroll cells into view
+  if (scrollToRowRef) {
+    scrollToRowRef.current = virtualizer.scrollToIndex;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -361,7 +393,7 @@ export function TakeoffIngestionStep({
       )}
 
       {/* Re-Architected workbook template grid */}
-      <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
+      <div ref={gridContainerRef} className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-4">
             <h3 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
@@ -374,9 +406,9 @@ export function TakeoffIngestionStep({
           </span>
         </div>
 
-        <div ref={parentRef} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border" style={{ maxHeight: "70vh" }}>
+        <div ref={parentRef} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border grid-scroll" style={{ maxHeight: "70vh" }}>
           <table className="w-full text-left text-xs border-separate border-spacing-0" style={{ tableLayout: "fixed" }}>
-            <thead style={{ display: "block", position: "sticky", top: 0, zIndex: 10 }}>
+            <thead className="thead-shadow" style={{ display: "block", position: "sticky", top: 0, zIndex: 10 }}>
               {table.getHeaderGroups().map((headerGroup: HeaderGroup<ProcessedTakeoffRow>) => (
                 <tr
                   key={headerGroup.id}
@@ -484,7 +516,18 @@ export function TakeoffIngestionStep({
                     // Data row
                     const row = item.row;
                     const idx = item.dataIndex;
+                    const isSelectedRow = selection.rowId === row.original.id;
                     const rowHoverClass = !row.original.isMapped ? "group-hover:bg-amber-50/50 dark:group-hover:bg-amber-900/15" : "group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
+
+                    // Zebra striping: alternating row backgrounds
+                    const zebraClass = idx % 2 === 1
+                      ? "bg-slate-50/40 dark:bg-slate-900/15"
+                      : "";
+
+                    // Active row highlight when selected
+                    const activeRowClass = isSelectedRow
+                      ? "bg-blue-50/60 dark:bg-blue-950/15"
+                      : zebraClass;
 
                     return (
                       <tr
@@ -493,8 +536,10 @@ export function TakeoffIngestionStep({
                         ref={virtualizer.measureElement}
                         className={`group transition-colors ${
                           !row.original.isMapped
-                            ? "bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500"
-                            : "hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 border-l-transparent"
+                            ? `bg-amber-50/20 dark:bg-amber-950/5 hover:bg-amber-50/40 dark:hover:bg-amber-950/10 border-l-4 border-l-amber-500`
+                            : `${activeRowClass} hover:bg-blue-100/50 dark:hover:bg-slate-800/60 border-l-4 ${
+                                isSelectedRow ? "border-l-blue-500" : "border-l-transparent"
+                              }`
                         }`}
                         style={{
                           display: "flex",
@@ -526,15 +571,33 @@ export function TakeoffIngestionStep({
                           const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
                           const paddingClass = isEditable ? "p-0" : "p-3";
 
+                          // Active cell indicator — 2px blue ring on td wrapper
+                          const isCellSelected = selection.rowId === row.original.id && selection.columnId === cell.column.id;
+                          const isCellEditing = isCellSelected && selection.isEditing;
+                          const cellSelectionClass = isCellEditing
+                            ? "cell-editing cell-transition"
+                            : isCellSelected
+                            ? "cell-selected cell-transition"
+                            : "cell-transition";
+
                           const editAffordance = isEditable
                             ? "hover:bg-blue-50/50 dark:hover:bg-blue-950/10 cursor-text"
                             : "cursor-default";
 
+                          // Non-editable cell click handler (E1) — set selection but don't enter edit mode
+                          const handleNonEditableCellClick = !isEditable ? () => {
+                            const meta = table.options.meta;
+                            if (meta) {
+                              meta.setSelection({ rowId: row.original.id, columnId: cell.column.id, isEditing: false });
+                            }
+                          } : undefined;
+
                           return (
                             <td
                               key={cell.id}
-                              className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} ${editAffordance} transition-colors`}
+                              className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} ${editAffordance} ${cellSelectionClass}`}
                               style={{ width: cell.column.getSize(), flex: "none" }}
+                              onClick={handleNonEditableCellClick}
                             >
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
                             </td>
@@ -622,6 +685,28 @@ export function TakeoffIngestionStep({
             )}
           </table>
         </div>
+
+        {/* Status Bar — Enterprise Excel-style footer info bar */}
+        {rows.length > 0 && (
+          <div className="status-bar flex items-center justify-between px-4 py-2 text-[10px] font-bold uppercase tracking-wider font-sans select-none">
+            <div className="flex items-center gap-4">
+              <span className="text-slate-400 dark:text-slate-500">Rows: <span className="text-foreground dark:text-slate-300">{rows.length}</span></span>
+              <span className="text-slate-400 dark:text-slate-500">Mapped: <span className="text-emerald-600 dark:text-emerald-400">{rows.filter(r => r.isMapped).length}</span></span>
+              <span className="text-slate-400 dark:text-slate-500">Unmapped: <span className="text-amber-600 dark:text-amber-400">{rows.filter(r => !r.isMapped).length}</span></span>
+              <span className="text-slate-300 dark:text-slate-700">|</span>
+              <span className="text-slate-400 dark:text-slate-500">Subtotal: <span className="text-foreground dark:text-slate-300 font-mono">${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+              <span className="text-slate-400 dark:text-slate-500">Est. Total: <span className="text-emerald-600 dark:text-emerald-400 font-mono">${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+            </div>
+            <div className="flex items-center gap-3">
+              {selection.rowId && (
+                <span className="text-blue-500 dark:text-blue-400">
+                  Cell: {selection.columnId} {selection.isEditing ? "(editing)" : "(selected)"}
+                </span>
+              )}
+              <span className="text-slate-500 dark:text-slate-600">v{new Date().getFullYear()}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Hidden Option Datalist */}
