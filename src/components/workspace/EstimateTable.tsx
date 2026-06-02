@@ -569,6 +569,7 @@ export function EstimateTable({
                           width: table.getTotalSize(),
                           height: virtualRow.size,
                           transform: `translateY(${virtualRow.start}px)`,
+                          zIndex: isSelectedRow ? 2 : undefined,
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault();

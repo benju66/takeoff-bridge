@@ -69,14 +69,14 @@ body {
 .cell-selected {
   outline: 2px solid #2563eb;
   outline-offset: -2px;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3);
   z-index: 5;
   position: relative;
 }
 
 :root[data-theme="dark"] .cell-selected,
 :root:not([data-theme="light"]) .cell-selected {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.35);
 }
 
 /* Editing cell glow — stronger indicator */
