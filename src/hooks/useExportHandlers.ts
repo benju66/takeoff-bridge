@@ -41,12 +41,12 @@ export function useExportHandlers(
   };
 
   const handleExportExcel = () => {
-    const payload = generateExcelPayload(rows, columnDefs);
+    const payload = generateExcelPayload(rows, columnDefs, project);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 
   const handleExportProcore = () => {
-    const payload = generateProcoreBudget(rows);
+    const payload = generateProcoreBudget(rows, project);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
   };
 

@@ -9,8 +9,6 @@ import {
   OPERATIONAL_EXPENSE_DEFAULTS,
   HOURS_PER_MONTH,
   DIVISION_NAMES,
-  GL_RATE,
-  FEE_RATE,
   COMMODITY_THRESHOLD,
   SAFETY_RATE_PER_MONTH,
   TEMP_PROTECTION_RATE_PER_SF,
@@ -155,8 +153,10 @@ export function computeSiteOperations(
 
 export interface TakeoffSummary {
   subtotal: number;
-  generalLiability: number;   // subtotal × 0.01
-  contractorFee: number;      // subtotal × 0.05
+  overheadMarkup: number;
+  generalLiability: number;
+  contractorFee: number;
+  salesTax: number;
   totalEstimatedCost: number;
   costPerSf: number;
   costPerUnit: number;
@@ -172,16 +172,68 @@ export interface TakeoffSummary {
 export function computeTakeoffSummary(
   rows: ProcessedTakeoffRow[],
   squareFootage: number,
-  unitCount: number
+  unitCount: number,
+  rates?: {
+    overheadRate: number;
+    feeRate: number;
+    liabilityRate: number;
+    taxRate: number;
+    roundingRule: string;
+  }
 ): TakeoffSummary {
   const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
-  const generalLiability = subtotal * GL_RATE;
-  const contractorFee = subtotal * FEE_RATE;
-  const totalEstimatedCost = subtotal + generalLiability + contractorFee;
+
+  const overheadRate = rates?.overheadRate ?? 10;
+  const feeRate = rates?.feeRate ?? 5;
+  const liabilityRate = rates?.liabilityRate ?? 1;
+  const taxRate = rates?.taxRate ?? 8.25;
+  const roundingRule = rates?.roundingRule ?? "dollar";
+
+  // 1. Material Subtotal (for sales tax modifier)
+  const materialSubtotal = rows
+    .filter((r) => (r.costType || "M").toUpperCase() === "M")
+    .reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
+
+  // 2. Compute raw modifier values
+  const rawOverhead = subtotal * (overheadRate / 100);
+  const rawLiability = subtotal * (liabilityRate / 100);
+  const rawFee = subtotal * (feeRate / 100);
+  const rawTax = materialSubtotal * (taxRate / 100);
+
+  // Helper function for rounding
+  const applyRounding = (val: number): number => {
+    if (roundingRule === "dollar") {
+      return Math.round(val);
+    } else if (roundingRule === "ten") {
+      return Math.round(val / 10) * 10;
+    } else if (roundingRule === "hundred") {
+      return Math.round(val / 100) * 100;
+    }
+    return val; // "none"
+  };
+
+  // 3. Apply rounding to each component for visual sum alignment (Zero Budget Leaks)
+  const roundedSubtotal = applyRounding(subtotal);
+  const overheadMarkup = applyRounding(rawOverhead);
+  const generalLiability = applyRounding(rawLiability);
+  const contractorFee = applyRounding(rawFee);
+  const salesTax = applyRounding(rawTax);
+
+  // 4. Total Estimated Cost is the exact sum of the rounded components
+  const totalEstimatedCost = roundedSubtotal + overheadMarkup + generalLiability + contractorFee + salesTax;
   const costPerSf = totalEstimatedCost / (squareFootage || 1);
   const costPerUnit = totalEstimatedCost / (unitCount || 1);
 
-  return { subtotal, generalLiability, contractorFee, totalEstimatedCost, costPerSf, costPerUnit };
+  return {
+    subtotal: roundedSubtotal,
+    overheadMarkup,
+    generalLiability,
+    contractorFee,
+    salesTax,
+    totalEstimatedCost,
+    costPerSf,
+    costPerUnit,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,4 +323,136 @@ export function evaluateDataFidelity(
   
   return "discrete_unit";
 }
+
+/**
+ * Safely parses and evaluates basic mathematical expressions.
+ * Acceptable characters: numbers, decimals, basic math operators (+, -, *, /), parentheses, and whitespace.
+ * Strips a leading '=' if present.
+ * Returns NaN if expression contains unsafe characters, invalid syntax, or evaluates to a non-finite number.
+ */
+export function evaluateMathExpression(str: string): number {
+  if (typeof str !== "string") return NaN;
+  let trimmed = str.trim();
+  if (trimmed.startsWith("=")) {
+    trimmed = trimmed.substring(1).trim();
+  }
+  if (!trimmed) return NaN;
+  
+  // Validate characters: digits, decimals, whitespace, +, -, *, /, (, )
+  if (!/^[0-9.+\-*/()\s]+$/.test(trimmed)) {
+    return NaN;
+  }
+
+  // Tokenizer
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < trimmed.length) {
+    const char = trimmed[i];
+    if (/\s/.test(char)) {
+      i++;
+      continue;
+    }
+    if (/[+\-*/()]/.test(char)) {
+      tokens.push(char);
+      i++;
+      continue;
+    }
+    if (/[0-9.]/.test(char)) {
+      let numStr = "";
+      while (i < trimmed.length && /[0-9.]/.test(trimmed[i])) {
+        numStr += trimmed[i];
+        i++;
+      }
+      tokens.push(numStr);
+      continue;
+    }
+    return NaN;
+  }
+
+  if (tokens.length === 0) return NaN;
+
+  let tokenIndex = 0;
+
+  function peek(): string | undefined {
+    return tokens[tokenIndex];
+  }
+
+  function consume(expected?: string): string {
+    const token = tokens[tokenIndex];
+    if (expected !== undefined && token !== expected) {
+      throw new Error(`Expected ${expected} but got ${token}`);
+    }
+    tokenIndex++;
+    return token;
+  }
+
+  function parseExpression(): number {
+    let result = parseTerm();
+    while (peek() === "+" || peek() === "-") {
+      const op = consume();
+      const right = parseTerm();
+      if (op === "+") {
+        result += right;
+      } else {
+        result -= right;
+      }
+    }
+    return result;
+  }
+
+  function parseTerm(): number {
+    let result = parseFactor();
+    while (peek() === "*" || peek() === "/") {
+      const op = consume();
+      const right = parseFactor();
+      if (op === "*") {
+        result *= right;
+      } else {
+        result /= right;
+      }
+    }
+    return result;
+  }
+
+  function parseFactor(): number {
+    const token = peek();
+    if (!token) {
+      throw new Error("Unexpected end of input");
+    }
+
+    if (token === "+") {
+      consume();
+      return parseFactor();
+    }
+    if (token === "-") {
+      consume();
+      return -parseFactor();
+    }
+    if (token === "(") {
+      consume("(");
+      const val = parseExpression();
+      consume(")");
+      return val;
+    }
+
+    // Number
+    consume();
+    const num = Number(token);
+    if (isNaN(num)) {
+      throw new Error(`Invalid number: ${token}`);
+    }
+    return num;
+  }
+
+  try {
+    const val = parseExpression();
+    if (tokenIndex < tokens.length) {
+      return NaN;
+    }
+    return isFinite(val) && !isNaN(val) ? val : NaN;
+  } catch {
+    return NaN;
+  }
+}
+
 

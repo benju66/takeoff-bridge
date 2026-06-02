@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, LogOut } from "lucide-react";
-import { getProjects, saveProject, deleteProjectData, signOut } from "@/lib/db";
+import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu } from "lucide-react";
+import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
 import { Project } from "@/types/db";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
@@ -85,45 +85,34 @@ export default function ProjectsDashboard() {
 
   return (
     <ProtectedRoute>
-      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-100 dark:selection:bg-blue-900/50">
+      <div className="flex flex-col gap-6 selection:bg-blue-100 dark:selection:bg-blue-900/50">
         {/* Header Panel */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
-              <Layers className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> TAKEOFF PORTAL
-            </h1>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
-              Multi-Project Directory Node v2.0.0
-            </p>
+        <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-2 gap-4">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent("toggle-sidebar"))}
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800/65 rounded-lg text-slate-650 dark:text-slate-350 transition-colors cursor-pointer"
+              title="Toggle Sidebar"
+            >
+              <Menu size={20} />
+            </button>
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
+                <Layers className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> TAKEOFF PORTAL
+              </h1>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
+                Multi-Project Directory Node v2.0.0
+              </p>
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
-            <Link
-              href="/registry"
-              className="flex items-center gap-2 bg-card hover:bg-background/80 text-foreground border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm cursor-pointer hover:shadow-md"
-            >
-              <Activity size={18} className="text-blue-600 dark:text-blue-400" /> Global Registry
-            </Link>
             <button
               onClick={() => setIsModalOpen(true)}
               className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg shadow-blue-900/30 hover:shadow-indigo-900/40 transform hover:-translate-y-0.5"
             >
               <Plus size={18} /> Initialize Project
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  await signOut();
-                  window.location.href = "/login";
-                } catch (err) {
-                  console.error("Sign out failed:", err);
-                }
-              }}
-              className="flex items-center gap-2 bg-card hover:bg-rose-500/10 text-rose-600 border border-rose-500/20 text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm cursor-pointer hover:shadow-md"
-              title="Sign Out"
-            >
-              <LogOut size={18} /> Sign Out
             </button>
           </div>
         </header>

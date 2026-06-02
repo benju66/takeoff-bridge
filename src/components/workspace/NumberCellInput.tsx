@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { evaluateMathExpression } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
 // NumberCellInput — Self-contained numeric cell with local string buffer
@@ -68,11 +69,17 @@ export const NumberCellInput = React.memo(function NumberCellInput({
       setIsEditing(false);
       return;
     }
-    const parsed = parseFloat(buffer);
-    const numVal = isNaN(parsed) ? 0 : parsed;
+    const trimmed = buffer.trim();
+    let numVal: number;
+    if (trimmed.startsWith("=") || /[+\-*/]/.test(trimmed)) {
+      numVal = evaluateMathExpression(trimmed);
+    } else {
+      numVal = parseFloat(trimmed);
+    }
+    const finalVal = isNaN(numVal) ? 0 : numVal;
     setIsEditing(false);
-    if (numVal !== initialValueRef.current) {
-      onCommit(numVal);
+    if (finalVal !== initialValueRef.current) {
+      onCommit(finalVal);
     }
   }, [buffer, onCommit]);
 

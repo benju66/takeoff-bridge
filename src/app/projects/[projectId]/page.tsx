@@ -1,14 +1,15 @@
 "use client";
 "use no compiler";
 
-import React, { use, useEffect, useRef } from "react";
+import React, { use, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   FileDown,
-  ChevronLeft,
   MapPin,
   Calendar,
+  Menu
 } from "lucide-react";
 import {
   computeTakeoffSummary,
@@ -27,18 +28,15 @@ import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
 }
 
-export default function ProjectWorkspace({ params }: PageProps) {
-  const resolvedParams = use(params);
-  const projectId = resolvedParams.projectId;
-
-  // ---------------------------------------------------------------------------
-  // Domain Hook Orchestration
-  // ---------------------------------------------------------------------------
+function WorkspaceInner({ projectId }: { projectId: string }) {
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get("step") || "step4";
 
   // Project metadata & duration
   const {
@@ -101,8 +99,14 @@ export default function ProjectWorkspace({ params }: PageProps) {
   }, [isFiltered, rows, table, globalFilter, columnFilters]);
 
   const takeoffSummary = React.useMemo(
-    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount),
-    [filteredRows, squareFootage, unitCount]
+    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, {
+      overheadRate: project?.overheadRate ?? 10,
+      feeRate: project?.feeRate ?? 5,
+      liabilityRate: project?.liabilityRate ?? 1,
+      taxRate: project?.taxRate ?? 8.25,
+      roundingRule: project?.roundingRule ?? "dollar"
+    }),
+    [filteredRows, squareFootage, unitCount, project]
   );
 
   // Divisional & Cost Type Budget Aggregations
@@ -120,9 +124,6 @@ export default function ProjectWorkspace({ params }: PageProps) {
   const totalRows = rows.length;
   const mappedCount = rows.filter((r) => r.isMapped).length;
   const unmappedCount = totalRows - mappedCount;
-
-  // Active workspace tab
-  const [activeTab, setActiveTab] = React.useState<string>("step4");
 
   // ---------------------------------------------------------------------------
   // Persistence Orchestration
@@ -143,10 +144,6 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   // ---------------------------------------------------------------------------
   // Global Keyboard Shortcuts — Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo)
-  //
-  // GAP-1 amendment: fires ALWAYS (even when <input> focused) and calls
-  // preventDefault() to suppress native input undo. This matches Excel/Sheets
-  // behavior where Ctrl+Z undoes the last committed workbook action.
   // ---------------------------------------------------------------------------
   const handleUndoRef = useRef(handleUndo);
   const handleRedoRef = useRef(handleRedo);
@@ -173,16 +170,11 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   // ---------------------------------------------------------------------------
   // Unsaved Changes Guard — beforeunload
-  //
-  // GAP-7 amendment: tracks hasPendingChanges from the moment rows change
-  // until saveStatus transitions to 'saved'. Covers both the 1500ms debounce
-  // window AND in-flight saves.
   // ---------------------------------------------------------------------------
   const hasPendingChangesRef = useRef(false);
   const initialLoadRef = useRef(true);
 
   useEffect(() => {
-    // Skip the initial load — rows haven't been user-edited yet
     if (initialLoadRef.current) {
       initialLoadRef.current = false;
       return;
@@ -213,7 +205,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
   // ---------------------------------------------------------------------------
   if (!isLoaded) {
     return (
-      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+      <div className="flex flex-col items-center justify-center p-8 min-h-[50vh]">
         <div className="w-10 h-10 border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin mb-4" />
         <h3 className="text-sm font-bold text-foreground mb-1 uppercase tracking-wider">Loading Project</h3>
         <p className="text-xs text-slate-600 dark:text-slate-400">Retrieving workspace data…</p>
@@ -223,7 +215,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   if (error) {
     return (
-      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+      <div className="flex flex-col items-center justify-center p-8 min-h-[50vh]">
         <AlertTriangle className="text-red-500 dark:text-red-400 mb-4" size={48} />
         <h3 className="text-lg font-bold text-red-700 dark:text-red-300 mb-2">Failed to Load Project</h3>
         <p className="text-xs text-red-600/80 dark:text-red-400/80 mb-6 max-w-md text-center font-mono break-all">{error}</p>
@@ -236,7 +228,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
   if (!project) {
     return (
-      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+      <div className="flex flex-col items-center justify-center p-8 min-h-[50vh]">
         <AlertTriangle className="text-amber-500 mb-4 animate-bounce" size={48} />
         <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Project Not Found</h3>
         <p className="text-xs text-slate-600 dark:text-slate-400 mb-6">Project ID &quot;{projectId}&quot; does not exist.</p>
@@ -247,61 +239,60 @@ export default function ProjectWorkspace({ params }: PageProps) {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-100 dark:selection:bg-blue-900/50">
-      {/* Breadcrumb Back Navigation */}
-      <div className="mb-4">
-        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors uppercase tracking-widest font-bold">
-          <ChevronLeft size={16} /> Back to Directory
-        </Link>
-      </div>
-
+    <div className="flex flex-col gap-6 selection:bg-blue-100 dark:selection:bg-blue-900/50 animate-fade-in">
       {/* Header Panel */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
-              {project.name}
-            </h1>
-            <span className="text-[10px] bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
-              {project.id}
-            </span>
-          </div>
+      <header className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-grid-border pb-6 mb-2 gap-4">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("toggle-sidebar"))}
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800/65 rounded-lg text-slate-655 dark:text-slate-355 transition-colors cursor-pointer"
+            title="Toggle Sidebar"
+          >
+            <Menu size={20} />
+          </button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
+                {project.name}
+              </h1>
+              <span className="text-[10px] bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-md font-bold tracking-widest uppercase">
+                {project.id}
+              </span>
+            </div>
 
-          <div className="flex flex-wrap gap-4 mt-3 text-slate-600 dark:text-slate-400 text-xs items-center uppercase font-semibold">
-            <span className="flex items-center gap-1"><MapPin size={13} className="text-slate-600 dark:text-slate-400" /> {project.location}</span>
-            <span className="text-slate-400 dark:text-slate-650">|</span>
-            <span className="flex items-center gap-1"><Calendar size={13} className="text-slate-600 dark:text-slate-400" /> Bid: {project.bidDate}</span>
-            <span className="text-slate-400 dark:text-slate-650">|</span>
-            <span>Size: {project.squareFootage.toLocaleString()} SF</span>
-            <span className="text-slate-400 dark:text-slate-650">|</span>
-            <span>Units: {project.unitCount.toLocaleString()}</span>
-            {saveStatus !== 'idle' && (
-              <>
-                <span className="text-slate-400 dark:text-slate-650">|</span>
-                {saveStatus === 'saving' && (
-                  <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    Saving…
-                  </span>
-                )}
-                {saveStatus === 'saved' && (
-                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Saved ✓
-                  </span>
-                )}
-                {saveStatus === 'error' && (
-                  <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400" title={saveError || undefined}>
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                    Save failed
-                  </span>
-                )}
-              </>
-            )}
+            <div className="flex flex-wrap gap-4 mt-3 text-slate-600 dark:text-slate-400 text-xs items-center uppercase font-semibold">
+              <span className="flex items-center gap-1"><MapPin size={13} /> {project.location}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span className="flex items-center gap-1"><Calendar size={13} /> Bid: {project.bidDate}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Size: {project.squareFootage.toLocaleString()} SF</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Units: {project.unitCount.toLocaleString()}</span>
+              {saveStatus !== 'idle' && (
+                <>
+                  <span className="text-slate-400 dark:text-slate-650">|</span>
+                  {saveStatus === 'saving' && (
+                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Saving…
+                    </span>
+                  )}
+                  {saveStatus === 'saved' && (
+                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Saved ✓
+                    </span>
+                  )}
+                  {saveStatus === 'error' && (
+                    <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400" title={saveError || undefined}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                      Save failed
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -311,7 +302,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button
                 onClick={handleExportExcelWorkbook}
                 disabled={unmappedCount > 0 || isExportingExcel}
-                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-950/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} />
                 {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
@@ -326,7 +317,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
               <button
                 onClick={handleExportProcore}
                 disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-950/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-955/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 <FileDown size={18} /> Export Procore Budget
               </button>
@@ -334,28 +325,6 @@ export default function ProjectWorkspace({ params }: PageProps) {
           )}
         </div>
       </header>
-
-      {/* Tab Navigation */}
-      <div className="flex border-b border-grid-border mb-6 gap-2 select-none overflow-x-auto">
-        {[
-          { id: "step1", label: "Multi-Family Layout" },
-          { id: "step2", label: "GC Personnel" },
-          { id: "step3", label: "Jobsite Infrastructure" },
-          { id: "step4", label: "Estimate Table" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-3 text-xs uppercase tracking-wider font-bold font-sans transition-all border-b-2 whitespace-nowrap cursor-pointer ${
-              activeTab === tab.id
-                ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/10"
-                : "border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
 
       {/* Export Error Banner */}
       {exportError && (
@@ -371,7 +340,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
         </div>
       )}
 
-      {/* Step Panels — Single active panel at a time */}
+      {/* Step Panels — Single active panel based on URL parameter */}
       {activeTab === "step1" && (
         <ErrorBoundary>
           <ArchitecturalParametersStep
@@ -449,6 +418,12 @@ export default function ProjectWorkspace({ params }: PageProps) {
         </ErrorBoundary>
       )}
 
+      {activeTab === "settings" && (
+        <ErrorBoundary>
+          <ProjectSettingsStep projectId={projectId} />
+        </ErrorBoundary>
+      )}
+
       {/* Floating Context Menu Portal */}
       <ErrorBoundary>
         <ContextMenuPortal
@@ -462,5 +437,24 @@ export default function ProjectWorkspace({ params }: PageProps) {
         />
       </ErrorBoundary>
     </div>
+  );
+}
+
+export default function ProjectWorkspace({ params }: PageProps) {
+  const resolvedParams = use(params);
+  const projectId = resolvedParams.projectId;
+
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col items-center justify-center p-8 min-h-[50vh] font-sans">
+          <div className="w-10 h-10 border-4 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin mb-4" />
+          <h3 className="text-sm font-bold text-foreground mb-1 uppercase tracking-wider">Loading Workspace</h3>
+          <p className="text-xs text-slate-600 dark:text-slate-400">Initializing project engine nodes…</p>
+        </div>
+      }
+    >
+      <WorkspaceInner projectId={projectId} />
+    </Suspense>
   );
 }

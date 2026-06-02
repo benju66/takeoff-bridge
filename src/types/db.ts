@@ -17,6 +17,11 @@ export interface Project {
   expectedFinish?: string;
   tenantId?: string;
   createdBy?: string;
+  overheadRate?: number;
+  feeRate?: number;
+  liabilityRate?: number;
+  taxRate?: number;
+  roundingRule?: string;
 }
 
 export interface ProjectEstimate {

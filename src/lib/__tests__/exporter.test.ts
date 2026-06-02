@@ -36,8 +36,23 @@ describe("exporter - generateExcelPayload", () => {
     },
   ];
 
+  const mockProject: Project = {
+    id: "project-1",
+    name: "Mock Project",
+    location: "Mock Location",
+    squareFootage: 1000,
+    unitCount: 10,
+    bidDate: "2026-06-01",
+    createdAt: new Date().toISOString(),
+    overheadRate: 0,
+    feeRate: 5,
+    liabilityRate: 1,
+    taxRate: 0,
+    roundingRule: "none"
+  };
+
   it("filters out actions and validationStatus web control columns", () => {
-    const csvContent = generateExcelPayload(mockRows, mockColumns);
+    const csvContent = generateExcelPayload(mockRows, mockColumns, mockProject);
     const firstLine = csvContent.split("\r\n")[0];
 
     // Headers should not contain actions or validationStatus
@@ -46,7 +61,7 @@ describe("exporter - generateExcelPayload", () => {
   });
 
   it("maps the notes column header to 'Notes' and row value correctly", () => {
-    const csvContent = generateExcelPayload(mockRows, mockColumns);
+    const csvContent = generateExcelPayload(mockRows, mockColumns, mockProject);
     const lines = csvContent.split("\r\n");
     const headers = lines[0].split(",");
     
@@ -59,12 +74,14 @@ describe("exporter - generateExcelPayload", () => {
   });
 
   it("calculates subtotals and markups correctly without interactive columns", () => {
-    const csvContent = generateExcelPayload(mockRows, mockColumns);
+    const csvContent = generateExcelPayload(mockRows, mockColumns, mockProject);
     const lines = csvContent.split("\r\n");
 
-    // We should have a data row, a General Liability (1%) row, and a Fee (5%) row
-    expect(lines).toHaveLength(4); // Header + data + GL + Fee
-    expect(lines[2]).toContain("General Liability (1%)");
-    expect(lines[3]).toContain("Fee (5%)");
+    // Header + data row + 4 markup rows = 6 lines
+    expect(lines).toHaveLength(6);
+    expect(lines[2]).toContain("Overhead Markup (0%)");
+    expect(lines[3]).toContain("General Liability (1%)");
+    expect(lines[4]).toContain("Contractor Fee (5%)");
+    expect(lines[5]).toContain("Sales Tax (0%)");
   });
 });

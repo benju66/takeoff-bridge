@@ -7,6 +7,7 @@ import {
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
   evaluateDataFidelity,
+  evaluateMathExpression,
 } from '../calculations';
 import { ProcessedTakeoffRow } from '@/types';
 
@@ -70,7 +71,13 @@ describe('computeTakeoffSummary', () => {
       makeRow({ matchedQty: 100, unitPrice: 10 }),
       makeRow({ matchedQty: 200, unitPrice: 5, id: 'row-2', itemId: '05-1000' }),
     ];
-    const result = computeTakeoffSummary(rows, 1000, 10);
+    const result = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 0,
+      feeRate: 5,
+      liabilityRate: 1,
+      taxRate: 0,
+      roundingRule: "none"
+    });
 
     // subtotal = (100 * 10) + (200 * 5) = 2000
     expect(result.subtotal).toBe(2000);
@@ -81,24 +88,122 @@ describe('computeTakeoffSummary', () => {
     expect(result.costPerUnit).toBeCloseTo(2120 / 10);
   });
 
+  it('computes dynamic rates, including material-only sales tax', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10, costType: 'M' }), // Material: 1000
+      makeRow({ matchedQty: 200, unitPrice: 5, costType: 'L', id: 'row-2' }), // Labor: 1000
+    ];
+    const result = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 10,
+      feeRate: 5,
+      liabilityRate: 1.5,
+      taxRate: 8,
+      roundingRule: "none"
+    });
+
+    expect(result.subtotal).toBe(2000);
+    expect(result.overheadMarkup).toBe(2000 * 0.1); // 200
+    expect(result.generalLiability).toBe(2000 * 0.015); // 30
+    expect(result.contractorFee).toBe(2000 * 0.05); // 100
+    expect(result.salesTax).toBe(1000 * 0.08); // 80 (8% of material subtotal 1000)
+    expect(result.totalEstimatedCost).toBe(2000 + 200 + 30 + 100 + 80); // 2410
+  });
+
+  it('applies dollar rounding rules to summary components and total', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // Material: 1025
+    ];
+    const result = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 10,       // 102.5 -> rounds to 103
+      feeRate: 5,            // 51.25 -> rounds to 51
+      liabilityRate: 1.25,    // 12.8125 -> rounds to 13
+      taxRate: 8.25,         // 84.5625 -> rounds to 85
+      roundingRule: "dollar"
+    });
+
+    expect(result.subtotal).toBe(1025);
+    expect(result.overheadMarkup).toBe(103);
+    expect(result.generalLiability).toBe(13);
+    expect(result.contractorFee).toBe(51);
+    expect(result.salesTax).toBe(85);
+    // 1025 + 103 + 13 + 51 + 85 = 1277
+    expect(result.totalEstimatedCost).toBe(1277);
+  });
+
+  it('applies ten and hundred rounding rules to components and total', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // Material: 1025
+    ];
+    
+    // Nearest $10 rounding
+    const resultTen = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 10,       // 102.5 -> rounds to 100
+      feeRate: 5,            // 51.25 -> rounds to 50
+      liabilityRate: 1.25,    // 12.8125 -> rounds to 10
+      taxRate: 8.25,         // 84.5625 -> rounds to 80
+      roundingRule: "ten"
+    });
+    expect(resultTen.subtotal).toBe(1030); // 1025 -> 1030
+    expect(resultTen.overheadMarkup).toBe(100);
+    expect(resultTen.generalLiability).toBe(10);
+    expect(resultTen.contractorFee).toBe(50);
+    expect(resultTen.salesTax).toBe(80);
+    expect(resultTen.totalEstimatedCost).toBe(1030 + 100 + 10 + 50 + 80); // 1270
+
+    // Nearest $100 rounding
+    const resultHundred = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 10,       // 102.5 -> rounds to 100
+      feeRate: 5,            // 51.25 -> rounds to 100
+      liabilityRate: 1.25,    // 12.8125 -> rounds to 0
+      taxRate: 8.25,         // 84.5625 -> rounds to 100
+      roundingRule: "hundred"
+    });
+    expect(resultHundred.subtotal).toBe(1000); // 1025 -> 1000
+    expect(resultHundred.overheadMarkup).toBe(100);
+    expect(resultHundred.generalLiability).toBe(0);
+    expect(resultHundred.contractorFee).toBe(100);
+    expect(resultHundred.salesTax).toBe(100);
+    expect(resultHundred.totalEstimatedCost).toBe(1000 + 100 + 0 + 100 + 100); // 1300
+  });
+
   it('returns all zeros for empty rows', () => {
-    const result = computeTakeoffSummary([], 1000, 10);
+    const result = computeTakeoffSummary([], 1000, 10, {
+      overheadRate: 10,
+      feeRate: 5,
+      liabilityRate: 1,
+      taxRate: 8.25,
+      roundingRule: "dollar"
+    });
     expect(result.subtotal).toBe(0);
+    expect(result.overheadMarkup).toBe(0);
     expect(result.generalLiability).toBe(0);
     expect(result.contractorFee).toBe(0);
+    expect(result.salesTax).toBe(0);
     expect(result.totalEstimatedCost).toBe(0);
   });
 
   it('uses fallback divisor of 1 for zero squareFootage', () => {
     const rows = [makeRow({ matchedQty: 100, unitPrice: 10 })];
-    const result = computeTakeoffSummary(rows, 0, 10);
+    const result = computeTakeoffSummary(rows, 0, 10, {
+      overheadRate: 0,
+      feeRate: 5,
+      liabilityRate: 1,
+      taxRate: 0,
+      roundingRule: "none"
+    });
     // costPerSf should divide by 1, not crash on divide-by-zero
     expect(result.costPerSf).toBe(result.totalEstimatedCost);
   });
 
   it('uses fallback divisor of 1 for zero unitCount', () => {
     const rows = [makeRow({ matchedQty: 100, unitPrice: 10 })];
-    const result = computeTakeoffSummary(rows, 1000, 0);
+    const result = computeTakeoffSummary(rows, 1000, 0, {
+      overheadRate: 0,
+      feeRate: 5,
+      liabilityRate: 1,
+      taxRate: 0,
+      roundingRule: "none"
+    });
     // costPerUnit should divide by 1, not crash on divide-by-zero
     expect(result.costPerUnit).toBe(result.totalEstimatedCost);
   });
@@ -106,7 +211,13 @@ describe('computeTakeoffSummary', () => {
   it('uses matchedQty × unitPrice, NOT row.total (regression)', () => {
     // row.total is set to 999 (wrong value) — summary should ignore it
     const rows = [makeRow({ matchedQty: 50, unitPrice: 20, total: 999 })];
-    const result = computeTakeoffSummary(rows, 1000, 10);
+    const result = computeTakeoffSummary(rows, 1000, 10, {
+      overheadRate: 0,
+      feeRate: 5,
+      liabilityRate: 1,
+      taxRate: 0,
+      roundingRule: "none"
+    });
     // subtotal should be 50 * 20 = 1000, NOT 999
     expect(result.subtotal).toBe(1000);
   });
@@ -356,4 +467,64 @@ describe('evaluateDataFidelity', () => {
     expect(evaluateDataFidelity(1, 'LS', 1000, 5000, customKeywords)).toBe('discrete_unit'); // LS no longer macro keyword
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// evaluateMathExpression
+// ═══════════════════════════════════════════════════════════════════
+
+describe('evaluateMathExpression', () => {
+  it('evaluates simple math expressions correctly', () => {
+    expect(evaluateMathExpression('1 + 2')).toBe(3);
+    expect(evaluateMathExpression('10 - 4')).toBe(6);
+    expect(evaluateMathExpression('3 * 4')).toBe(12);
+    expect(evaluateMathExpression('12 / 3')).toBe(4);
+  });
+
+  it('handles leading equals sign correctly', () => {
+    expect(evaluateMathExpression('= 5 + 5')).toBe(10);
+    expect(evaluateMathExpression('=12 * 2')).toBe(24);
+  });
+
+  it('respects standard operator precedence and parentheses', () => {
+    expect(evaluateMathExpression('2 + 3 * 4')).toBe(14);
+    expect(evaluateMathExpression('(2 + 3) * 4')).toBe(20);
+    expect(evaluateMathExpression('10 - 2 * (1 + 2)')).toBe(4);
+  });
+
+  it('evaluates decimals and whitespace correctly', () => {
+    expect(evaluateMathExpression('1.5 + 2.5')).toBe(4);
+    expect(evaluateMathExpression(' 2.5 *   2 ')).toBe(5);
+    expect(evaluateMathExpression('.5 * 10')).toBe(5);
+  });
+
+  it('handles negative and positive unary operators correctly', () => {
+    expect(evaluateMathExpression('-5 + 3')).toBe(-2);
+    expect(evaluateMathExpression('+5 - 1')).toBe(4);
+    expect(evaluateMathExpression('2 * -3')).toBe(-6);
+    expect(evaluateMathExpression('-2 * -3')).toBe(6);
+  });
+
+  it('returns NaN for expressions with invalid characters', () => {
+    expect(evaluateMathExpression('1 + alert(1)')).toBeNaN();
+    expect(evaluateMathExpression('2 * abc')).toBeNaN();
+    expect(evaluateMathExpression('1 + @')).toBeNaN();
+  });
+
+  it('returns NaN for syntax errors', () => {
+    expect(evaluateMathExpression('')).toBeNaN();
+    expect(evaluateMathExpression('   ')).toBeNaN();
+    expect(evaluateMathExpression('1 +')).toBeNaN();
+    expect(evaluateMathExpression('+')).toBeNaN();
+    expect(evaluateMathExpression('1 + * 2')).toBeNaN();
+    expect(evaluateMathExpression('(1 + 2')).toBeNaN();
+    expect(evaluateMathExpression('1 + 2)')).toBeNaN();
+    expect(evaluateMathExpression('1.2.3')).toBeNaN();
+  });
+
+  it('returns NaN for division by zero (non-finite)', () => {
+    expect(evaluateMathExpression('1 / 0')).toBeNaN();
+    expect(evaluateMathExpression('10 / (2 - 2)')).toBeNaN();
+  });
+});
+
 

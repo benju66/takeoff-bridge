@@ -64,7 +64,7 @@ export function useCellEditing(
   // ---------------------------------------------------------------------------
   // Cell edit direct (cascading logic)
   // ---------------------------------------------------------------------------
-  const applyCellEditDirect = (
+  const applyCellEditDirect = useCallback((
     updated: ProcessedTakeoffRow[],
     index: number,
     field: keyof ProcessedTakeoffRow,
@@ -183,7 +183,7 @@ export function useCellEditing(
     row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total, threshold, keywords);
 
     return newRegistry;
-  };
+  }, [globalRegistryRef]);
 
   // ---------------------------------------------------------------------------
   // Cell edit handler — PURE STATE MUTATOR (no history push)
@@ -383,7 +383,7 @@ export function useCellEditing(
       setGlobalRegistry(stagedGlobalReg);
       saveGlobalRegistry(stagedGlobalReg).catch((err) => console.error('Global registry persist failed:', err));
     }
-  }, [commandHistory, projectId, setUserRegistry, setGlobalRegistry]);
+  }, [commandHistory, projectId, setUserRegistry, setGlobalRegistry, applyCellEditDirect, globalRegistryRef, rowsRef, userRegistryRef]);
 
   /** Flush any active editing buffer — commit the pending value before switching cells (Amendment E) */
   const flushEditingBuffer = useCallback(() => {
@@ -420,7 +420,7 @@ export function useCellEditing(
     }
     setEditingValues({});
     setEditingCellId(null);
-  }, [editingCellId, editingValues, commitCellEdit, projectId, setUserRegistry, setGlobalRegistry, setRows]);
+  }, [editingCellId, editingValues, commitCellEdit, projectId, setUserRegistry, setGlobalRegistry, setRows, applyCellEditDirect, globalRegistryRef, rowsRef, userRegistryRef]);
 
   // Keep the ref current so cell renderers always call the latest version
   useEffect(() => { flushEditingBufferRef.current = flushEditingBuffer; }, [flushEditingBuffer]);

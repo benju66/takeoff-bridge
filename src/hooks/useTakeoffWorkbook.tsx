@@ -362,7 +362,7 @@ export function useTakeoffWorkbook(
     })();
 
     return () => { cancelled = true; };
-  }, [projectId, setColumnDefs, setLockedCells]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows]);
 
   // ---------------------------------------------------------------------------
   // Insert manual row

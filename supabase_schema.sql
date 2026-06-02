@@ -51,7 +51,12 @@ CREATE TABLE projects (
   expected_start TEXT,
   expected_finish TEXT,
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  overhead_rate NUMERIC NOT NULL DEFAULT 10,
+  fee_rate NUMERIC NOT NULL DEFAULT 5,
+  liability_rate NUMERIC NOT NULL DEFAULT 1,
+  tax_rate NUMERIC NOT NULL DEFAULT 8.25,
+  rounding_rule TEXT NOT NULL DEFAULT 'dollar'
 );
 
 -- ─────────────────────────────────────────────────

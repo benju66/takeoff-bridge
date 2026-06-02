@@ -1,6 +1,6 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
-import { GL_RATE, FEE_RATE, DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS } from "./constants";
+import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS } from "./constants";
 import { escapeCSVField, buildNumFmt } from "./exportUtils";
 import ExcelJS from "exceljs";
 
@@ -12,9 +12,18 @@ export { getColumnLetter } from "./exportUtils";
  * Formats columns dynamically to match user's custom and default workspace column definitions.
  * Incorporates standard markup layers (General Liability 1%, Contractor Fee 5%) cleanly at the bottom.
  */
-export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: ColumnDefinition[]): string {
+export function generateExcelPayload(
+  rows: ProcessedTakeoffRow[],
+  columnDefs: ColumnDefinition[],
+  project?: Project | null
+): string {
   const csvLines: string[] = [];
   const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
+
+  const overheadRate = project?.overheadRate ?? 10;
+  const feeRate = project?.feeRate ?? 5;
+  const liabilityRate = project?.liabilityRate ?? 1;
+  const taxRate = project?.taxRate ?? 8.25;
 
   // Populate dynamic headers based on activeCols
   const headers = activeCols.map((col) => {
@@ -89,9 +98,43 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
   // Calculate dynamic subtotal and append standard markup layers
   const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
   if (subtotal > 0) {
-    const generalLiability = subtotal * GL_RATE;
-    const fee = subtotal * FEE_RATE;
+    const materialSubtotal = rows
+      .filter((r) => (r.costType || "M").toUpperCase() === "M")
+      .reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
 
+    const overheadMarkup = subtotal * (overheadRate / 100);
+    const generalLiability = subtotal * (liabilityRate / 100);
+    const fee = subtotal * (feeRate / 100);
+    const salesTax = materialSubtotal * (taxRate / 100);
+
+    // Overhead Markup Row
+    const ohRow = activeCols.map((col) => {
+      if (col.type === "default") {
+        switch (col.id) {
+          case "costType":
+            return "TI";
+          case "itemId":
+            return "";
+          case "description":
+            return `Overhead Markup (${overheadRate}%)`;
+          case "matchedQty":
+            return 1;
+          case "uom":
+            return "LS";
+          case "unitPrice":
+            return overheadMarkup.toFixed(2);
+          case "total":
+            return overheadMarkup.toFixed(2);
+          default:
+            return "";
+        }
+      } else {
+        return "";
+      }
+    });
+    csvLines.push(ohRow.map(escapeCSVField).join(","));
+
+    // General Liability Row
     const glRow = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
@@ -100,7 +143,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
           case "itemId":
             return "";
           case "description":
-            return "General Liability (1%)";
+            return `General Liability (${liabilityRate}%)`;
           case "matchedQty":
             return 1;
           case "uom":
@@ -118,6 +161,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
     });
     csvLines.push(glRow.map(escapeCSVField).join(","));
 
+    // Contractor Fee Row
     const feeRow = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
@@ -126,7 +170,7 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
           case "itemId":
             return "";
           case "description":
-            return "Fee (5%)";
+            return `Contractor Fee (${feeRate}%)`;
           case "matchedQty":
             return 1;
           case "uom":
@@ -143,6 +187,33 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
       }
     });
     csvLines.push(feeRow.map(escapeCSVField).join(","));
+
+    // Sales Tax Row
+    const taxRow = activeCols.map((col) => {
+      if (col.type === "default") {
+        switch (col.id) {
+          case "costType":
+            return "TI";
+          case "itemId":
+            return "";
+          case "description":
+            return `Sales Tax (${taxRate}%)`;
+          case "matchedQty":
+            return 1;
+          case "uom":
+            return "LS";
+          case "unitPrice":
+            return salesTax.toFixed(2);
+          case "total":
+            return salesTax.toFixed(2);
+          default:
+            return "";
+        }
+      } else {
+        return "";
+      }
+    });
+    csvLines.push(taxRow.map(escapeCSVField).join(","));
   }
 
   // Use \r\n for universal Windows and Excel spreadsheet compliance
@@ -153,11 +224,19 @@ export function generateExcelPayload(rows: ProcessedTakeoffRow[], columnDefs: Co
  * Groups fine-grained suffix costs into unified Procore parent codes and cost types,
  * summing the budget values and structuring exactly matching Procore's budget importer schema.
  * Columns: "Cost Code","Cost Type","Description","Original Budget"
- * Incorporates standard markup layers (General Liability 1%, Contractor Fee 5%) cleanly at the bottom.
+ * Incorporates dynamic markup layers based on project settings.
  */
-export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
+export function generateProcoreBudget(
+  rows: ProcessedTakeoffRow[],
+  project?: Project | null
+): string {
   const csvLines: string[] = [];
-  
+
+  const overheadRate = project?.overheadRate ?? 10;
+  const feeRate = project?.feeRate ?? 5;
+  const liabilityRate = project?.liabilityRate ?? 1;
+  const taxRate = project?.taxRate ?? 8.25;
+
   // Header line exactly matching Procore's standard budget importer columns
   csvLines.push(["Cost Code", "Cost Type", "Description", "Original Budget"].map(escapeCSVField).join(","));
 
@@ -195,7 +274,7 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
   for (const key of Object.keys(groupings)) {
     const group = groupings[key];
     const consolidatedDescription = Array.from(group.descriptions).join("; ");
-    
+
     const columns = [
       group.parentCode,
       group.costType,
@@ -209,21 +288,41 @@ export function generateProcoreBudget(rows: ProcessedTakeoffRow[]): string {
   // Calculate subtotal and append standard markup layers dynamically
   const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
   if (subtotal > 0) {
-    const generalLiability = subtotal * GL_RATE;
-    const fee = subtotal * FEE_RATE;
+    const materialSubtotal = rows
+      .filter((r) => (r.costType || "M").toUpperCase() === "M")
+      .reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
+
+    const overheadMarkup = subtotal * (overheadRate / 100);
+    const generalLiability = subtotal * (liabilityRate / 100);
+    const fee = subtotal * (feeRate / 100);
+    const salesTax = materialSubtotal * (taxRate / 100);
+
+    csvLines.push([
+      "1-30000.000",
+      "O",
+      `Overhead Markup (${overheadRate}%)`,
+      overheadMarkup.toFixed(2)
+    ].map(escapeCSVField).join(","));
 
     csvLines.push([
       "1-10000.000",
       "O",
-      "General Liability (1%)",
+      `General Liability (${liabilityRate}%)`,
       generalLiability.toFixed(2)
     ].map(escapeCSVField).join(","));
 
     csvLines.push([
       "1-20000.000",
       "O",
-      "Fee (5%)",
+      `Fee (${feeRate}%)`,
       fee.toFixed(2)
+    ].map(escapeCSVField).join(","));
+
+    csvLines.push([
+      "1-40000.000",
+      "O",
+      `Sales Tax (${taxRate}%)`,
+      salesTax.toFixed(2)
     ].map(escapeCSVField).join(","));
   }
 
@@ -429,7 +528,6 @@ export async function generateExcelWorkbook(
   }
 
   // Insert unmapped/manual rows above the SUBTOTAL row
-  let insertedCount = 0;
   for (const row of unmappedRows) {
     worksheet.insertRow(subtotalRowIdx, []);
     const excelRow = worksheet.getRow(subtotalRowIdx);
@@ -491,30 +589,55 @@ export async function generateExcelWorkbook(
     }
 
     subtotalRowIdx++;
-    insertedCount++;
   }
 
   // Update SUBTOTAL formula (SUM from Row 10 to row before the new subtotal)
   const subtotalCell = worksheet.getCell(`I${subtotalRowIdx}`);
   subtotalCell.value = { formula: `SUM(I10:I${subtotalRowIdx - 1})` };
 
-  // Rewrite shifted formulas to match their new row coordinates
-  if (insertedCount > 0) {
-    for (let offset = 2; offset <= 8; offset++) {
-      const r = subtotalRowIdx + offset;
-      const excelRow = worksheet.getRow(r);
-      excelRow.getCell(9).value = { formula: `F${r}*$I$${subtotalRowIdx}` };
-      excelRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${r}/$J$8)` };
-      excelRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${r}/$K$8)` };
+  // Always rewrite markup row formulas and inject customized project pricing rates into Column F
+  for (let offset = 2; offset <= 8; offset++) {
+    const r = subtotalRowIdx + offset;
+    const excelRow = worksheet.getRow(r);
+    const descCell = excelRow.getCell(4); // Column D
+    const descText = descCell.value ? String(descCell.value).toUpperCase() : "";
+
+    // Determine the dynamic rate for this row based on its template description
+    let rate = 0;
+    if (projectMetadata) {
+      if (descText.includes("OVERHEAD")) {
+        rate = (projectMetadata.overheadRate ?? 10) / 100;
+        descCell.value = `Overhead Markup (${projectMetadata.overheadRate ?? 10}%)`;
+      } else if (descText.includes("LIABILITY") || descText.includes("GL")) {
+        rate = (projectMetadata.liabilityRate ?? 1) / 100;
+        descCell.value = `General Liability (${projectMetadata.liabilityRate ?? 1}%)`;
+      } else if (descText.includes("FEE") || descText.includes("PROFIT")) {
+        rate = (projectMetadata.feeRate ?? 5) / 100;
+        descCell.value = `Contractor Fee (${projectMetadata.feeRate ?? 5}%)`;
+      } else if (descText.includes("TAX")) {
+        rate = (projectMetadata.taxRate ?? 8.25) / 100;
+        descCell.value = `Sales Tax (${projectMetadata.taxRate ?? 8.25}%)`;
+      }
     }
 
-    // Rewrite Grand Total row formulas
-    const totalRowIdx = subtotalRowIdx + 10;
-    const totalRow = worksheet.getRow(totalRowIdx);
-    totalRow.getCell(9).value = { formula: `SUM(I${subtotalRowIdx}:I${subtotalRowIdx + 9})` };
-    totalRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${totalRowIdx}/$J$8)` };
-    totalRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${totalRowIdx}/$K$8)` };
+    // If we matched a rate, write it into Column F (cell 6)
+    if (rate > 0) {
+      const rateCell = excelRow.getCell(6);
+      rateCell.value = rate;
+      rateCell.numFmt = "0.00%";
+    }
+
+    excelRow.getCell(9).value = { formula: `F${r}*$I$${subtotalRowIdx}` };
+    excelRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${r}/$J$8)` };
+    excelRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${r}/$K$8)` };
   }
+
+  // Rewrite Grand Total row formulas
+  const totalRowIdx = subtotalRowIdx + 10;
+  const totalRow = worksheet.getRow(totalRowIdx);
+  totalRow.getCell(9).value = { formula: `SUM(I${subtotalRowIdx}:I${subtotalRowIdx + 9})` };
+  totalRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${totalRowIdx}/$J$8)` };
+  totalRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${totalRowIdx}/$K$8)` };
 
   // Write to buffer
   const outBuffer = await workbook.xlsx.writeBuffer();

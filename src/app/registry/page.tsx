@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
-  ChevronLeft, 
   Search, 
   Trash2, 
   Database, 
@@ -12,7 +11,8 @@ import {
   Terminal, 
   CheckCircle2,
   Sliders,
-  Save
+  Save,
+  Menu
 } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { DIVISION_NAMES } from "@/lib/constants";
@@ -134,7 +134,7 @@ export default function GlobalRegistryDashboard() {
   };
 
   const handleFlushCache = async () => {
-    if (window.confirm("CRITICAL ADMIN OVERRIDE:\nAre you sure you want to permanently flush the entire global corporate registry cache?\nAll harvested lookup mappings will be permanently erased. This cannot be undone.")) {
+    if (window.confirm("CRITICAL ADMIN OVERRIDE:\nAre you sure you want to permanently erase this global corporate registry cache?\nThis cannot be undone.")) {
       setRegistry({});
       try {
         await deleteGlobalRegistry();
@@ -166,7 +166,6 @@ export default function GlobalRegistryDashboard() {
     });
   }, [registry]);
 
-  // Filter processed rows instantly by classification or assigned item code string targets
   const filteredRows = React.useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return processedRows;
@@ -182,7 +181,7 @@ export default function GlobalRegistryDashboard() {
 
   if (!isLoaded || registry === null) {
     return (
-      <div className="flex flex-col min-h-screen bg-background text-foreground font-sans items-center justify-center p-8 transition-colors duration-200">
+      <div className="flex flex-col items-center justify-center p-8 min-h-[50vh]">
         <Terminal className="text-blue-600 dark:text-blue-400 mb-4 animate-pulse" size={48} />
         <h3 className="text-lg font-bold text-foreground mb-2">Connecting to Harvester Registry...</h3>
         <p className="text-xs text-slate-600 dark:text-slate-400">Initializing secure browser sandbox</p>
@@ -194,24 +193,26 @@ export default function GlobalRegistryDashboard() {
   const harvestedCount = Object.keys(registry).length;
 
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground font-sans p-8 transition-colors duration-200 selection:bg-blue-100 dark:selection:bg-blue-900/50">
-      {/* Breadcrumb Back Navigation */}
-      <div className="mb-4">
-        <Link href="/projects" className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors uppercase tracking-widest font-bold">
-          <ChevronLeft size={16} /> Back to Directory
-        </Link>
-      </div>
-
+    <div className="flex flex-col gap-6 selection:bg-blue-100 dark:selection:bg-blue-900/50">
       {/* Header Panel */}
-      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-8 gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
-            <Database className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> GLOBAL CORPORATE REGISTRY
-          </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
-            Centralized Harvester Node // Active Directory
-          </p>
+      <header className="flex flex-col md:flex-row md:items-center justify-between border-b border-grid-border pb-6 mb-2 gap-4">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("toggle-sidebar"))}
+            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800/65 rounded-lg text-slate-650 dark:text-slate-350 transition-colors cursor-pointer"
+            title="Toggle Sidebar"
+          >
+            <Menu size={20} />
+          </button>
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
+              <Database className="text-blue-600 dark:text-blue-400 animate-pulse" size={32} /> GLOBAL CORPORATE REGISTRY
+            </h1>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
+              Centralized Harvester Node // Active Directory
+            </p>
+          </div>
         </div>
         
         <div className="flex flex-wrap gap-4 items-center">

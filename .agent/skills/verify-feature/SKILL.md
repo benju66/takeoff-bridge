@@ -13,10 +13,13 @@
 
 ## 3. Financial Ledger Precision
 * **Command History Integrity**: Validate that executing a manual row insertion, deletion, or cell modification calls `commandHistory.pushCommand()` with a `WorkbookCommand` payload prior to updating state arrays. Verify that the command captures cascade effects for `itemId`, `description`, and `unitPrice` edits on classified rows.
-* **Compounding Formula Audit**: Confirm that cumulative estimate totals accurately run the following compounding chain:
+* **Compounding Formula Audit**: Confirm that cumulative estimate totals accurately run the following compounding chain based on dynamic project rates and rounding rules:
   * `Itemized Subtotal = Sum(Quantity × Unit Price)`
-  * `General Liability Insurance = Itemized Subtotal × 0.01`
-  * `Contractor Fee = Itemized Subtotal × 0.05`
+  * `Overhead Markup = Itemized Subtotal × (overheadRate / 100)`
+  * `General Liability Insurance = Itemized Subtotal × (liabilityRate / 100)`
+  * `Contractor Fee = Itemized Subtotal × (feeRate / 100)`
+  * `Sales Tax (Material-Only) = Sum(Material-Only Quantities × Unit Price) × (taxRate / 100)`
+  * `Total Estimated Cost = Rounded(Subtotal) + Rounded(Overhead) + Rounded(GL) + Rounded(Fee) + Rounded(Tax)`
 * **Zero Budget Leaks**: Verify that final tallies are completely free of floating-point rounding errors or JavaScript `NaN` leaks in the UI views.
 
 ## 4. Downstream Export Integration

@@ -31,6 +31,11 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     expectedFinish: (row.expected_finish as string) || undefined,
     tenantId: (row.tenant_id as string) || undefined,
     createdBy: (row.created_by as string) || undefined,
+    overheadRate: row.overhead_rate != null ? Number(row.overhead_rate) : 10,
+    feeRate: row.fee_rate != null ? Number(row.fee_rate) : 5,
+    liabilityRate: row.liability_rate != null ? Number(row.liability_rate) : 1,
+    taxRate: row.tax_rate != null ? Number(row.tax_rate) : 8.25,
+    roundingRule: (row.rounding_rule as string) || "dollar",
   };
 }
 
@@ -52,6 +57,11 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     expected_finish: project.expectedFinish ?? null,
     tenant_id: project.tenantId ?? null,
     created_by: project.createdBy ?? null,
+    overhead_rate: project.overheadRate ?? 10,
+    fee_rate: project.feeRate ?? 5,
+    liability_rate: project.liabilityRate ?? 1,
+    tax_rate: project.taxRate ?? 8.25,
+    rounding_rule: project.roundingRule ?? "dollar",
   };
 }
 
@@ -214,17 +224,24 @@ export async function getProjectEstimate(
 export async function saveProjectEstimate(
   estimate: Omit<ProjectEstimate, "items">
 ): Promise<void> {
+  const sanitizeNum = (val: number | null | undefined): number => {
+    if (val === null || val === undefined || isNaN(val) || !isFinite(val)) {
+      return 0;
+    }
+    return val;
+  };
+
   const { error } = await supabase.from("project_estimates").upsert(
     {
       project_id: estimate.projectId,
-      subtotal: estimate.subtotal,
-      general_liability: estimate.generalLiability,
-      fee: estimate.fee,
-      total_cost: estimate.totalCost,
-      general_conditions_total: estimate.generalConditionsTotal ?? 0,
+      subtotal: sanitizeNum(estimate.subtotal),
+      general_liability: sanitizeNum(estimate.generalLiability),
+      fee: sanitizeNum(estimate.fee),
+      total_cost: sanitizeNum(estimate.totalCost),
+      general_conditions_total: sanitizeNum(estimate.generalConditionsTotal),
       gc_utilization: estimate.gcUtilization ?? {},
       gc_equipment_overrides: estimate.gcEquipmentOverrides ?? {},
-      site_operations_total: estimate.siteOperationsTotal ?? 0,
+      site_operations_total: sanitizeNum(estimate.siteOperationsTotal),
       site_ops_quantities: estimate.siteOpsQuantities ?? {},
       site_ops_rates: estimate.siteOpsRates ?? {},
       updated_at: new Date().toISOString(),
@@ -233,8 +250,13 @@ export async function saveProjectEstimate(
   );
 
   if (error) {
-    console.error("Failed to save project estimate", error);
-    throw new Error(`Failed to save project estimate: ${error.message}`);
+    console.error("Failed to save project estimate:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    });
+    throw new Error(`Failed to save project estimate: ${error.message} (Details: ${error.details || "none"})`);
   }
 }
 

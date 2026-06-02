@@ -17,11 +17,13 @@
 4. **Human-In-The-Loop UI**: Halts processing on missing keys to display an editable data grid for manual assignments.
 5. **Supabase Persistence Layer**: All application state is persisted to a cloud PostgreSQL database via Supabase. The data access layer (`src/lib/db.ts`) serves as the single gateway — no other file imports the Supabase client directly.
    - **Projects, estimates, registries, column definitions, and cell locks** are stored in dedicated normalized tables with `ON DELETE CASCADE` referential integrity.
+   - **Data Sanitization**: Before upserting records (such as project estimates), numerical fields are sanitized (converting invalid `NaN` or non-finite float inputs to `0`). This prevents PostgreSQL constraint violations (e.g. `NOT NULL` violations) on serialization.
+   - **Verbose Database Error Logging**: Data layer errors are caught, decomposed, and logged with raw PostgreSQL status codes, details, and hints, avoiding empty JSON stringification (`{}`) of non-enumerable properties.
    - **Estimate line items** are saved atomically via a PostgreSQL stored procedure (`save_estimate_line_items`) that wraps DELETE + INSERT in a single transaction to prevent data loss during network interruptions.
    - **Sort order preservation**: Each line item stores a `sort_order` integer matching its array index. On reload, items are loaded with `ORDER BY sort_order ASC` to preserve the exact visual layout, including manually spliced rows.
    - **Debounced auto-persist**: All auto-save effects use 1500ms debounce timers to prevent excessive network traffic during rapid keyboard-driven data entry.
    - **Classification registries** are persisted at two scopes: project-isolated (`project_registries`) and global corporate (`global_registry`). Lookup resolution follows the fallback chain: project registry → global registry → static constants.
-   - **Theme preference** remains in browser `localStorage` for instant FOUC-free rendering before JavaScript executes.
+   - **Theme & Sidebar preference**: Layout themes and layout settings (such as sidebar hover auto-expand under `takeoff-bridge-sidebar-hover-expand`) are stored in browser `localStorage`. Realtime layout updates are communicated via window-level `CustomEvent` dispatches (e.g. `"sidebar-settings-updated"`) to prevent full-page refreshes.
 6. **Export Core Pipeline**: Generates a structured paste-ready Excel CSV and a summarized Procore Budget CSV.
 
 ## Automated Test Infrastructure
@@ -40,7 +42,7 @@ To assist users in reconciling unmapped classifications, `src/lib/similarity.ts`
 ## Custom Context Menu & Manual Row Insertion Pipeline (Phase 1 Expansion)
 To transition the ingestion grid from a rigid tabular layout into an elastic spreadsheet experience, the application uses a decoupled, event-driven row splicing architecture:
 
-1. Context Pointer Interception: The UI intercepts native browser right-click triggers on the Step 4 Takeoff Workbook Matrix via `onContextMenu` cell handlers. It prevents standard window events and records mouse coordinates (`clientX`, `clientY`) alongside runtime row index markers.
+1. Context Pointer Interception: The UI intercepts native browser right-click triggers on the Step 4 Estimate Table via `onContextMenu` cell handlers. It prevents standard window events and records mouse coordinates (`clientX`, `clientY`) alongside runtime row index markers.
 2. Context Menu Portal UI: A floating context menu primitive renders conditionally at the recorded cursor screen coordinates. It provides explicit operational commands ("Insert Row Above", "Insert Row Below").
 3. Command Pattern History Protection: Before performing any array mutations, the system records an atomic `WorkbookCommand` delta via `commandHistory.pushCommand()` (defined in `src/hooks/useCommandHistory.ts`). The command captures the minimum inverse data needed for undo/redo — including per-field prev/next values, cascade effects for sibling rows (computed via dual-simulation of `applyCellEditDirect`), and registry deltas. This replaces the former snapshot-based approach and supports full bidirectional undo/redo with 50-entry history depth.
 4. Compliant Skeleton Splicing: The insertion engine performs an absolute array modification using `.splice()`. To maintain type contract validation and prevent application rendering runtime exceptions, the manual row object must initialize with valid fallback properties matching the `ProcessedTakeoffRow` contract:
@@ -54,8 +56,11 @@ To transition the ingestion grid from a rigid tabular layout into an elastic spr
 5. Window Blur Dismissal: An ambient event listener registers against the global `window` click target to automatically clear layout coordinate tracking and hide the panel on outside interaction clicks.
 
 ## Compounding Overhead Calculation Layer
-Upon establishing all mapped quantities and unit prices, the application dynamically aggregates takeoff values through a compounding overhead calculation layer:
+Upon establishing all mapped quantities and unit prices, the application dynamically aggregates takeoff values through a compounding overhead calculation layer using project-specific pricing modifiers:
 1. **Itemized Subtotal**: Sum of all line items, where `Total Cost = Matched Quantity × Unit Price`.
-2. **General Liability Insurance**: Generates a financial layer computed at exactly `1%` of the cumulative itemized subtotal (`Subtotal × 0.01`).
-3. **Contractor Fee**: Generates an agency fee calculated at exactly `5%` of the itemized subtotal (`Subtotal × 0.05`).
-4. **Total Estimated Cost**: Accumulates all components via `Total Est. Cost = Subtotal + General Liability (1%) + Contractor Fee (5%)`, displaying the live calculation across the terminal dashboards and top metrics panel.
+2. **Overhead Markup**: Calculated as `Subtotal × (overheadRate / 100)`.
+3. **General Liability Insurance**: Computed as `Subtotal × (liabilityRate / 100)`.
+4. **Contractor Fee**: Computed as `Subtotal × (feeRate / 100)`.
+5. **Sales Tax (Material-Only)**: Sums all line items where `costType === 'M'` (Materials) and multiplies by `(taxRate / 100)`.
+6. **Cell Rounding Rules**: Applied to each summary component individually (rounding to nearest $1, $10, or $100 depending on the project's `roundingRule`) before calculating the Grand Total to prevent floating-point leaks and ensure that spreadsheet column values match the total exactly.
+7. **Total Estimated Cost**: Cumulative sum of the rounded subtotal and rounded modifiers, displaying the live calculation across the terminal dashboards and top metrics panel.
