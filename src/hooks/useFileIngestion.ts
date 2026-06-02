@@ -2,6 +2,7 @@ import { useState } from "react";
 import Papa from "papaparse";
 import { ProcessedTakeoffRow, TogalRowPayload, WorkbookCommand } from "@/types";
 import { parseTogalCSV } from "@/lib/parser";
+import { evaluateDataFidelity } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
 // UseFileIngestionReturn — Public API surface for the file ingestion hook
@@ -58,6 +59,7 @@ export function useFileIngestion(
           classification: r.classification,
           rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
           isMapped: r.isMapped,
+          dataFidelity: r.dataFidelity,
         },
       });
     }
@@ -66,7 +68,14 @@ export function useFileIngestion(
     // Compute next state
     const updatedRows = currentRows.map((r) => {
       if (!appendData) {
-        return { ...r, matchedQty: 0, total: 0, classification: "", rawQuantities: [] as { qty: number; uom: string }[] };
+        return { 
+          ...r, 
+          matchedQty: 0, 
+          total: 0, 
+          classification: "", 
+          rawQuantities: [] as { qty: number; uom: string }[],
+          dataFidelity: 'discrete_unit' as const
+        };
       }
       return { ...r };
     });
@@ -79,6 +88,11 @@ export function useFileIngestion(
         updatedRows[targetIdx].total = updatedRows[targetIdx].matchedQty * updatedRows[targetIdx].unitPrice;
         updatedRows[targetIdx].classification = parsedRow.classification;
         updatedRows[targetIdx].rawQuantities = parsedRow.rawQuantities;
+        updatedRows[targetIdx].dataFidelity = evaluateDataFidelity(
+          updatedRows[targetIdx].matchedQty,
+          updatedRows[targetIdx].uom,
+          updatedRows[targetIdx].total
+        );
       }
     });
 
@@ -93,6 +107,7 @@ export function useFileIngestion(
           classification: r.classification,
           rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
           isMapped: r.isMapped,
+          dataFidelity: r.dataFidelity,
         },
       });
     }

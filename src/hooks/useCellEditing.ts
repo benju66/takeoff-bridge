@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { ProcessedTakeoffRow, WorkbookCommand } from "@/types";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
+import { evaluateDataFidelity } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
 // useCellEditing — Cell editing state, handlers, and cascade logic
@@ -129,6 +130,7 @@ export function useCellEditing(
               updated[i].matchedQty = q;
               updated[i].total = q * targetItem.defaultUnitPrice;
               updated[i].isMapped = true;
+              updated[i].dataFidelity = evaluateDataFidelity(q, targetItem.targetUom, updated[i].total);
             }
           }
         }
@@ -167,10 +169,13 @@ export function useCellEditing(
           if (updated[i].classification === classification) {
             updated[i].unitPrice = price;
             updated[i].total = updated[i].matchedQty * price;
+            updated[i].dataFidelity = evaluateDataFidelity(updated[i].matchedQty, updated[i].uom, updated[i].total);
           }
         }
       }
     }
+
+    row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
 
     return newRegistry;
   };
@@ -274,7 +279,7 @@ export function useCellEditing(
 
           if (field === "itemId") {
             // itemId cascade touches: itemId, description, procoreParentCode,
-            // unitPrice, uom, costType, matchedQty, total, isMapped
+            // unitPrice, uom, costType, matchedQty, total, isMapped, dataFidelity
             prevCapture = {
               itemId: prevSibling.itemId,
               description: prevSibling.description,
@@ -285,6 +290,7 @@ export function useCellEditing(
               matchedQty: prevSibling.matchedQty,
               total: prevSibling.total,
               isMapped: prevSibling.isMapped,
+              dataFidelity: prevSibling.dataFidelity,
             };
             nextCapture = {
               itemId: nextSibling.itemId,
@@ -296,20 +302,23 @@ export function useCellEditing(
               matchedQty: nextSibling.matchedQty,
               total: nextSibling.total,
               isMapped: nextSibling.isMapped,
+              dataFidelity: nextSibling.dataFidelity,
             };
           } else if (field === "description") {
             // description cascade touches: description only
             prevCapture = { description: prevSibling.description };
             nextCapture = { description: nextSibling.description };
           } else {
-            // unitPrice cascade touches: unitPrice, total
+            // unitPrice cascade touches: unitPrice, total, dataFidelity
             prevCapture = {
               unitPrice: prevSibling.unitPrice,
               total: prevSibling.total,
+              dataFidelity: prevSibling.dataFidelity,
             };
             nextCapture = {
               unitPrice: nextSibling.unitPrice,
               total: nextSibling.total,
+              dataFidelity: nextSibling.dataFidelity,
             };
           }
 

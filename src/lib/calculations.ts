@@ -11,6 +11,7 @@ import {
   DIVISION_NAMES,
   GL_RATE,
   FEE_RATE,
+  COMMODITY_THRESHOLD,
   SAFETY_RATE_PER_MONTH,
   TEMP_PROTECTION_RATE_PER_SF,
   MATERIAL_HOIST_RATE_PER_MONTH,
@@ -240,3 +241,32 @@ export function computeCostTypeBreakdown(
     { key: "S", label: "Subcontract", total: costTotals.S, percentage: (costTotals.S / (subtotal || 1)) * 100 },
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Data Fidelity Classification Tagging
+// ---------------------------------------------------------------------------
+
+export type DataFidelity = "discrete_unit" | "macro_lump_sum";
+
+/**
+ * Evaluates row attributes to derive the data fidelity enum classification tag.
+ */
+export function evaluateDataFidelity(
+  qty: number,
+  uom: string,
+  total: number
+): DataFidelity {
+  const normalizedUom = (uom || "").trim().toUpperCase();
+  const macroKeywords = ["LS", "SUM", "ALLW", "LUMP"];
+  
+  if (macroKeywords.includes(normalizedUom)) {
+    return "macro_lump_sum";
+  }
+  
+  if (qty === 1 && total > COMMODITY_THRESHOLD) {
+    return "macro_lump_sum";
+  }
+  
+  return "discrete_unit";
+}
+

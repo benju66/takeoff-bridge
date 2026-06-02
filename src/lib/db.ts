@@ -1,6 +1,7 @@
 import { Project, ProjectEstimate } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { supabase } from "./supabase";
+import type { Session } from "@supabase/supabase-js";
 
 // ═══════════════════════════════════════════════════════════════════
 // db.ts — Async Supabase data access layer
@@ -28,6 +29,8 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     levelsAbovePodium: row.levels_above_podium != null ? Number(row.levels_above_podium) : undefined,
     expectedStart: (row.expected_start as string) || undefined,
     expectedFinish: (row.expected_finish as string) || undefined,
+    tenantId: (row.tenant_id as string) || undefined,
+    createdBy: (row.created_by as string) || undefined,
   };
 }
 
@@ -47,6 +50,8 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     levels_above_podium: project.levelsAbovePodium ?? null,
     expected_start: project.expectedStart ?? null,
     expected_finish: project.expectedFinish ?? null,
+    tenant_id: project.tenantId ?? null,
+    created_by: project.createdBy ?? null,
   };
 }
 
@@ -67,6 +72,7 @@ function mapLineItemFromRow(row: Record<string, unknown>): ProcessedTakeoffRow {
     customFields: (row.custom_fields != null && typeof row.custom_fields === "object" && !Array.isArray(row.custom_fields))
       ? (row.custom_fields as Record<string, string | number>)
       : {},
+    dataFidelity: (row.data_fidelity as 'discrete_unit' | 'macro_lump_sum') || 'discrete_unit',
   };
 }
 
@@ -108,7 +114,7 @@ export async function getProjects(): Promise<Project[]> {
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("Failed to fetch projects from Supabase", error);
+    console.error("Failed to fetch projects from Supabase. Code:", error.code, "Message:", error.message, "Details:", error.details, "Hint:", error.hint);
     throw new Error(`Failed to fetch projects: ${error.message}`);
   }
   return (data || []).map(mapProjectFromRow);
@@ -133,9 +139,23 @@ export async function getProject(projectId: string): Promise<Project | null> {
 
 /**
  * Saves or updates a project record in Supabase.
+ * Injects tenantId and createdBy automatically if not provided.
  */
 export async function saveProject(project: Project): Promise<void> {
-  const row = mapProjectToRow(project);
+  const tenantId = project.tenantId || (await getCurrentTenantId());
+  
+  let userId: string | undefined = project.createdBy;
+  if (!userId) {
+    const { data: { session } } = await supabase.auth.getSession();
+    userId = session?.user?.id;
+  }
+
+  const row = mapProjectToRow({
+    ...project,
+    tenantId,
+    createdBy: userId,
+  });
+
   const { error } = await supabase
     .from("projects")
     .upsert(row, { onConflict: "id" });
@@ -266,6 +286,7 @@ export async function saveEstimateLineItems(
     raw_quantities: row.rawQuantities,
     cost_type: row.costType,
     custom_fields: row.customFields || {},
+    data_fidelity: row.dataFidelity || 'discrete_unit',
   }));
 
   const { error } = await supabase.rpc("save_estimate_line_items", {
@@ -328,9 +349,11 @@ export async function saveProjectRegistry(
  * Retrieves the global corporate classification mapping registry.
  */
 export async function getGlobalRegistry(): Promise<Record<string, string>> {
+  const tenantId = await getCurrentTenantId();
   const { data, error } = await supabase
     .from("global_registry")
     .select("registry")
+    .eq("tenant_id", tenantId)
     .eq("id", 1)
     .maybeSingle();
 
@@ -347,9 +370,11 @@ export async function getGlobalRegistry(): Promise<Record<string, string>> {
 export async function saveGlobalRegistry(
   registry: Record<string, string>
 ): Promise<void> {
+  const tenantId = await getCurrentTenantId();
   const { error } = await supabase
     .from("global_registry")
     .update({ registry })
+    .eq("tenant_id", tenantId)
     .eq("id", 1);
 
   if (error) {
@@ -362,9 +387,11 @@ export async function saveGlobalRegistry(
  * Resets the global corporate registry to an empty map.
  */
 export async function deleteGlobalRegistry(): Promise<void> {
+  const tenantId = await getCurrentTenantId();
   const { error } = await supabase
     .from("global_registry")
     .update({ registry: {} })
+    .eq("tenant_id", tenantId)
     .eq("id", 1);
 
   if (error) {
@@ -454,3 +481,106 @@ export async function saveProjectLockedCells(
     throw new Error(`Failed to save project locked cells: ${error.message}`);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Auth Session & Profile Gateway Wrappers
+// ═══════════════════════════════════════════════════════════════════
+
+let cachedTenantId: string | null = null;
+
+export function clearDbCache() {
+  cachedTenantId = null;
+}
+
+export async function getCurrentTenantId(): Promise<string> {
+  if (cachedTenantId) return cachedTenantId;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) {
+    throw new Error("No authenticated session found.");
+  }
+
+  const { data, error } = await supabase
+    .from("users")
+    .select("tenant_id")
+    .eq("id", session.user.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new Error(`Failed to retrieve user tenant: ${error?.message || 'User profile not found'}`);
+  }
+
+  cachedTenantId = data.tenant_id as string;
+  return cachedTenantId;
+}
+
+export async function getUserProfile(userId: string): Promise<{ id: string; email: string; tenantId: string } | null> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, tenant_id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to fetch user profile:", error);
+    return null;
+  }
+
+  if (!data) return null;
+
+  return {
+    id: data.id as string,
+    email: data.email as string,
+    tenantId: data.tenant_id as string,
+  };
+}
+
+export function subscribeToAuthChanges(
+  callback: (event: string, session: Session | null) => void
+) {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT") {
+      clearDbCache();
+    }
+    callback(event, session);
+  });
+  return subscription;
+}
+
+export async function signIn(email: string, password: string) {
+  clearDbCache();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signUp(email: string, password: string, companyName?: string) {
+  clearDbCache();
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        company_name: companyName || "Corporate Workspace",
+      },
+    },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signOut() {
+  clearDbCache();
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+export async function getSession() {
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return session;
+}
+

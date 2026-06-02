@@ -90,6 +90,9 @@ export const GL_RATE = 0.01;
 /** Contractor Fee — 5% of subtotal */
 export const FEE_RATE = 0.05;
 
+/** Standard Commodity threshold for lump sum evaluation */
+export const COMMODITY_THRESHOLD = 5000;
+
 // ---------------------------------------------------------------------------
 // Grid Display Defaults
 // ---------------------------------------------------------------------------

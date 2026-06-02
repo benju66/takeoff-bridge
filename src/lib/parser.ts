@@ -1,5 +1,6 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
+import { evaluateDataFidelity } from "./calculations";
 
 /**
  * Converts a Record<string, string> registry into a Map<string, string>
@@ -57,7 +58,7 @@ export function parseTogalCSV(
   const userMap: Map<string, string> = buildNormalizedMap(userRegistry);
   const globalMap: Map<string, string> = buildNormalizedMap(globalRegistry);
 
-  return rawRows.map((row, index) => {
+  return rawRows.map((row, index): ProcessedTakeoffRow | null => {
     // Normalize all row keys once for O(1) column access (Deep Review E1: explicit cast)
     const normalizedRow = normalizeRowKeys(row as unknown as Record<string, unknown>);
 
@@ -90,6 +91,8 @@ export function parseTogalCSV(
 
     const qty = matchedMeasurement?.qty || 0;
     const price = masterItem?.defaultUnitPrice || 0;
+    const total = qty * price;
+    const dataFidelity = evaluateDataFidelity(qty, targetUom, total);
 
     return {
       id: `row-${index}`,
@@ -100,10 +103,11 @@ export function parseTogalCSV(
       matchedQty: qty,
       uom: targetUom,
       unitPrice: price,
-      total: qty * price,
+      total,
       isMapped: !!masterItem,
       rawQuantities: measurements,
       costType: masterItem?.costType || "M",
+      dataFidelity,
     };
   }).filter((r): r is ProcessedTakeoffRow => r !== null);
 }

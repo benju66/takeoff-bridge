@@ -6,6 +6,7 @@ import {
   computeTakeoffSummary,
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
+  evaluateDataFidelity,
 } from '../calculations';
 import { ProcessedTakeoffRow } from '@/types';
 
@@ -299,3 +300,47 @@ describe('computeSiteOperations', () => {
     expect(result.grandTotal).toBe(0);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// evaluateDataFidelity
+// ═══════════════════════════════════════════════════════════════════
+
+describe('evaluateDataFidelity', () => {
+  it('classifies to macro_lump_sum when UOM matches a macro keyword case-insensitively', () => {
+    expect(evaluateDataFidelity(10, 'LS', 1000)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(5, 'sum', 200)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(1, 'Allw', 50)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(100, 'LUMP', 25000)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(1, '  ls  ', 100)).toBe('macro_lump_sum'); // trim support
+  });
+
+  it('classifies to macro_lump_sum when qty is exactly 1 and total exceeds standard commodity threshold (5000)', () => {
+    expect(evaluateDataFidelity(1, 'SF', 5001)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(1, 'LF', 10000)).toBe('macro_lump_sum');
+  });
+
+  it('classifies to discrete_unit when qty is exactly 1 but total does not exceed standard threshold (5000)', () => {
+    expect(evaluateDataFidelity(1, 'SF', 5000)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(1, 'LF', 4999)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(1, 'EA', 1000)).toBe('discrete_unit');
+  });
+
+  it('classifies to discrete_unit when qty is not exactly 1 even if total exceeds threshold', () => {
+    expect(evaluateDataFidelity(2, 'SF', 10000)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(0.5, 'SF', 6000)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(0, 'SF', 10000)).toBe('discrete_unit');
+  });
+
+  it('classifies standard itemized components to discrete_unit', () => {
+    expect(evaluateDataFidelity(150, 'SF', 1500)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(22, 'CY', 4400)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(1.5, 'TN', 600)).toBe('discrete_unit');
+  });
+
+  it('handles edge cases like empty, undefined, or invalid UOM strings gracefully', () => {
+    expect(evaluateDataFidelity(1, '', 6000)).toBe('macro_lump_sum'); // qty=1 and total > 5000
+    expect(evaluateDataFidelity(1, '', 4000)).toBe('discrete_unit');
+    expect(evaluateDataFidelity(1, '  ', 6000)).toBe('macro_lump_sum');
+  });
+});
+

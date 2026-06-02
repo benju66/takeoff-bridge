@@ -32,6 +32,7 @@ export interface ProcessedTakeoffRow {
   rawQuantities: { qty: number; uom: string }[];
   costType: string;        // Dynamic costType mapped from InternalEstimateItem
   customFields?: Record<string, string | number>;
+  dataFidelity?: 'discrete_unit' | 'macro_lump_sum';
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,8 @@ export interface Project {
   levelsAbovePodium?: number;
   expectedStart?: string;
   expectedFinish?: string;
+  tenantId?: string;
+  createdBy?: string;
 }
 
 export interface ProjectEstimate {
@@ -55,6 +57,7 @@ export interface DbEstimateLineItem {
   raw_quantities: { qty: number; uom: string }[];
   cost_type: string;
   custom_fields: Record<string, string | number>;
+  data_fidelity: 'discrete_unit' | 'macro_lump_sum';
 }
 
 /** Project-isolated classification → cost code mapping registry */
@@ -65,6 +68,7 @@ export interface DbProjectRegistry {
 
 /** Global corporate classification → cost code mapping registry */
 export interface DbGlobalRegistry {
+  tenant_id?: string;
   id: number;
   registry: Record<string, string>;
 }

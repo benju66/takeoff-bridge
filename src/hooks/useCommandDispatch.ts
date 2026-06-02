@@ -4,6 +4,7 @@ import React, { useCallback } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition, WorkbookCommand } from "@/types";
 import { UseCommandHistoryReturn } from "./useCommandHistory";
 import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
+import { evaluateDataFidelity } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -46,6 +47,7 @@ export function useCommandDispatch(
           if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
             row.total = row.matchedQty * row.unitPrice;
           }
+          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
           updated[idx] = row;
           if (cmd.cascadeEffects) {
             for (const effect of cmd.cascadeEffects) {
@@ -55,6 +57,7 @@ export function useCommandDispatch(
                 if (effect.nextFields.matchedQty !== undefined || effect.nextFields.unitPrice !== undefined) {
                   updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
                 }
+                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total);
               }
             }
           }
@@ -193,6 +196,7 @@ export function useCommandDispatch(
           if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
             row.total = row.matchedQty * row.unitPrice;
           }
+          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
           updated[idx] = row;
           if (cmd.cascadeEffects) {
             for (const effect of cmd.cascadeEffects) {
@@ -202,6 +206,7 @@ export function useCommandDispatch(
                 if (effect.prevFields.matchedQty !== undefined || effect.prevFields.unitPrice !== undefined) {
                   updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
                 }
+                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total);
               }
             }
           }
