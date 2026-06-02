@@ -26,7 +26,10 @@ function focusWithScroll(
   const scrollToRow = scrollToRowRef?.current;
   if (scrollToRow) {
     scrollToRow(targetRowIdx);
-    // Wait for virtualizer to render the row before focusing
+    // NOTE: The .focus() call below is a no-op since the single-container keyboard
+    // refactor removed tabIndex from cell display divs. The useGridKeyboard safety
+    // net (in TakeoffIngestionStep) handles focus recovery after selection changes.
+    // The scroll call above is still necessary to bring off-screen rows into view.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         document.getElementById(elementId)?.focus();
@@ -103,24 +106,45 @@ export function useKeyboardNavigation(
     if (e.key === "Enter") {
       e.preventDefault();
       if (!isEditing) {
-        // Enters edit mode
-        if (isColumnEditable(columnId)) {
-          meta.setSelection({ rowId: rows[rIdx]?.original.id, columnId, isEditing: true });
-          requestAnimationFrame(() => {
-            document.getElementById(getInputId(columnId, rIdx))?.focus();
-          });
+        if (e.shiftKey) {
+          // Shift+Enter in nav mode: move selection UP
+          const prevRIdx = rIdx - 1;
+          if (prevRIdx >= 0) {
+            const prevRowId = rows[prevRIdx]?.original.id;
+            meta.setSelection({ rowId: prevRowId, columnId, isEditing: false });
+            focusWithScroll(getCellId(columnId, prevRIdx), prevRIdx, scrollToRowRef);
+          }
+        } else {
+          // Enter in nav mode: move selection DOWN (Excel standard; F2 enters edit mode)
+          const nextRIdx = rIdx + 1;
+          if (nextRIdx < totalRows) {
+            const nextRowId = rows[nextRIdx]?.original.id;
+            meta.setSelection({ rowId: nextRowId, columnId, isEditing: false });
+            focusWithScroll(getCellId(columnId, nextRIdx), nextRIdx, scrollToRowRef);
+          }
         }
       } else {
         // Commit the active edit (blur triggers onCommit), then navigate
         commitActiveEdit();
-        // Exit editing & move to next row (Excel Enter = down)
-        meta.setSelection({ rowId: null, columnId: null, isEditing: false });
-        // Excel enters down
-        const nextRIdx = rIdx + 1;
-        if (nextRIdx < totalRows) {
-          const nextRowId = rows[nextRIdx]?.original.id;
-          meta.setSelection({ rowId: nextRowId, columnId, isEditing: false });
-          focusWithScroll(getCellId(columnId, nextRIdx), nextRIdx, scrollToRowRef);
+        if (e.shiftKey) {
+          // Shift+Enter while editing: commit + move UP
+          const prevRIdx = rIdx - 1;
+          if (prevRIdx >= 0) {
+            const prevRowId = rows[prevRIdx]?.original.id;
+            meta.setSelection({ rowId: prevRowId, columnId, isEditing: false });
+            focusWithScroll(getCellId(columnId, prevRIdx), prevRIdx, scrollToRowRef);
+          } else {
+            meta.setSelection({ rowId: null, columnId: null, isEditing: false });
+          }
+        } else {
+          // Enter while editing: commit + move DOWN
+          meta.setSelection({ rowId: null, columnId: null, isEditing: false });
+          const nextRIdx = rIdx + 1;
+          if (nextRIdx < totalRows) {
+            const nextRowId = rows[nextRIdx]?.original.id;
+            meta.setSelection({ rowId: nextRowId, columnId, isEditing: false });
+            focusWithScroll(getCellId(columnId, nextRIdx), nextRIdx, scrollToRowRef);
+          }
         }
       }
     }

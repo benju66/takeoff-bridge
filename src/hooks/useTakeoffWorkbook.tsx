@@ -499,8 +499,7 @@ export function useTakeoffWorkbook(
             return (
               <div
                 id={`cell-${row.id}-${def.id}`}
-                tabIndex={0}
-                className={`w-full h-full min-h-[36px] px-3 py-2 text-left font-sans text-xs transition-all outline-none focus:outline-none ${
+                className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center text-left font-sans text-xs transition-all outline-none focus:outline-none ${
                   isCellHardLocked
                     ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                     : isSelected
@@ -509,10 +508,13 @@ export function useTakeoffWorkbook(
                 }`}
                 onClick={() => {
                   if (!isCellHardLocked) {
-                    meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: isSelected ? true : false });
+                    if (isSelected) {
+                      meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: false });
+                    }
                   }
                 }}
-                onKeyDown={(e) => handleCustomKeyDown(e, index, def.id, info.table)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: false });
@@ -690,7 +692,6 @@ export function useTakeoffWorkbook(
               return (
                 <div
                   id={`cell-${row.id}-itemId`}
-                  tabIndex={0}
                   className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-between gap-2 font-mono text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
@@ -707,7 +708,6 @@ export function useTakeoffWorkbook(
                       meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: false });
                     }
                   }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "code", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: false });
@@ -783,8 +783,7 @@ export function useTakeoffWorkbook(
               return (
                 <div
                   id={`cell-${row.id}-description`}
-                  tabIndex={0}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 text-left font-sans text-xs transition-all outline-none focus:outline-none ${
+                  className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center text-left font-sans text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                       : isSelected
@@ -798,7 +797,6 @@ export function useTakeoffWorkbook(
                       meta.setSelection({ rowId: row.id, columnId: "description", isEditing: false });
                     }
                   }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "desc", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     meta.setSelection({ rowId: row.id, columnId: "description", isEditing: false });
@@ -854,8 +852,7 @@ export function useTakeoffWorkbook(
               return (
                 <div
                   id={`cell-${row.id}-matchedQty`}
-                  tabIndex={0}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
+                  className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                       : isSelected
@@ -869,7 +866,6 @@ export function useTakeoffWorkbook(
                       meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: false });
                     }
                   }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "qty", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: false });
@@ -937,8 +933,7 @@ export function useTakeoffWorkbook(
               return (
                 <div
                   id={`cell-${row.id}-unitPrice`}
-                  tabIndex={0}
-                  className={`w-full h-full min-h-[36px] px-3 py-2 text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
+                  className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
                     isCellHardLocked
                       ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
                       : isSelected
@@ -952,7 +947,6 @@ export function useTakeoffWorkbook(
                       meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: false });
                     }
                   }}
-                  onKeyDown={(e) => meta.handleKeyDown(e, index, "price", info.table)}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: false });

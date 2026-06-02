@@ -2,6 +2,7 @@
 "use no compiler";
 
 import React, { useRef, useMemo, useEffect, useCallback } from "react";
+import { useGridKeyboard } from "@/hooks/useGridKeyboard";
 import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
@@ -158,10 +159,24 @@ export function TakeoffIngestionStep({
     useFlushSync: false,
   });
 
-  // Bind virtualizer scrollTo index to the shared Ref so that keyboard navigation can scroll cells into view
+  // Bind virtualizer scrollTo index to the shared Ref so that keyboard navigation can scroll cells into view.
+  // Maps data row index → flat item index (accounting for divider rows).
   if (scrollToRowRef) {
-    scrollToRowRef.current = virtualizer.scrollToIndex;
+    scrollToRowRef.current = (dataRowIndex: number) => {
+      const flatIndex = flatItems.findIndex(item => item.type === "row" && item.dataIndex === dataRowIndex);
+      if (flatIndex >= 0) virtualizer.scrollToIndex(flatIndex);
+    };
   }
+
+  // Grid-level keyboard navigation (single container owner)
+  const { handleGridKeyDown, focusContainer } = useGridKeyboard({
+    containerRef: parentRef,
+    selection,
+    table,
+    onNavigate: (e, rIdx, columnId, tbl) => {
+      tbl.options.meta?.handleCustomKeyDown(e, rIdx, columnId, tbl);
+    },
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -410,7 +425,7 @@ export function TakeoffIngestionStep({
           </span>
         </div>
 
-        <div ref={parentRef} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border grid-scroll" style={{ maxHeight: "70vh" }}>
+        <div ref={parentRef} tabIndex={-1} onKeyDown={handleGridKeyDown} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border grid-scroll outline-none" style={{ maxHeight: "70vh" }}>
           <table className="w-full text-left text-xs border-separate border-spacing-0" style={{ tableLayout: "fixed" }}>
             <thead className="thead-shadow" style={{ display: "block", position: "sticky", top: 0, zIndex: 10 }}>
               {table.getHeaderGroups().map((headerGroup: HeaderGroup<ProcessedTakeoffRow>) => (
@@ -593,6 +608,7 @@ export function TakeoffIngestionStep({
                             const meta = table.options.meta;
                             if (meta) {
                               meta.setSelection({ rowId: row.original.id, columnId: cell.column.id, isEditing: false });
+                              focusContainer();
                             }
                           } : undefined;
 
