@@ -18,11 +18,11 @@ import { SearchBar } from "./SearchBar";
 import { FilterableColumnHeader } from "./FilterableColumnHeader";
 
 // ---------------------------------------------------------------------------
-// TakeoffIngestionStep — Step 4 Panel
+// EstimateTable — Step 4 Panel
 // Takeoff Workbook Spreadsheet Matrix + Summary Analytics
 // ---------------------------------------------------------------------------
 
-interface TakeoffIngestionStepProps {
+interface EstimateTableProps {
   project: Project;
   projectDurationMonths: number;
   squareFootage: number;
@@ -69,7 +69,7 @@ interface TakeoffIngestionStepProps {
   scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
 }
 
-export function TakeoffIngestionStep({
+export function EstimateTable({
   project,
   projectDurationMonths,
   squareFootage,
@@ -101,7 +101,7 @@ export function TakeoffIngestionStep({
   globalFilter,
   setGlobalFilter,
   scrollToRowRef,
-}: TakeoffIngestionStepProps) {
+}: EstimateTableProps) {
   const { subtotal, generalLiability, contractorFee: fee, totalEstimatedCost, costPerSf, costPerUnit } = takeoffSummary;
 
   // ---------------------------------------------------------------------------

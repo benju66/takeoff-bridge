@@ -38,6 +38,11 @@ export function useFileIngestion(
   // Merge takeoff CSV data
   // ---------------------------------------------------------------------------
   const mergeTakeoffData = (parsed: ProcessedTakeoffRow[]) => {
+    const threshold = Number(globalRegistry["__config_threshold"]) || 5000;
+    const keywords = globalRegistry["__config_keywords"]
+      ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
+      : ["LS", "SUM", "ALLW", "LUMP"];
+
     const unmappedList: string[] = [];
     parsed.forEach((parsedRow) => {
       if (!parsedRow.itemId) {
@@ -91,7 +96,9 @@ export function useFileIngestion(
         updatedRows[targetIdx].dataFidelity = evaluateDataFidelity(
           updatedRows[targetIdx].matchedQty,
           updatedRows[targetIdx].uom,
-          updatedRows[targetIdx].total
+          updatedRows[targetIdx].total,
+          threshold,
+          keywords
         );
       }
     });

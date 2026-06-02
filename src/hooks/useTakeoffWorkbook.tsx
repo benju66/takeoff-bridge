@@ -217,6 +217,7 @@ export function useTakeoffWorkbook(
     commandHistory, projectId,
     setRows, setUserRegistry, setGlobalRegistry,
     setColumnDefs, setLockedCells, setUnmappedTakeoffClassifications,
+    globalRegistry,
   );
 
   // ---------------------------------------------------------------------------

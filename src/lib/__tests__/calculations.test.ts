@@ -342,5 +342,18 @@ describe('evaluateDataFidelity', () => {
     expect(evaluateDataFidelity(1, '', 4000)).toBe('discrete_unit');
     expect(evaluateDataFidelity(1, '  ', 6000)).toBe('macro_lump_sum');
   });
+
+  it('supports custom commodity price thresholds', () => {
+    // Custom threshold of 1000
+    expect(evaluateDataFidelity(1, 'SF', 1500, 1000)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(1, 'SF', 900, 1000)).toBe('discrete_unit');
+  });
+
+  it('supports custom UOM keywords overrides list', () => {
+    const customKeywords = ['QUOTE', 'FIXED'];
+    expect(evaluateDataFidelity(10, 'QUOTE', 1000, 5000, customKeywords)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(5, 'FIXED', 200, 5000, customKeywords)).toBe('macro_lump_sum');
+    expect(evaluateDataFidelity(1, 'LS', 1000, 5000, customKeywords)).toBe('discrete_unit'); // LS no longer macro keyword
+  });
 });
 

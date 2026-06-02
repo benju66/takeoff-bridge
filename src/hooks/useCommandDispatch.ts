@@ -30,6 +30,7 @@ export function useCommandDispatch(
   setColumnDefs: React.Dispatch<React.SetStateAction<ColumnDefinition[]>>,
   setLockedCells: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
   setUnmappedTakeoffClassifications: React.Dispatch<React.SetStateAction<string[]>>,
+  globalRegistry: Record<string, string>,
 ): UseCommandDispatchReturn {
 
   // ---------------------------------------------------------------------------
@@ -38,6 +39,11 @@ export function useCommandDispatch(
   const applyCommandForward = useCallback((cmd: WorkbookCommand) => {
     switch (cmd.type) {
       case "EDIT_CELL": {
+        const threshold = Number(globalRegistry["__config_threshold"]) || 5000;
+        const keywords = globalRegistry["__config_keywords"]
+          ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
+          : ["LS", "SUM", "ALLW", "LUMP"];
+
         setRows((prev) => {
           const updated = [...prev];
           const idx = updated.findIndex((r) => r.id === cmd.rowId);
@@ -47,7 +53,7 @@ export function useCommandDispatch(
           if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
             row.total = row.matchedQty * row.unitPrice;
           }
-          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
+          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total, threshold, keywords);
           updated[idx] = row;
           if (cmd.cascadeEffects) {
             for (const effect of cmd.cascadeEffects) {
@@ -57,7 +63,7 @@ export function useCommandDispatch(
                 if (effect.nextFields.matchedQty !== undefined || effect.nextFields.unitPrice !== undefined) {
                   updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
                 }
-                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total);
+                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total, threshold, keywords);
               }
             }
           }
@@ -179,7 +185,7 @@ export function useCommandDispatch(
         break;
       }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -187,6 +193,11 @@ export function useCommandDispatch(
   const applyCommandInverse = useCallback((cmd: WorkbookCommand) => {
     switch (cmd.type) {
       case "EDIT_CELL": {
+        const threshold = Number(globalRegistry["__config_threshold"]) || 5000;
+        const keywords = globalRegistry["__config_keywords"]
+          ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
+          : ["LS", "SUM", "ALLW", "LUMP"];
+
         setRows((prev) => {
           const updated = [...prev];
           const idx = updated.findIndex((r) => r.id === cmd.rowId);
@@ -196,7 +207,7 @@ export function useCommandDispatch(
           if (cmd.field === "matchedQty" || cmd.field === "unitPrice") {
             row.total = row.matchedQty * row.unitPrice;
           }
-          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
+          row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total, threshold, keywords);
           updated[idx] = row;
           if (cmd.cascadeEffects) {
             for (const effect of cmd.cascadeEffects) {
@@ -206,7 +217,7 @@ export function useCommandDispatch(
                 if (effect.prevFields.matchedQty !== undefined || effect.prevFields.unitPrice !== undefined) {
                   updated[si].total = updated[si].matchedQty * updated[si].unitPrice;
                 }
-                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total);
+                updated[si].dataFidelity = evaluateDataFidelity(updated[si].matchedQty, updated[si].uom, updated[si].total, threshold, keywords);
               }
             }
           }
@@ -348,7 +359,7 @@ export function useCommandDispatch(
         break;
       }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
 
   // ---------------------------------------------------------------------------
   // handleUndo — Pop from undo stack and apply inverse

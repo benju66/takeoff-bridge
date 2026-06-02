@@ -19,7 +19,7 @@ page.tsx (ProjectWorkspace)
 │   ├── useExportHandlers() ← Excel/Procore export
 │   └── useCommandHistory() ← undo/redo stack
 │
-├── TakeoffIngestionStep ← renders the virtualized grid
+├── EstimateTable ← renders the virtualized grid
 │   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
 │   ├── @tanstack/react-virtual ← row virtualization
 │   ├── flexRender() ← renders cell functions from column defs
@@ -42,7 +42,7 @@ page.tsx (ProjectWorkspace)
 | `src/hooks/usePasteHandler.ts` | Multi-row/multi-col paste from clipboard |
 | `src/hooks/useCommandHistory.ts` | Undo/redo stack with `WorkbookCommand` payloads |
 | `src/hooks/useColumnDefinitions.ts` | Custom column CRUD, column ordering |
-| `src/components/workspace/TakeoffIngestionStep.tsx` | Grid renderer with virtualization, click-outside, status bar |
+| `src/components/workspace/EstimateTable.tsx` | Grid renderer with virtualization, click-outside, status bar |
 | `src/components/workspace/StringCellInput.tsx` | Buffered text editor for string cells |
 | `src/components/workspace/NumberCellInput.tsx` | Buffered numeric editor with `parseFloat` commit |
 | `src/components/workspace/ContextMenuPortal.tsx` | Right-click menu: lock/insert/delete |
@@ -61,7 +61,7 @@ interface GridSelectionState {
 }
 ```
 
-**State ownership**: `useState` in `useTakeoffWorkbook` → flows to TanStack table via `meta.selection` AND to `TakeoffIngestionStep` as a prop.
+**State ownership**: `useState` in `useTakeoffWorkbook` → flows to TanStack table via `meta.selection` AND to `EstimateTable` as a prop.
 
 **Cell renderers access selection via**: `info.table.options.meta!.selection` (NOT via closure — the meta is updated each render via `useReactTable.setOptions`).
 

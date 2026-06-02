@@ -28,7 +28,7 @@ function focusWithScroll(
     scrollToRow(targetRowIdx);
     // NOTE: The .focus() call below is a no-op since the single-container keyboard
     // refactor removed tabIndex from cell display divs. The useGridKeyboard safety
-    // net (in TakeoffIngestionStep) handles focus recovery after selection changes.
+    // net (in EstimateTable) handles focus recovery after selection changes.
     // The scroll call above is still necessary to bring off-screen rows into view.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {

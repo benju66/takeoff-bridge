@@ -71,6 +71,11 @@ export function useCellEditing(
     value: string | number,
     currentRegistry: Record<string, string>
   ): Record<string, string> | null => {
+    const threshold = Number(globalRegistryRef.current["__config_threshold"]) || 5000;
+    const keywords = globalRegistryRef.current["__config_keywords"]
+      ? globalRegistryRef.current["__config_keywords"].split(",").map(k => k.trim())
+      : ["LS", "SUM", "ALLW", "LUMP"];
+
     const originalRow = updated[index];
     if (!originalRow) return null;
 
@@ -130,7 +135,7 @@ export function useCellEditing(
               updated[i].matchedQty = q;
               updated[i].total = q * targetItem.defaultUnitPrice;
               updated[i].isMapped = true;
-              updated[i].dataFidelity = evaluateDataFidelity(q, targetItem.targetUom, updated[i].total);
+              updated[i].dataFidelity = evaluateDataFidelity(q, targetItem.targetUom, updated[i].total, threshold, keywords);
             }
           }
         }
@@ -169,13 +174,13 @@ export function useCellEditing(
           if (updated[i].classification === classification) {
             updated[i].unitPrice = price;
             updated[i].total = updated[i].matchedQty * price;
-            updated[i].dataFidelity = evaluateDataFidelity(updated[i].matchedQty, updated[i].uom, updated[i].total);
+            updated[i].dataFidelity = evaluateDataFidelity(updated[i].matchedQty, updated[i].uom, updated[i].total, threshold, keywords);
           }
         }
       }
     }
 
-    row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total);
+    row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total, threshold, keywords);
 
     return newRegistry;
   };

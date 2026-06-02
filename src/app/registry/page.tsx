@@ -10,11 +10,14 @@ import {
   AlertTriangle, 
   Info, 
   Terminal, 
-  CheckCircle2 
+  CheckCircle2,
+  Sliders,
+  Save
 } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { DIVISION_NAMES } from "@/lib/constants";
 import { getGlobalRegistry, saveGlobalRegistry, deleteGlobalRegistry } from "@/lib/db";
+import { evaluateDataFidelity } from "@/lib/calculations";
 
 
 interface RegistryRow {
@@ -32,6 +35,16 @@ export default function GlobalRegistryDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Custom configurations state
+  const [thresholdInput, setThresholdInput] = useState("5000");
+  const [keywordsInput, setKeywordsInput] = useState("LS, SUM, ALLW, LUMP");
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Simulator State
+  const [simQty, setSimQty] = useState(1);
+  const [simUom, setSimUom] = useState("SF");
+  const [simPrice, setSimPrice] = useState(6000);
+
   // Load registry from Supabase on client load
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +53,8 @@ export default function GlobalRegistryDashboard() {
         const loaded = await getGlobalRegistry();
         if (!cancelled) {
           setRegistry(loaded);
+          setThresholdInput(loaded["__config_threshold"] || "5000");
+          setKeywordsInput(loaded["__config_keywords"] || "LS, SUM, ALLW, LUMP");
           setIsLoaded(true);
         }
       } catch (err) {
@@ -52,6 +67,56 @@ export default function GlobalRegistryDashboard() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registry) return;
+
+    const thresholdVal = thresholdInput.trim();
+    const keywordsVal = keywordsInput
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .join(", ");
+
+    const updatedRegistry = {
+      ...registry,
+      "__config_threshold": thresholdVal,
+      "__config_keywords": keywordsVal,
+    };
+
+    try {
+      await saveGlobalRegistry(updatedRegistry);
+      setRegistry(updatedRegistry);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error("Failed to save rules configuration:", err);
+      alert("Failed to save rules configuration. Please try again.");
+    }
+  };
+
+  const simResult = React.useMemo(() => {
+    const t = Number(thresholdInput) || 5000;
+    const k = keywordsInput
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const total = simQty * simPrice;
+
+    const fidelity = evaluateDataFidelity(simQty, simUom, total, t, k);
+
+    let reason = "";
+    if (k.map((x) => x.toUpperCase()).includes(simUom.trim().toUpperCase())) {
+      reason = `UOM "${simUom}" matches registered macro keywords (${k.join(", ")}).`;
+    } else if (simQty === 1 && total > t) {
+      reason = `Qty is 1 and total cost ($${total.toLocaleString()}) exceeds the threshold ($${t.toLocaleString()}).`;
+    } else {
+      reason = `Standard unit of measure (${simUom}) with variable quantities, or total cost under threshold.`;
+    }
+
+    return { fidelity, total, reason };
+  }, [simQty, simUom, simPrice, thresholdInput, keywordsInput]);
 
   const handleDeleteRule = async (classificationToDelete: string) => {
     if (!registry) return;
@@ -80,11 +145,12 @@ export default function GlobalRegistryDashboard() {
     }
   };
 
-  // Process rows by joining with ESTIMATE_ITEMS_MASTER mock database catalog
   const processedRows: RegistryRow[] = React.useMemo(() => {
     if (!registry) return [];
 
-    return Object.entries(registry).map(([classification, itemId]) => {
+    return Object.entries(registry)
+      .filter(([classification]) => !classification.startsWith("__"))
+      .map(([classification, itemId]) => {
       const masterItem = ESTIMATE_ITEMS_MASTER[itemId];
       const divisionCode = itemId && itemId.length >= 2 ? itemId.substring(0, 2) : "";
       
@@ -202,6 +268,147 @@ export default function GlobalRegistryDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Estimation Standards & Rules Configuration Section */}
+      <section className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+        {/* Settings Configuration Card */}
+        <div className="lg:col-span-2 bg-card border border-grid-border p-6 rounded-xl shadow-sm">
+          <h2 className="text-lg font-extrabold text-foreground flex items-center gap-2 mb-4 uppercase tracking-wider">
+            <Sliders className="text-blue-600 dark:text-blue-400" size={20} /> Data-Fidelity Classification Settings
+          </h2>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-6">
+            Configure default rules that automatically classify estimate line items into itemized discrete units or macro lump-sum values based on units of measure and price thresholds.
+          </p>
+
+          <form onSubmit={handleSaveConfig} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  Commodity Price Threshold ($)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg px-3 py-2.5 text-xs text-foreground outline-none font-mono transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                  value={thresholdInput}
+                  onChange={(e) => setThresholdInput(e.target.value)}
+                  placeholder="5000"
+                />
+                <span className="text-[9px] text-slate-600 dark:text-slate-400 block mt-1">
+                  Threshold limit where single-quantity items are tagged as lump sum.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">
+                  Lump Sum UOM Keywords (Comma Separated)
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg px-3 py-2.5 text-xs text-foreground outline-none transition-all focus:bg-white dark:focus:bg-slate-900/40"
+                  value={keywordsInput}
+                  onChange={(e) => setKeywordsInput(e.target.value)}
+                  placeholder="LS, SUM, ALLW, LUMP"
+                />
+                <span className="text-[9px] text-slate-600 dark:text-slate-400 block mt-1">
+                  Keywords that automatically trigger lump-sum tagging.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                {saveSuccess && (
+                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold animate-pulse">
+                    <CheckCircle2 size={14} /> Rules saved successfully to registry!
+                  </span>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm cursor-pointer"
+              >
+                <Save size={14} /> Save Configuration
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Interactive Simulator Card */}
+        <div className="bg-card border border-grid-border p-6 rounded-xl shadow-sm flex flex-col justify-between">
+          <div>
+            <h2 className="text-lg font-extrabold text-foreground flex items-center gap-2 mb-2 uppercase tracking-wider">
+              <Terminal className="text-cyan-600 dark:text-cyan-400 animate-pulse" size={20} /> Rule Test Simulator
+            </h2>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 mb-4">
+              Test your configuration changes in real time before saving them globally.
+            </p>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[8px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Qty
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-2 py-1 text-xs text-foreground outline-none font-mono"
+                    value={simQty}
+                    onChange={(e) => setSimQty(Number(e.target.value) || 0)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[8px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    UOM
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-2 py-1 text-xs text-foreground outline-none font-mono"
+                    value={simUom}
+                    onChange={(e) => setSimUom(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[8px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Rate ($)
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg px-2 py-1 text-xs text-foreground outline-none font-mono"
+                    value={simPrice}
+                    onChange={(e) => setSimPrice(Number(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+
+              <div className="border border-grid-border p-3 rounded-lg bg-background/50 dark:bg-slate-900/30 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wider font-bold">
+                    Resulting Tag:
+                  </span>
+                  <span
+                    className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest uppercase ${
+                      simResult.fidelity === "macro_lump_sum"
+                        ? "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-500 border-amber-200 dark:border-amber-900/50"
+                        : "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50"
+                    }`}
+                  >
+                    {simResult.fidelity}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-slate-600 dark:text-slate-400">Total Cost:</span>
+                  <span className="font-mono font-bold text-foreground">${simResult.total.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 italic mt-3 pt-2 border-t border-grid-border leading-normal">
+            <strong>Logic Trigger:</strong> {simResult.reason}
+          </div>
+        </div>
+      </section>
 
       {/* Main Content Area */}
       {harvestedCount === 0 ? (

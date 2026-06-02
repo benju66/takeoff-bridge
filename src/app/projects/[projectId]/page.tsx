@@ -24,7 +24,7 @@ import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
-import { TakeoffIngestionStep } from "@/components/workspace/TakeoffIngestionStep";
+import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
@@ -341,7 +341,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
           { id: "step1", label: "Multi-Family Layout" },
           { id: "step2", label: "GC Personnel" },
           { id: "step3", label: "Jobsite Infrastructure" },
-          { id: "step4", label: "Takeoff Ingestion" },
+          { id: "step4", label: "Estimate Table" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -411,7 +411,7 @@ export default function ProjectWorkspace({ params }: PageProps) {
 
       {activeTab === "step4" && (
         <ErrorBoundary>
-          <TakeoffIngestionStep
+          <EstimateTable
             project={project}
             projectDurationMonths={projectDurationMonths}
             squareFootage={squareFootage}

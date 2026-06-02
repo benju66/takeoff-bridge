@@ -254,16 +254,18 @@ export type DataFidelity = "discrete_unit" | "macro_lump_sum";
 export function evaluateDataFidelity(
   qty: number,
   uom: string,
-  total: number
+  total: number,
+  threshold: number = COMMODITY_THRESHOLD,
+  keywords: string[] = ["LS", "SUM", "ALLW", "LUMP"]
 ): DataFidelity {
   const normalizedUom = (uom || "").trim().toUpperCase();
-  const macroKeywords = ["LS", "SUM", "ALLW", "LUMP"];
+  const macroKeywords = keywords.map((k) => k.trim().toUpperCase());
   
   if (macroKeywords.includes(normalizedUom)) {
     return "macro_lump_sum";
   }
   
-  if (qty === 1 && total > COMMODITY_THRESHOLD) {
+  if (qty === 1 && total > threshold) {
     return "macro_lump_sum";
   }
   

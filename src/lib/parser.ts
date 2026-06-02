@@ -58,6 +58,11 @@ export function parseTogalCSV(
   const userMap: Map<string, string> = buildNormalizedMap(userRegistry);
   const globalMap: Map<string, string> = buildNormalizedMap(globalRegistry);
 
+  const threshold = Number(globalRegistry["__config_threshold"]) || 5000;
+  const keywords = globalRegistry["__config_keywords"]
+    ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
+    : ["LS", "SUM", "ALLW", "LUMP"];
+
   return rawRows.map((row, index): ProcessedTakeoffRow | null => {
     // Normalize all row keys once for O(1) column access (Deep Review E1: explicit cast)
     const normalizedRow = normalizeRowKeys(row as unknown as Record<string, unknown>);
@@ -92,7 +97,7 @@ export function parseTogalCSV(
     const qty = matchedMeasurement?.qty || 0;
     const price = masterItem?.defaultUnitPrice || 0;
     const total = qty * price;
-    const dataFidelity = evaluateDataFidelity(qty, targetUom, total);
+    const dataFidelity = evaluateDataFidelity(qty, targetUom, total, threshold, keywords);
 
     return {
       id: `row-${index}`,
