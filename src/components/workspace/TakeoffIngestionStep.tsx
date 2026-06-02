@@ -111,7 +111,11 @@ export function TakeoffIngestionStep({
     if (gridContainerRef.current && !gridContainerRef.current.contains(e.target as Node)) {
       const meta = table.options.meta;
       if (meta?.selection?.rowId) {
-        meta.setSelection({ rowId: null, columnId: null, isEditing: false });
+        // Defer deselection so the active input's onBlur fires first,
+        // allowing StringCellInput to commit the edit before unmounting.
+        setTimeout(() => {
+          meta.setSelection({ rowId: null, columnId: null, isEditing: false });
+        }, 0);
       }
     }
   }, [table]);

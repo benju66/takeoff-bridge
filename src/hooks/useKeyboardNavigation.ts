@@ -52,6 +52,14 @@ export function useKeyboardNavigation(
     const selection = meta.selection;
     const isEditing = selection.isEditing;
     const rows = table.getRowModel().rows;
+
+    // Explicitly blur the active input to trigger StringCellInput's
+    // onBlur → onCommit BEFORE we change selection (which unmounts the input).
+    const commitActiveEdit = () => {
+      if (isEditing && document.activeElement instanceof HTMLInputElement) {
+        document.activeElement.blur();
+      }
+    };
     const totalRows = rows.length;
 
     // Get exact visible columns
@@ -83,15 +91,9 @@ export function useKeyboardNavigation(
     if (e.key === "Escape") {
       if (isEditing) {
         e.preventDefault();
-        // Trigger cancel state restoration inside the active editor
-        const input = e.target as HTMLInputElement;
-        if (input) {
-          // Trigger custom escape key down inside component if needed
-          const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
-          input.dispatchEvent(event);
-        }
+        // StringCellInput handles Escape internally (revert buffer + blur).
+        // We just need to exit edit mode and refocus the cell div.
         meta.setSelection((prev: GridSelectionState) => ({ ...prev, isEditing: false }));
-        // Refocus standard cell
         requestAnimationFrame(() => {
           document.getElementById(getCellId(columnId, rIdx))?.focus();
         });
@@ -109,7 +111,9 @@ export function useKeyboardNavigation(
           });
         }
       } else {
-        // Exit editing & commit (done automatically on blur by input element)
+        // Commit the active edit (blur triggers onCommit), then navigate
+        commitActiveEdit();
+        // Exit editing & move to next row (Excel Enter = down)
         meta.setSelection({ rowId: null, columnId: null, isEditing: false });
         // Excel enters down
         const nextRIdx = rIdx + 1;
@@ -123,6 +127,7 @@ export function useKeyboardNavigation(
 
     if (e.key === "Tab") {
       e.preventDefault();
+      commitActiveEdit();
       meta.setSelection({ rowId: null, columnId: null, isEditing: false });
       if (e.shiftKey) {
         // Shift+Tab: move left
@@ -182,6 +187,7 @@ export function useKeyboardNavigation(
 
       if (!isEditing || isCaretAtStart) {
         e.preventDefault();
+        commitActiveEdit();
         if (colIdx > 0) {
           meta.setSelection({ rowId: rows[rIdx]?.original.id, columnId: visibleCols[colIdx - 1], isEditing: false });
           focusWithScroll(getCellId(visibleCols[colIdx - 1], rIdx), rIdx, scrollToRowRef);
@@ -196,6 +202,7 @@ export function useKeyboardNavigation(
 
       if (!isEditing || isCaretAtEnd) {
         e.preventDefault();
+        commitActiveEdit();
         if (colIdx < visibleCols.length - 1) {
           meta.setSelection({ rowId: rows[rIdx]?.original.id, columnId: visibleCols[colIdx + 1], isEditing: false });
           focusWithScroll(getCellId(visibleCols[colIdx + 1], rIdx), rIdx, scrollToRowRef);
