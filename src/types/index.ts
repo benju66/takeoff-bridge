@@ -33,6 +33,8 @@ export interface ProcessedTakeoffRow {
   costType: string;        // Dynamic costType mapped from InternalEstimateItem
   customFields?: Record<string, string | number>;
   dataFidelity?: 'discrete_unit' | 'macro_lump_sum';
+  /** Cost code extracted from classification string (e.g., "03-0000.002" from "03-0000.002 - Footings") */
+  embeddedCode?: string;
 }
 
 // ---------------------------------------------------------------------------

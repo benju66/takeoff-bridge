@@ -73,7 +73,7 @@ interface EstimateTableProps {
 
   // Import modal
   pendingImport: PendingImport | null;
-  confirmImport: (archParams: ArchParamSuggestion[]) => void;
+  confirmImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
   cancelImport: () => void;
   reParseWithSheet: (sheetName: string) => Promise<void>;
   handleProjectParamChange?: (field: string, value: string | number) => void;
@@ -234,7 +234,7 @@ export function EstimateTable({
 
   return (
     <>
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in" {...(pendingImport ? { inert: "" } as Record<string, unknown> : {})}>
       {/* Top Ingestion Module Tray */}
       <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         {/* Left side: Compact Ingest / Drop Takeoff CSV box */}
@@ -854,8 +854,8 @@ export function EstimateTable({
         <ImportPreviewModal
           pendingImport={pendingImport}
           appendData={appendData}
-          onImport={(archParams) => {
-            confirmImport(archParams);
+          onImport={(archParams, overriddenRows) => {
+            confirmImport(archParams, overriddenRows);
             // Apply accepted architectural parameters to project
             if (handleProjectParamChange) {
               archParams.forEach((param) => {

@@ -129,6 +129,7 @@ export function parseTogalCSV(
       rawQuantities: measurements,
       costType: masterItem?.costType || "M",
       dataFidelity,
+      embeddedCode: embeddedCode || undefined,
     };
   }).filter((r): r is ProcessedTakeoffRow => r !== null);
 }

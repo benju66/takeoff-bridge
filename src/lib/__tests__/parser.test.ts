@@ -234,4 +234,32 @@ describe("parseTogalCSV", () => {
     expect(result).toHaveLength(1);
     expect(result[0].rawQuantities[0].uom).toBe("SF");
   });
+
+  // -------------------------------------------------------------------------
+  // Test 14: embeddedCode metadata — matching pattern stored on row
+  // -------------------------------------------------------------------------
+  it("stores embeddedCode on row when classification matches XX-XXXX.XXX pattern", () => {
+    const rows: TogalRowPayload[] = [
+      makeRow({ Classification: "03-0000.002 - Footings", "Quantity 1": "100", "Quantity1 UOM": "SF" }),
+    ];
+
+    const result = parseTogalCSV(rows);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].embeddedCode).toBe("03-0000.002");
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 15: embeddedCode metadata — undefined for non-matching classification
+  // -------------------------------------------------------------------------
+  it("leaves embeddedCode undefined when classification has no embedded code", () => {
+    const rows: TogalRowPayload[] = [
+      makeRow({ Classification: "Slab on Grade", "Quantity 1": "1500", "Quantity1 UOM": "SF" }),
+    ];
+
+    const result = parseTogalCSV(rows);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].embeddedCode).toBeUndefined();
+  });
 });

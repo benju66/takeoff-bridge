@@ -15,7 +15,7 @@ page.tsx (ProjectWorkspace)
 │   ├── useColumnDefinitions() ← dynamic column management
 │   ├── useCopyHandler() ← Ctrl+C (document-level)
 │   ├── usePasteHandler() ← Ctrl+V (input-level)
-│   ├── useFileIngestion() ← CSV/XLSX drag-and-drop
+│   ├── useFileIngestion() ← CSV/XLSX drag-and-drop + staged import
 │   ├── useExportHandlers() ← Excel/Procore export
 │   └── useCommandHistory() ← undo/redo stack
 │
@@ -23,6 +23,7 @@ page.tsx (ProjectWorkspace)
 │   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
 │   ├── @tanstack/react-virtual ← row virtualization
 │   ├── flexRender() ← renders cell functions from column defs
+│   ├── ImportPreviewModal ← 3-stage import preview (rendered when pendingImport non-null)
 │   ├── SearchBar ← global filter input
 │   └── Status Bar ← row count, selection info
 │
@@ -43,8 +44,10 @@ page.tsx (ProjectWorkspace)
 | `src/hooks/useCommandHistory.ts` | Undo/redo stack with `WorkbookCommand` payloads |
 | `src/hooks/useColumnDefinitions.ts` | Custom column CRUD, column ordering |
 | `src/components/workspace/EstimateTable.tsx` | Grid renderer with virtualization, click-outside, status bar |
+| `src/components/workspace/ImportPreviewModal.tsx` | 3-stage import preview with UOM override dropdowns |
 | `src/components/workspace/StringCellInput.tsx` | Buffered text editor for string cells |
 | `src/components/workspace/NumberCellInput.tsx` | Buffered numeric editor with `parseFloat` commit |
+| `src/components/workspace/SelectCellInput.tsx` | Dropdown select editor for UOM cells |
 | `src/components/workspace/ContextMenuPortal.tsx` | Right-click menu: lock/insert/delete |
 | `src/types/index.ts` | `GridSelectionState`, `ProcessedTakeoffRow`, `ColumnDefinition`, TanStack meta augmentation |
 
@@ -182,7 +185,7 @@ StringCellInput.handleKeyDownInternal
 | `description` | Yes | StringCellInput | Cascades to siblings |
 | `matchedQty` | Yes | NumberCellInput | Numeric with parseFloat |
 | `unitPrice` | Yes | NumberCellInput | Cascades unitPrice + total |
-| `uom` | No | Display div | Read-only unit of measure |
+| `uom` | Yes | SelectCellInput | Dropdown with UOM_OPTIONS; supports cell locking |
 | `total` | No | Display div | Computed: matchedQty × unitPrice |
 | `costPerUnit` | No | Display div | Computed metric |
 | `costPerSf` | No | Display div | Computed metric |
@@ -191,7 +194,7 @@ StringCellInput.handleKeyDownInternal
 
 ### Editable Column IDs (for navigation)
 ```typescript
-const editableColumns = ["itemId", "description", "matchedQty", "unitPrice"];
+const editableColumns = ["itemId", "description", "matchedQty", "unitPrice", "uom"];
 // Plus any column starting with "custom-"
 ```
 
@@ -262,8 +265,9 @@ focusWithScroll(cellId, rowIndex, scrollToRowRef);
 
 - **Stack**: `useCommandHistory` maintains `undoStack` and `redoStack` of `WorkbookCommand` objects
 - **Global listener**: `page.tsx` registers `Ctrl+Z` / `Ctrl+Y` on `document`, calls `e.preventDefault()` to suppress native input undo
-- **Command types**: `EDIT_CELL`, `EDIT_CUSTOM_CELL`, `PASTE`, `INSERT_ROW`, `DELETE_ROW`, `TOGGLE_LOCK`, `ADD_COLUMN`, `DELETE_COLUMN`, `RENAME_COLUMN`
+- **Command types**: `EDIT_CELL`, `EDIT_CUSTOM_CELL`, `PASTE`, `INSERT_ROW`, `DELETE_ROW`, `TOGGLE_LOCK`, `ADD_COLUMN`, `DELETE_COLUMN`, `UPDATE_COLUMN`, `MERGE_TAKEOFF_DATA`
 - **Cascade capture**: `commitCellEdit` simulates cascade in both directions (prev→next) to produce timing-independent undo snapshots
+- **Import merge**: `MERGE_TAKEOFF_DATA` captures per-row `prevRowStates`/`nextRowStates` diffs for full undo/redo of bulk import operations
 
 ---
 

@@ -5,6 +5,7 @@ import { parseTogalCSV } from "@/lib/parser";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { parseTogalXLSX, XlsxParseResult } from "@/lib/xlsx-reader";
 import { detectArchParams, ArchParamSuggestion } from "@/lib/archParamDetector";
+import { saveProjectRegistry } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
 // Pending Import state — holds parsed data between preview and confirm
@@ -30,7 +31,7 @@ export interface UseFileIngestionReturn {
   handleFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleDrag: (e: React.DragEvent) => void;
   handleDrop: (e: React.DragEvent) => void;
-  confirmImport: (archParams: ArchParamSuggestion[]) => void;
+  confirmImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
   cancelImport: () => void;
   reParseWithSheet: (sheetName: string) => Promise<void>;
 }
@@ -94,6 +95,8 @@ export function useFileIngestion(
   userRegistry: Record<string, string>,
   globalRegistry: Record<string, string>,
   appendData: boolean,
+  setUserRegistry: React.Dispatch<React.SetStateAction<Record<string, string>>>,
+  userRegistryRef: React.MutableRefObject<Record<string, string>>,
   commandHistory: { pushCommand: (cmd: WorkbookCommand) => void },
   setRows: React.Dispatch<React.SetStateAction<ProcessedTakeoffRow[]>>,
   setUnmappedTakeoffClassifications: React.Dispatch<React.SetStateAction<string[]>>,
@@ -253,14 +256,29 @@ export function useFileIngestion(
   // ---------------------------------------------------------------------------
   // Confirm import — execute the merge with optional arch params
   // ---------------------------------------------------------------------------
-  const confirmImport = useCallback((_archParams: ArchParamSuggestion[]) => {
-    void _archParams;
+  const confirmImport = useCallback((archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => {
     if (!pendingImport) return;
-    mergeTakeoffData(pendingImport.parsed);
+    mergeTakeoffData(overriddenRows ?? pendingImport.parsed);
+
+    // Persist extracted cost codes to project registry
+    const rowsToUse = overriddenRows ?? pendingImport.parsed;
+    const registryUpdates: Record<string, string> = {};
+    for (const row of rowsToUse) {
+      if (row.embeddedCode && row.isMapped && row.itemId) {
+        registryUpdates[row.classification] = row.itemId;
+      }
+    }
+    if (Object.keys(registryUpdates).length > 0) {
+      const newRegistry = { ...userRegistryRef.current, ...registryUpdates };
+      setUserRegistry(newRegistry);
+      userRegistryRef.current = newRegistry;
+      saveProjectRegistry(projectId, newRegistry).catch(console.error);
+    }
+
     setPendingImport(null);
     setLastFile(null);
     // Note: archParams are handled by the modal caller (passed to handleProjectParamChange)
-  }, [pendingImport, mergeTakeoffData]);
+  }, [pendingImport, mergeTakeoffData, projectId, setUserRegistry, userRegistryRef]);
 
   // ---------------------------------------------------------------------------
   // Cancel import — discard pending data

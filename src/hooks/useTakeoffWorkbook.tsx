@@ -103,7 +103,7 @@ export interface UseTakeoffWorkbookReturn {
 
   // Import modal
   pendingImport: PendingImport | null;
-  confirmImport: (archParams: ArchParamSuggestion[]) => void;
+  confirmImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
   cancelImport: () => void;
   reParseWithSheet: (sheetName: string) => Promise<void>;
 }
@@ -214,6 +214,7 @@ export function useTakeoffWorkbook(
   } = useFileIngestion(
     projectId, rowsRef, unmappedRef,
     userRegistry, globalRegistry, appendData,
+    setUserRegistry, userRegistryRef,
     commandHistory, setRows, setUnmappedTakeoffClassifications,
   );
 
@@ -899,6 +900,7 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::uom`];
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "uom";
               const isEditing = isSelected && meta.selection.isEditing;
@@ -909,7 +911,12 @@ export function useTakeoffWorkbook(
                   <SelectCellInput
                     id={`uom-select-${index}`}
                     value={row.uom}
-                    className="w-full h-full min-h-[36px] px-1 py-1 bg-transparent border-none rounded-none text-center font-bold uppercase font-mono text-xs outline-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-white cursor-pointer appearance-none"
+                    disabled={isCellHardLocked}
+                    className={`w-full h-full min-h-[36px] px-1 py-1 bg-transparent border-none rounded-none text-center font-bold uppercase font-mono text-xs outline-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 cursor-pointer appearance-none ${
+                      isCellHardLocked
+                        ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                        : "text-slate-900 dark:text-white"
+                    }`}
                     onCommit={(newUom) => {
                       meta.handleCellEdit(index, "uom", newUom);
                       meta.commitCellEdit(row.id, "uom" as keyof ProcessedTakeoffRow, prevUom, newUom);
@@ -934,12 +941,14 @@ export function useTakeoffWorkbook(
                 <div
                   id={`cell-${row.id}-uom`}
                   className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center text-center font-bold uppercase font-mono text-xs transition-all outline-none focus:outline-none ${
-                    isSelected
+                    isCellHardLocked
+                      ? "text-slate-600 dark:text-slate-400 bg-slate-50/50 dark:bg-slate-950/30 cursor-not-allowed opacity-60"
+                      : isSelected
                       ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative text-slate-900 dark:text-white"
                       : "text-slate-600 dark:text-slate-400"
                   }`}
                   onClick={() => {
-                    if (isSelected) {
+                    if (isSelected && !isCellHardLocked) {
                       meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: true });
                     } else {
                       meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });

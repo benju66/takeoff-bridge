@@ -2,8 +2,10 @@
 
 import React, { useState, useMemo } from "react";
 import { X, Upload, CheckCircle, AlertTriangle, XCircle, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { ProcessedTakeoffRow } from "@/types";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
 import { PendingImport } from "@/hooks/useFileIngestion";
+import { UOM_OPTIONS } from "@/lib/uom-options";
 
 // ---------------------------------------------------------------------------
 // ImportPreviewModal — 3-stage enterprise import flow
@@ -16,7 +18,7 @@ import { PendingImport } from "@/hooks/useFileIngestion";
 interface ImportPreviewModalProps {
   pendingImport: PendingImport;
   appendData: boolean;
-  onImport: (archParams: ArchParamSuggestion[]) => void;
+  onImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
   onClose: () => void;
   onSheetChange?: (sheetName: string) => void;
 }
@@ -34,17 +36,35 @@ export function ImportPreviewModal({
   const [archParams, setArchParams] = useState<ArchParamSuggestion[]>(
     pendingImport.archParamSuggestions,
   );
+  const [uomOverrides, setUomOverrides] = useState<Record<number, string>>({});
 
-  // Computed stats
+  // Effective rows with UOM overrides applied (re-matches quantity on override)
+  const effectiveRows = useMemo(() => {
+    return pendingImport.parsed.map((row, i) => {
+      const override = uomOverrides[i];
+      if (!override || override === row.uom) return row;
+      const matched = row.rawQuantities.find(
+        (m) => m.uom?.trim().toUpperCase() === override.toUpperCase(),
+      );
+      return {
+        ...row,
+        uom: override,
+        matchedQty: matched?.qty ?? 0,
+        total: (matched?.qty ?? 0) * row.unitPrice,
+      };
+    });
+  }, [pendingImport.parsed, uomOverrides]);
+
+  // Computed stats — uses effectiveRows to reflect UOM overrides
   const stats = useMemo(() => {
-    const total = pendingImport.parsed.length;
-    const matched = pendingImport.parsed.filter((r) => r.isMapped).length;
+    const total = effectiveRows.length;
+    const matched = effectiveRows.filter((r) => r.isMapped).length;
     const unmapped = total - matched;
-    const uomMismatches = pendingImport.parsed.filter(
+    const uomMismatches = effectiveRows.filter(
       (r) => r.isMapped && r.matchedQty === 0,
     ).length;
     return { total, matched, unmapped, uomMismatches };
-  }, [pendingImport.parsed]);
+  }, [effectiveRows]);
 
   const handleToggleArchParam = (index: number) => {
     setArchParams((prev) =>
@@ -53,7 +73,8 @@ export function ImportPreviewModal({
   };
 
   const handleImport = () => {
-    onImport(archParams.filter((p) => p.accepted));
+    const hasOverrides = Object.keys(uomOverrides).length > 0;
+    onImport(archParams.filter((p) => p.accepted), hasOverrides ? effectiveRows : undefined);
   };
 
   return (
@@ -117,6 +138,9 @@ export function ImportPreviewModal({
           {stage === "preview" ? (
             <PreviewStage
               pendingImport={pendingImport}
+              effectiveRows={effectiveRows}
+              uomOverrides={uomOverrides}
+              setUomOverrides={setUomOverrides}
               stats={stats}
               archParams={archParams}
               onToggleArchParam={handleToggleArchParam}
@@ -178,12 +202,18 @@ export function ImportPreviewModal({
 
 function PreviewStage({
   pendingImport,
+  effectiveRows,
+  uomOverrides,
+  setUomOverrides,
   stats,
   archParams,
   onToggleArchParam,
   onSheetChange,
 }: {
   pendingImport: PendingImport;
+  effectiveRows: ProcessedTakeoffRow[];
+  uomOverrides: Record<number, string>;
+  setUomOverrides: React.Dispatch<React.SetStateAction<Record<number, string>>>;
   stats: { total: number; matched: number; unmapped: number; uomMismatches: number };
   archParams: ArchParamSuggestion[];
   onToggleArchParam: (index: number) => void;
@@ -291,7 +321,10 @@ function PreviewStage({
                   Qty
                 </th>
                 <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  UOM
+                  Source UOM
+                </th>
+                <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
+                  Target UOM
                 </th>
                 <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
                   Status
@@ -299,7 +332,7 @@ function PreviewStage({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {pendingImport.parsed.map((row, i) => (
+              {effectiveRows.map((row, i) => (
                 <tr
                   key={i}
                   className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
@@ -316,8 +349,25 @@ function PreviewStage({
                       maximumFractionDigits: 2,
                     })}
                   </td>
-                  <td className="px-4 py-2.5 text-center font-mono text-xs font-bold text-slate-600 dark:text-slate-400">
-                    {row.uom}
+                  <td className="px-4 py-2.5 text-center font-mono text-xs text-slate-500 dark:text-slate-500">
+                    {pendingImport.parsed[i]?.rawQuantities?.[0]?.uom || "—"}
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    {row.isMapped ? (
+                      <select
+                        value={uomOverrides[i] ?? row.uom}
+                        onChange={(e) => setUomOverrides((prev) => ({ ...prev, [i]: e.target.value }))}
+                        className="text-xs font-mono font-bold bg-transparent border border-slate-300 dark:border-slate-600 rounded px-1.5 py-0.5 text-slate-700 dark:text-slate-300 cursor-pointer focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      >
+                        {UOM_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.value}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-mono text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-center">
                     {row.isMapped ? (
