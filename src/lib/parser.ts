@@ -1,6 +1,7 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
 import { evaluateDataFidelity } from "./calculations";
+import { normalizeUom } from "./uom-aliases";
 
 /**
  * Converts a Record<string, string> registry into a Map<string, string>
@@ -71,8 +72,23 @@ export function parseTogalCSV(
     const classification = typeof rawClassification === "string" ? rawClassification.trim() : String(rawClassification || "").trim();
     if (!classification) return null;
 
-    // Direct match first: userRegistry override has priority over globalRegistry override and INITIAL_MAPPING_REGISTRY constant
-    let itemId = userRegistry[classification] || globalRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
+    // Priority 0: Extract embedded cost code from classification string
+    // Matches patterns like "03-0000.002 - Footings" → "03-0000.002"
+    const embeddedCodeMatch = classification.match(/^(\d{2}-\d{4}\.\d{3})\s*-\s*/);
+    const embeddedCode = embeddedCodeMatch?.[1] || "";
+
+    // Resolution chain:
+    // 0. Embedded code extraction (only if code exists in master catalog)
+    // 1. userRegistry exact match
+    // 2. globalRegistry exact match
+    // 3. INITIAL_MAPPING_REGISTRY exact match
+    // 4. Normalized fallback (case-insensitive)
+    let itemId = "";
+    if (embeddedCode && ESTIMATE_ITEMS_MASTER[embeddedCode]) {
+      itemId = embeddedCode;
+    } else {
+      itemId = userRegistry[classification] || globalRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
+    }
 
     // Normalized fallback — single .get() per registry instead of O(N) .find() scans
     if (!itemId) {
@@ -84,9 +100,9 @@ export function parseTogalCSV(
 
     // Normalize Togal wide columns into accessible lookup blocks with clean float parsing
     const measurements = [
-      { qty: parseCleanFloat(normalizedRow.get("quantity 1")), uom: String(normalizedRow.get("quantity1 uom") || "SF") },
-      { qty: parseCleanFloat(normalizedRow.get("quantity 2")), uom: String(normalizedRow.get("quantity2 uom") || "") },
-      { qty: parseCleanFloat(normalizedRow.get("quantity 3")), uom: String(normalizedRow.get("quantity3 uom") || "") },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 1")), uom: normalizeUom(String(normalizedRow.get("quantity1 uom") || "SF")) },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 2")), uom: normalizeUom(String(normalizedRow.get("quantity2 uom") || "")) },
+      { qty: parseCleanFloat(normalizedRow.get("quantity 3")), uom: normalizeUom(String(normalizedRow.get("quantity3 uom") || "")) },
     ];
 
     const targetUom = masterItem?.targetUom || "SF";

@@ -16,6 +16,9 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
+import { SelectCellInput } from "@/components/workspace/SelectCellInput";
+import { PendingImport } from "./useFileIngestion";
+import { ArchParamSuggestion } from "@/lib/archParamDetector";
 import { Project } from "@/types/db";
 import {
   getEstimateLineItems,
@@ -77,7 +80,7 @@ export interface UseTakeoffWorkbookReturn {
   commitCellEdit: (rowId: string, field: keyof ProcessedTakeoffRow, prevValue: string | number | boolean, nextValue: string | number | boolean) => void;
   handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
   commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
-  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<ProcessedTakeoffRow>) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<ProcessedTakeoffRow>) => void;
   handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<ProcessedTakeoffRow>) => void;
   handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
   handleAddCustomColumn: () => void;
@@ -97,6 +100,12 @@ export interface UseTakeoffWorkbookReturn {
   handleExportExcelWorkbook: () => Promise<void>;
   handleUndo: () => void;
   handleRedo: () => void;
+
+  // Import modal
+  pendingImport: PendingImport | null;
+  confirmImport: (archParams: ArchParamSuggestion[]) => void;
+  cancelImport: () => void;
+  reParseWithSheet: (sheetName: string) => Promise<void>;
 }
 const multiSelect = "multiSelect" as "includesString";
 
@@ -199,7 +208,9 @@ export function useTakeoffWorkbook(
 
   const {
     dragActive,
+    pendingImport,
     handleFileUpload, handleDrag, handleDrop,
+    confirmImport, cancelImport, reParseWithSheet,
   } = useFileIngestion(
     projectId, rowsRef, unmappedRef,
     userRegistry, globalRegistry, appendData,
@@ -884,11 +895,66 @@ export function useTakeoffWorkbook(
             header: def.header,
             ...getSizeConfig(def),
             filterFn: multiSelect,
-            cell: (info) => (
-              <div className="text-center text-slate-600 dark:text-slate-400 font-bold uppercase font-mono">
-                {info.getValue()}
-              </div>
-            ),
+            cell: (info) => {
+              const index = info.row.index;
+              const row = info.row.original;
+              const meta = info.table.options.meta!;
+
+              const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "uom";
+              const isEditing = isSelected && meta.selection.isEditing;
+
+              if (isEditing) {
+                const prevUom = row.uom;
+                return (
+                  <SelectCellInput
+                    id={`uom-select-${index}`}
+                    value={row.uom}
+                    className="w-full h-full min-h-[36px] px-1 py-1 bg-transparent border-none rounded-none text-center font-bold uppercase font-mono text-xs outline-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-white cursor-pointer appearance-none"
+                    onCommit={(newUom) => {
+                      meta.handleCellEdit(index, "uom", newUom);
+                      meta.commitCellEdit(row.id, "uom" as keyof ProcessedTakeoffRow, prevUom, newUom);
+                      meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" || e.key === "Tab" || e.key === "Enter") {
+                        meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });
+                      }
+                      meta.handleKeyDown(e as unknown as React.KeyboardEvent<HTMLInputElement>, index, "uom", info.table);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "uom" });
+                    }}
+                  />
+                );
+              }
+
+              return (
+                <div
+                  id={`cell-${row.id}-uom`}
+                  className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center text-center font-bold uppercase font-mono text-xs transition-all outline-none focus:outline-none ${
+                    isSelected
+                      ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative text-slate-900 dark:text-white"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                  onClick={() => {
+                    if (isSelected) {
+                      meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: true });
+                    } else {
+                      meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });
+                    meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "uom" });
+                  }}
+                >
+                  {row.uom}
+                </div>
+              );
+            },
           });
         case "unitPrice": {
           return columnHelper.accessor("unitPrice", {
@@ -1091,6 +1157,10 @@ export function useTakeoffWorkbook(
     handleFileUpload,
     handleDrag,
     handleDrop,
+    pendingImport,
+    confirmImport,
+    cancelImport,
+    reParseWithSheet,
     selection,
     setSelection,
     scrollToRowRef,

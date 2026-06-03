@@ -71,11 +71,16 @@ describe("Operational Expense Defaults", () => {
 });
 
 describe("Division Labels", () => {
-  it("DIVISION_NAMES covers divisions 01-09", () => {
+  it("DIVISION_NAMES covers standard divisions", () => {
     const keys = Object.keys(DIVISION_NAMES);
-    expect(keys).toHaveLength(9);
-    for (let i = 1; i <= 9; i++) {
-      expect(DIVISION_NAMES[String(i).padStart(2, "0")]).toBeDefined();
+    expect(keys).toHaveLength(25);
+    const expectedDivisions = [
+      "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+      "11", "12", "13", "14", "21", "22", "23", "26", "27", "28",
+      "31", "32", "33", "50", "80"
+    ];
+    for (const div of expectedDivisions) {
+      expect(DIVISION_NAMES[div]).toBeDefined();
     }
   });
 

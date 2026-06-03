@@ -178,6 +178,21 @@ export function useCellEditing(
           }
         }
       }
+    } else if (field === "uom") {
+      // UOM change is ROW-LOCAL — no cascade to same-classification rows
+      const newUom = String(value).toUpperCase();
+      row.uom = newUom;
+
+      // Re-match quantity from rawQuantities using normalized comparison
+      // rawQuantities are already normalized at parse time (uom-aliases.ts)
+      const matched = row.rawQuantities.find(
+        (m) => m.uom?.trim().toUpperCase() === newUom
+      );
+      if (matched) {
+        row.matchedQty = matched.qty;
+      }
+      // Recalculate total
+      row.total = row.matchedQty * row.unitPrice;
     }
 
     row.dataFidelity = evaluateDataFidelity(row.matchedQty, row.uom, row.total, threshold, keywords);
@@ -358,6 +373,41 @@ export function useCellEditing(
           nextValue: String(nextValue).trim(),
         },
       };
+    }
+
+    // Build UOM self-cascade: UOM edits are row-local but change matchedQty + total
+    // as side effects. Capture these in cascadeEffects on the SAME row so undo/redo
+    // reverts all three fields atomically (GAP-1 fix).
+    if (field === "uom") {
+      const cloneRows = () => currentRows.map((r) => ({
+        ...r,
+        rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
+        customFields: { ...(r.customFields || {}) },
+      }));
+
+      const simRegistry = { ...userRegistryRef.current };
+
+      // Simulate with prevValue → accurate "before" matchedQty/total
+      const simPrev = cloneRows();
+      applyCellEditDirect(simPrev, idx, field, prevValue as string | number, { ...simRegistry });
+
+      // Simulate with nextValue → accurate "after" matchedQty/total
+      const simNext = cloneRows();
+      applyCellEditDirect(simNext, idx, field, nextValue as string | number, { ...simRegistry });
+
+      cascadeEffects = [{
+        rowId,
+        prevFields: {
+          matchedQty: simPrev[idx].matchedQty,
+          total: simPrev[idx].total,
+          dataFidelity: simPrev[idx].dataFidelity,
+        },
+        nextFields: {
+          matchedQty: simNext[idx].matchedQty,
+          total: simNext[idx].total,
+          dataFidelity: simNext[idx].dataFidelity,
+        },
+      }];
     }
 
     // pushCommand (AGENTS.md guardrail: push before mutation for new edits;

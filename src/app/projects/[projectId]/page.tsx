@@ -78,6 +78,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     handleDeleteColumn, handleRenameColumn,
     insertManualRow, deleteRow, handleToggleCellLock,
     handleFileUpload, handleDrag, handleDrop,
+    pendingImport, confirmImport, cancelImport, reParseWithSheet,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
     handleUndo, handleRedo,
     canUndo, canRedo, undoStackSize, redoStackSize,
@@ -414,6 +415,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             setGlobalFilter={setGlobalFilter}
             selection={selection}
             scrollToRowRef={scrollToRowRef}
+            pendingImport={pendingImport}
+            confirmImport={confirmImport}
+            cancelImport={cancelImport}
+            reParseWithSheet={reParseWithSheet}
+            handleProjectParamChange={handleProjectParamChange as (field: string, value: string | number) => void}
           />
         </ErrorBoundary>
       )}

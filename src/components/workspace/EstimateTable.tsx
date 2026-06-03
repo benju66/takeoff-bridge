@@ -11,11 +11,14 @@ import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "luci
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project } from "@/types/db";
-import { DIVISION_NAMES } from "@/lib/constants";
+import { DIVISION_LABELS } from "@/lib/constants";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
 import { FilterableColumnHeader } from "./FilterableColumnHeader";
+import { ImportPreviewModal } from "./ImportPreviewModal";
+import { PendingImport } from "@/hooks/useFileIngestion";
+import { ArchParamSuggestion } from "@/lib/archParamDetector";
 
 // ---------------------------------------------------------------------------
 // EstimateTable — Step 4 Panel
@@ -67,6 +70,13 @@ interface EstimateTableProps {
   setGlobalFilter: (value: string) => void;
 
   scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
+
+  // Import modal
+  pendingImport: PendingImport | null;
+  confirmImport: (archParams: ArchParamSuggestion[]) => void;
+  cancelImport: () => void;
+  reParseWithSheet: (sheetName: string) => Promise<void>;
+  handleProjectParamChange?: (field: string, value: string | number) => void;
 }
 
 export function EstimateTable({
@@ -101,6 +111,11 @@ export function EstimateTable({
   globalFilter,
   setGlobalFilter,
   scrollToRowRef,
+  pendingImport,
+  confirmImport,
+  cancelImport,
+  reParseWithSheet,
+  handleProjectParamChange,
 }: EstimateTableProps) {
   const {
     subtotal,
@@ -135,13 +150,39 @@ export function EstimateTable({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [handleClickOutside]);
 
-
   // ---------------------------------------------------------------------------
   // Row Virtualization — Build flat item list interleaving dividers & data rows
   // ---------------------------------------------------------------------------
-  type VirtualItem = { type: "divider"; divisionCode: string; label: string } | { type: "row"; row: Row<ProcessedTakeoffRow>; dataIndex: number };
-
+  const [collapsedDivisions, setCollapsedDivisions] = React.useState<Record<string, boolean>>({});
   const tableRows = table.getRowModel().rows;
+
+  // Auto-expand division if user keyboard-navigates into a collapsed division
+  useEffect(() => {
+    if (selection.rowId) {
+      const selectedRow = rows.find(r => r.id === selection.rowId);
+      if (selectedRow) {
+        const division = selectedRow.itemId.split("-")[0];
+        if (division && collapsedDivisions[division]) {
+          setCollapsedDivisions(prev => ({ ...prev, [division]: false }));
+        }
+      }
+    }
+  }, [selection.rowId, rows, collapsedDivisions]);
+
+  const divisionTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    tableRows.forEach((row) => {
+      const itemId = row.original.itemId || "";
+      const currentDivision = itemId.split("-")[0] || "";
+      if (currentDivision) {
+        const rowTotal = (Number(row.original.matchedQty) || 0) * (Number(row.original.unitPrice) || 0);
+        totals[currentDivision] = (totals[currentDivision] || 0) + rowTotal;
+      }
+    });
+    return totals;
+  }, [tableRows]);
+
+  type VirtualItem = { type: "divider"; divisionCode: string; label: string; total: number; isCollapsed: boolean } | { type: "row"; row: Row<ProcessedTakeoffRow>; dataIndex: number };
   const flatItems: VirtualItem[] = useMemo(() => {
     const items: VirtualItem[] = [];
     let lastDivision = "";
@@ -150,13 +191,17 @@ export function EstimateTable({
       const currentDivision = itemId.split("-")[0] || "";
       if (currentDivision && currentDivision !== lastDivision) {
         lastDivision = currentDivision;
-        const divLabel = DIVISION_NAMES[currentDivision] || `DIVISION ${currentDivision}`;
-        items.push({ type: "divider", divisionCode: currentDivision, label: divLabel });
+        const total = divisionTotals[currentDivision] || 0;
+        const isCollapsed = !!collapsedDivisions[currentDivision];
+        const divLabel = DIVISION_LABELS[currentDivision] || `DIVISION ${currentDivision}`;
+        items.push({ type: "divider", divisionCode: currentDivision, label: divLabel, total, isCollapsed });
       }
-      items.push({ type: "row", row, dataIndex: idx });
+      if (!currentDivision || !collapsedDivisions[currentDivision]) {
+        items.push({ type: "row", row, dataIndex: idx });
+      }
     });
     return items;
-  }, [tableRows]);
+  }, [tableRows, collapsedDivisions, divisionTotals]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -188,6 +233,7 @@ export function EstimateTable({
   });
 
   return (
+    <>
     <div className="space-y-6 animate-fade-in">
       {/* Top Ingestion Module Tray */}
       <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -206,10 +252,10 @@ export function EstimateTable({
           <label className="flex flex-col items-center justify-center cursor-pointer select-none">
             <div className="flex items-center gap-2 text-foreground">
               <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
-              <span className="text-xs font-bold uppercase tracking-wider">Ingest / Drop Takeoff CSV</span>
+              <span className="text-xs font-bold uppercase tracking-wider">Import Takeoff Data</span>
             </div>
             <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
-            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+            <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
           </label>
         </div>
 
@@ -519,10 +565,18 @@ export function EstimateTable({
                     if (!item) return null;
 
                     if (item.type === "divider") {
+                      const prefix = item.isCollapsed ? "▶" : "▼";
+                      const formattedTotal = item.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       return (
                         <tr
                           key={`div-header-${item.divisionCode}`}
-                          className="bg-[#3057A6] border-y border-l-4 border-l-transparent border-grid-border font-sans select-none"
+                          onClick={() => {
+                            setCollapsedDivisions((prev) => ({
+                              ...prev,
+                              [item.divisionCode]: !prev[item.divisionCode],
+                            }));
+                          }}
+                          className="bg-[#3057A6] hover:bg-[#284a8c] cursor-pointer border-y border-l-4 border-l-transparent border-grid-border font-sans select-none transition-colors duration-200"
                           style={{
                             display: "flex",
                             position: "absolute",
@@ -534,8 +588,18 @@ export function EstimateTable({
                             transform: `translateY(${virtualRow.start}px)`,
                           }}
                         >
-                          <td colSpan={table.getVisibleFlatColumns().length} className="p-3 border-r border-b border-grid-border text-left font-bold text-white uppercase tracking-wider text-[13px]" style={{ flex: 1 }}>
-                            {item.label}
+                          <td 
+                            colSpan={table.getVisibleFlatColumns().length} 
+                            className="p-3 border-r border-b border-grid-border text-white text-[13px] font-bold uppercase tracking-wider flex items-center justify-between" 
+                            style={{ flex: 1 }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-blue-200 w-4 text-center">{prefix}</span>
+                              <span>{item.label}</span>
+                            </div>
+                            <div className="mr-4">
+                              ${formattedTotal}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -597,7 +661,7 @@ export function EstimateTable({
 
                           const colDef = columnDefs.find(c => c.id === cell.column.id);
                           const isCustom = colDef && colDef.type === "custom";
-                          const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice"].includes(cell.column.id);
+                          const isEditable = isCustom || ["itemId", "description", "matchedQty", "unitPrice", "uom"].includes(cell.column.id);
                           const paddingClass = isEditable ? "p-0" : "p-3";
 
                           // Active cell indicator — 2px blue ring on td wrapper
@@ -784,5 +848,25 @@ export function EstimateTable({
         ))}
       </datalist>
     </div>
+
+      {/* Import Preview Modal */}
+      {pendingImport && (
+        <ImportPreviewModal
+          pendingImport={pendingImport}
+          appendData={appendData}
+          onImport={(archParams) => {
+            confirmImport(archParams);
+            // Apply accepted architectural parameters to project
+            if (handleProjectParamChange) {
+              archParams.forEach((param) => {
+                handleProjectParamChange(param.projectField, param.value);
+              });
+            }
+          }}
+          onClose={cancelImport}
+          onSheetChange={reParseWithSheet}
+        />
+      )}
+    </>
   );
 }

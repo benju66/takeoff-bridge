@@ -10,7 +10,7 @@ import { ProcessedTakeoffRow, GridSelectionState } from "@/types";
 // ---------------------------------------------------------------------------
 
 export interface UseKeyboardNavigationReturn {
-  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<ProcessedTakeoffRow>) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<ProcessedTakeoffRow>) => void;
   handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, columnId: string, table: Table<ProcessedTakeoffRow>) => void;
 }
 
@@ -71,7 +71,7 @@ export function useKeyboardNavigation(
 
     // List of editable columns
     const isColumnEditable = (colId: string) => {
-      return colId.startsWith("custom-") || ["itemId", "description", "matchedQty", "unitPrice"].includes(colId);
+      return colId.startsWith("custom-") || ["itemId", "description", "matchedQty", "unitPrice", "uom"].includes(colId);
     };
 
     // Helper to find column input ID
@@ -81,6 +81,7 @@ export function useKeyboardNavigation(
       if (cId === "description") return `desc-input-${index}`;
       if (cId === "matchedQty") return `qty-input-${index}`;
       if (cId === "unitPrice") return `price-input-${index}`;
+      if (cId === "uom") return `uom-select-${index}`;
       return `cell-${rows[index]?.original.id}-${cId}`;
     };
 
@@ -335,12 +336,13 @@ export function useKeyboardNavigation(
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<ProcessedTakeoffRow>) => {
+  const handleKeyDown = (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<ProcessedTakeoffRow>) => {
     const colMapping: Record<string, string> = {
       code: "itemId",
       desc: "description",
       qty: "matchedQty",
       price: "unitPrice",
+      uom: "uom",
     };
     processGridNavigation(e, rIdx, colMapping[type], table);
   };

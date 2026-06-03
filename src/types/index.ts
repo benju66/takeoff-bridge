@@ -238,7 +238,7 @@ declare module '@tanstack/table-core' {
       rowId: string, field: keyof ProcessedTakeoffRow,
       prev: string | number | boolean, next: string | number | boolean
     ) => void;
-    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price", table: Table<TData>) => void;
+    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<TData>) => void;
     handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TData>) => void;
     handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
     setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
