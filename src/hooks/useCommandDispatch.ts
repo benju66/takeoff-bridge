@@ -87,6 +87,21 @@ export function useCommandDispatch(
             });
           }
         }
+        // Apply moveEffect (forward: remove→insert at toIndex)
+        if (cmd.moveEffect) {
+          setRows((prev) => {
+            const arr = [...prev];
+            const movingRows = cmd.moveEffect!.moves.map(m => {
+              const ri = arr.findIndex(r => r.id === m.rowId);
+              return arr[ri];
+            });
+            const removeIndices = cmd.moveEffect!.moves.map(m => arr.findIndex(r => r.id === m.rowId)).sort((a, b) => b - a);
+            removeIndices.forEach(ri => arr.splice(ri, 1));
+            const insertAt = cmd.moveEffect!.moves[0].toIndex;
+            arr.splice(insertAt, 0, ...movingRows);
+            return arr;
+          });
+        }
         break;
       }
       case "EDIT_CUSTOM_CELL": {
@@ -240,6 +255,25 @@ export function useCommandDispatch(
               return next;
             });
           }
+        }
+        // Apply moveEffect inverse (reverse: remove→insert at fromIndex)
+        if (cmd.moveEffect) {
+          setRows((prev) => {
+            const arr = [...prev];
+            const movingRows = cmd.moveEffect!.moves.map(m => {
+              const ri = arr.findIndex(r => r.id === m.rowId);
+              return arr[ri];
+            });
+            const removeIndices = cmd.moveEffect!.moves.map(m => arr.findIndex(r => r.id === m.rowId)).sort((a, b) => b - a);
+            removeIndices.forEach(ri => arr.splice(ri, 1));
+            // Insert back at original fromIndex (sorted ascending to maintain stable splicing)
+            const sorted = [...cmd.moveEffect!.moves].sort((a, b) => a.fromIndex - b.fromIndex);
+            sorted.forEach((m) => {
+              const row = movingRows.find(r => r.id === m.rowId)!;
+              arr.splice(m.fromIndex, 0, row);
+            });
+            return arr;
+          });
         }
         break;
       }

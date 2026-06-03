@@ -12,6 +12,7 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project } from "@/types/db";
 import { DIVISION_LABELS } from "@/lib/constants";
+import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
@@ -161,7 +162,7 @@ export function EstimateTable({
     if (selection.rowId) {
       const selectedRow = rows.find(r => r.id === selection.rowId);
       if (selectedRow) {
-        const division = selectedRow.itemId.split("-")[0];
+        const division = getDivisionCode(selectedRow.itemId);
         if (division && collapsedDivisions[division]) {
           setCollapsedDivisions(prev => ({ ...prev, [division]: false }));
         }
@@ -173,7 +174,7 @@ export function EstimateTable({
     const totals: Record<string, number> = {};
     tableRows.forEach((row) => {
       const itemId = row.original.itemId || "";
-      const currentDivision = itemId.split("-")[0] || "";
+      const currentDivision = getDivisionCode(itemId);
       if (currentDivision) {
         const rowTotal = (Number(row.original.matchedQty) || 0) * (Number(row.original.unitPrice) || 0);
         totals[currentDivision] = (totals[currentDivision] || 0) + rowTotal;
@@ -188,7 +189,7 @@ export function EstimateTable({
     let lastDivision = "";
     tableRows.forEach((row, idx) => {
       const itemId = row.original.itemId || "";
-      const currentDivision = itemId.split("-")[0] || "";
+      const currentDivision = getDivisionCode(itemId);
       if (currentDivision && currentDivision !== lastDivision) {
         lastDivision = currentDivision;
         const total = divisionTotals[currentDivision] || 0;

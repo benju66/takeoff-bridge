@@ -18,6 +18,7 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { DIVISION_NAMES } from "@/lib/constants";
 import { getGlobalRegistry, saveGlobalRegistry, deleteGlobalRegistry } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
+import { getDivisionCode } from "@/lib/division";
 
 
 interface RegistryRow {
@@ -152,7 +153,7 @@ export default function GlobalRegistryDashboard() {
       .filter(([classification]) => !classification.startsWith("__"))
       .map(([classification, itemId]) => {
       const masterItem = ESTIMATE_ITEMS_MASTER[itemId];
-      const divisionCode = itemId && itemId.length >= 2 ? itemId.substring(0, 2) : "";
+      const divisionCode = getDivisionCode(itemId);
       
       return {
         classification,

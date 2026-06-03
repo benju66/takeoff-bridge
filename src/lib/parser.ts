@@ -130,6 +130,7 @@ export function parseTogalCSV(
       costType: masterItem?.costType || "M",
       dataFidelity,
       embeddedCode: embeddedCode || undefined,
+      source: 'csv_import' as const,
     };
   }).filter((r): r is ProcessedTakeoffRow => r !== null);
 }

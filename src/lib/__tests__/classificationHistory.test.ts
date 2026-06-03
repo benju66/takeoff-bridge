@@ -1,0 +1,144 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Mock Supabase client — intercepts all db.ts calls
+// ---------------------------------------------------------------------------
+const mockInsert = vi.fn();
+const mockEq = vi.fn();
+const mockOrder = vi.fn();
+
+vi.mock("../supabase", () => ({
+  supabase: {
+    from: vi.fn(() => ({
+      insert: mockInsert,
+      select: vi.fn(() => ({
+        eq: mockEq,
+        order: mockOrder,
+      })),
+    })),
+  },
+}));
+
+import {
+  recordClassificationResolution,
+  getClassificationHistory,
+} from "../db";
+
+describe("Classification History — recordClassificationResolution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("inserts a resolution row with all required fields", async () => {
+    mockInsert.mockResolvedValueOnce({ error: null });
+
+    await recordClassificationResolution(
+      "Slab on Grade",
+      "03-3000.001",
+      "project-1",
+      "user",
+      1.0
+    );
+
+    expect(mockInsert).toHaveBeenCalledWith({
+      classification: "Slab on Grade",
+      resolved_code: "03-3000.001",
+      project_id: "project-1",
+      resolved_by: "user",
+      confidence: 1.0,
+    });
+  });
+
+  it("accepts null projectId for global resolutions", async () => {
+    mockInsert.mockResolvedValueOnce({ error: null });
+
+    await recordClassificationResolution(
+      "Brick Veneer",
+      "04-0000.001",
+      null,
+      "global"
+    );
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: null,
+        resolved_by: "global",
+        confidence: 1.0,
+      })
+    );
+  });
+
+  it("defaults confidence to 1.0 when omitted", async () => {
+    mockInsert.mockResolvedValueOnce({ error: null });
+
+    await recordClassificationResolution(
+      "Test",
+      "01-0000",
+      "p1",
+      "seed"
+    );
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ confidence: 1.0 })
+    );
+  });
+
+  it("throws on Supabase error", async () => {
+    mockInsert.mockResolvedValueOnce({
+      error: { message: "DB error" },
+    });
+
+    await expect(
+      recordClassificationResolution("X", "Y", null, "ai")
+    ).rejects.toThrow("Failed to record classification resolution: DB error");
+  });
+});
+
+describe("Classification History — getClassificationHistory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("groups results by resolved_code with count", async () => {
+    const mockData = [
+      { resolved_code: "03-3000.001", resolved_by: "user", confidence: 1.0 },
+      { resolved_code: "03-3000.001", resolved_by: "seed", confidence: 0.8 },
+      { resolved_code: "04-0000.001", resolved_by: "user", confidence: 1.0 },
+    ];
+
+    mockOrder.mockResolvedValueOnce({ data: mockData, error: null });
+    mockEq.mockReturnValueOnce({ order: mockOrder });
+
+    const result = await getClassificationHistory("Slab on Grade");
+
+    expect(result).toHaveLength(2);
+    
+    const group03 = result.find((r) => r.resolvedCode === "03-3000.001");
+    expect(group03).toBeDefined();
+    expect(group03!.count).toBe(2);
+    
+    const group04 = result.find((r) => r.resolvedCode === "04-0000.001");
+    expect(group04).toBeDefined();
+    expect(group04!.count).toBe(1);
+  });
+
+  it("returns empty array when no history exists", async () => {
+    mockOrder.mockResolvedValueOnce({ data: [], error: null });
+    mockEq.mockReturnValueOnce({ order: mockOrder });
+
+    const result = await getClassificationHistory("Unknown Classification");
+    expect(result).toEqual([]);
+  });
+
+  it("throws on Supabase error", async () => {
+    mockOrder.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Network error" },
+    });
+    mockEq.mockReturnValueOnce({ order: mockOrder });
+
+    await expect(
+      getClassificationHistory("Test")
+    ).rejects.toThrow("Failed to fetch classification history: Network error");
+  });
+});

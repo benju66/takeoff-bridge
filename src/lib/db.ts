@@ -83,6 +83,7 @@ function mapLineItemFromRow(row: Record<string, unknown>): ProcessedTakeoffRow {
       ? (row.custom_fields as Record<string, string | number>)
       : {},
     dataFidelity: (row.data_fidelity as 'discrete_unit' | 'macro_lump_sum') || 'discrete_unit',
+    source: (row.source as ProcessedTakeoffRow['source']) || 'template',
   };
 }
 
@@ -309,6 +310,7 @@ export async function saveEstimateLineItems(
     cost_type: row.costType,
     custom_fields: row.customFields || {},
     data_fidelity: row.dataFidelity || 'discrete_unit',
+    source: row.source || 'template',
   }));
 
   const { error } = await supabase.rpc("save_estimate_line_items", {
@@ -502,6 +504,169 @@ export async function saveProjectLockedCells(
     console.error("Failed to save project locked cells", error);
     throw new Error(`Failed to save project locked cells: ${error.message}`);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Classification History (AI Training Data Pipeline)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Records a classification → cost code resolution event.
+ * Each call inserts an immutable training observation.
+ * Fire-and-forget callers should swallow errors — training data loss is non-critical.
+ */
+export async function recordClassificationResolution(
+  classification: string,
+  resolvedCode: string,
+  projectId: string | null,
+  resolvedBy: 'user' | 'global' | 'seed' | 'ai',
+  confidence: number = 1.0
+): Promise<void> {
+  const { error } = await supabase.from("classification_history").insert({
+    classification,
+    resolved_code: resolvedCode,
+    project_id: projectId,
+    resolved_by: resolvedBy,
+    confidence,
+  });
+
+  if (error) {
+    console.error("Failed to record classification resolution:", error);
+    throw new Error(`Failed to record classification resolution: ${error.message}`);
+  }
+}
+
+/**
+ * Retrieves all historical resolutions for a classification string.
+ * Groups by resolved_code with count for AI confidence scoring.
+ */
+export async function getClassificationHistory(
+  classification: string
+): Promise<{ resolvedCode: string; resolvedBy: string; confidence: number; count: number }[]> {
+  const { data, error } = await supabase
+    .from("classification_history")
+    .select("resolved_code, resolved_by, confidence")
+    .eq("classification", classification)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch classification history for "${classification}"`, error);
+    throw new Error(`Failed to fetch classification history: ${error.message}`);
+  }
+
+  // Group by resolved_code and count occurrences
+  const groups = new Map<string, { resolvedBy: string; confidence: number; count: number }>();
+  for (const row of data || []) {
+    const code = row.resolved_code as string;
+    const existing = groups.get(code);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.set(code, {
+        resolvedBy: row.resolved_by as string,
+        confidence: Number(row.confidence) || 1.0,
+        count: 1,
+      });
+    }
+  }
+
+  return Array.from(groups.entries()).map(([resolvedCode, data]) => ({
+    resolvedCode,
+    resolvedBy: data.resolvedBy,
+    confidence: data.confidence,
+    count: data.count,
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Estimate Snapshots (Version History / Milestones)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Creates a frozen snapshot of the current estimate state.
+ * Fire-and-forget callers should swallow errors — snapshot loss is non-critical.
+ */
+export async function createEstimateSnapshot(
+  projectId: string,
+  lineItems: ProcessedTakeoffRow[],
+  snapshotType: 'auto' | 'manual' | 'pre_import' | 'milestone',
+  label?: string,
+  summary?: Record<string, number>,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  const { error } = await supabase.from("estimate_snapshots").insert({
+    project_id: projectId,
+    snapshot_type: snapshotType,
+    label: label || '',
+    line_items: lineItems,
+    summary: summary || {},
+    metadata: metadata || {},
+  });
+
+  if (error) {
+    console.error("Failed to create estimate snapshot:", error);
+    throw new Error(`Failed to create estimate snapshot: ${error.message}`);
+  }
+}
+
+/**
+ * Retrieves snapshot metadata for a project (lightweight listing).
+ * Does NOT include full line_items — use getSnapshotDetail() for that.
+ */
+export async function getEstimateSnapshots(
+  projectId: string
+): Promise<{ id: string; snapshotAt: string; snapshotType: string; label: string; itemCount: number }[]> {
+  const { data, error } = await supabase
+    .from("estimate_snapshots")
+    .select("id, snapshot_at, snapshot_type, label, line_items")
+    .eq("project_id", projectId)
+    .order("snapshot_at", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch snapshots for project ${projectId}`, error);
+    throw new Error(`Failed to fetch snapshots: ${error.message}`);
+  }
+
+  return (data || []).map((row) => ({
+    id: row.id as string,
+    snapshotAt: row.snapshot_at as string,
+    snapshotType: row.snapshot_type as string,
+    label: (row.label as string) || '',
+    itemCount: Array.isArray(row.line_items) ? row.line_items.length : 0,
+  }));
+}
+
+/**
+ * Retrieves a single snapshot's full detail including line items.
+ * Summary is returned from stored value — if empty, caller can recompute
+ * via computeTakeoffSummary(lineItems, ...).
+ */
+export async function getSnapshotDetail(
+  snapshotId: string
+): Promise<{ lineItems: ProcessedTakeoffRow[]; summary: Record<string, number> } | null> {
+  const { data, error } = await supabase
+    .from("estimate_snapshots")
+    .select("line_items, summary")
+    .eq("id", snapshotId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Failed to fetch snapshot detail ${snapshotId}`, error);
+    throw new Error(`Failed to fetch snapshot detail: ${error.message}`);
+  }
+
+  if (!data) return null;
+
+  // Map raw JSONB rows back through the standard line item mapper
+  const rawItems = Array.isArray(data.line_items) ? data.line_items : [];
+  const lineItems = rawItems.map((item: Record<string, unknown>) => mapLineItemFromRow(item));
+
+  return {
+    lineItems,
+    summary: (data.summary != null && typeof data.summary === "object" && !Array.isArray(data.summary))
+      ? (data.summary as Record<string, number>)
+      : {},
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════

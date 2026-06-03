@@ -108,6 +108,7 @@ CREATE TABLE estimate_line_items (
   cost_type TEXT NOT NULL DEFAULT 'M',
   custom_fields JSONB DEFAULT '{}',
   data_fidelity data_fidelity_type NOT NULL DEFAULT 'discrete_unit',
+  source TEXT NOT NULL DEFAULT 'template',
   PRIMARY KEY (project_id, id)
 );
 
@@ -172,7 +173,7 @@ BEGIN
     id, project_id, sort_order, classification, item_id,
     procore_parent_code, description, matched_qty, uom,
     unit_price, total, is_mapped, raw_quantities, cost_type,
-    custom_fields, data_fidelity
+    custom_fields, data_fidelity, source
   )
   SELECT
     item->>'id',
@@ -190,10 +191,64 @@ BEGIN
     COALESCE(item->'raw_quantities', '[]'::JSONB),
     COALESCE(item->>'cost_type', 'M'),
     COALESCE(item->'custom_fields', '{}'::JSONB),
-    COALESCE(item->>'data_fidelity', 'discrete_unit')::data_fidelity_type
+    COALESCE(item->>'data_fidelity', 'discrete_unit')::data_fidelity_type,
+    COALESCE(item->>'source', 'template')
   FROM jsonb_array_elements(p_items) AS item;
 END;
 $$;
+
+-- ═════════════════════════════════════════════════════════════════════
+-- Table 8: classification_history (AI training data pipeline)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Records every classification → cost code resolution for future
+-- AI-driven auto-mapping. Each row is an immutable training observation.
+-- ═════════════════════════════════════════════════════════════════════
+
+CREATE TABLE classification_history (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  classification  TEXT NOT NULL,
+  resolved_code   TEXT NOT NULL,
+  project_id      TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  resolved_by     TEXT NOT NULL DEFAULT 'seed',
+  confidence      NUMERIC DEFAULT 1.0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_classification_history_lookup
+  ON classification_history (classification, resolved_code);
+
+CREATE INDEX idx_classification_history_project
+  ON classification_history (project_id);
+
+ALTER TABLE classification_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_full_access" ON classification_history FOR ALL USING (true) WITH CHECK (true);
+
+-- ═════════════════════════════════════════════════════════════════════
+-- Table 9: estimate_snapshots (Version history / milestones)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Frozen copies of estimate state at explicit user milestones
+-- and automatic pre-import checkpoints. Provides undo-beyond-session
+-- capability and clean training data for price prediction models.
+-- ═════════════════════════════════════════════════════════════════════
+
+CREATE TABLE estimate_snapshots (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  snapshot_type  TEXT NOT NULL DEFAULT 'auto',
+  label          TEXT DEFAULT '',
+  line_items     JSONB NOT NULL,
+  summary        JSONB DEFAULT '{}',
+  metadata       JSONB DEFAULT '{}'
+);
+
+CREATE INDEX idx_snapshots_project
+  ON estimate_snapshots (project_id, snapshot_at DESC);
+
+ALTER TABLE estimate_snapshots ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_full_access" ON estimate_snapshots FOR ALL USING (true) WITH CHECK (true);
 
 -- ═════════════════════════════════════════════════════════════════════
 -- Trigger: Auto-provision Tenant + User Profile on Auth Signup

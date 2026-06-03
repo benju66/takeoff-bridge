@@ -266,6 +266,7 @@ export function useTakeoffWorkbook(
         rawQuantities: [],
         costType: item.costType,
         customFields: {},
+        source: 'template' as const,
       };
     });
   };
@@ -394,6 +395,7 @@ export function useTakeoffWorkbook(
       rawQuantities: [],
       costType: "M",
       customFields: {},
+      source: 'manual' as const,
     };
     const insertIdx = direction === "above" ? targetIndex : targetIndex + 1;
 

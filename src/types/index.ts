@@ -35,6 +35,8 @@ export interface ProcessedTakeoffRow {
   dataFidelity?: 'discrete_unit' | 'macro_lump_sum';
   /** Cost code extracted from classification string (e.g., "03-0000.002" from "03-0000.002 - Footings") */
   embeddedCode?: string;
+  /** Provenance tracking: where this row originated */
+  source?: 'template' | 'csv_import' | 'manual' | 'ai_suggestion';
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,10 @@ export interface EditCellCommand {
   registryDelta?: {
     projectRegistry?: { key: string; prevValue: string; nextValue: string };
     globalRegistry?: { key: string; prevValue: string; nextValue: string };
+  };
+  /** Row relocation when an itemId edit changes the division — enables atomic undo */
+  moveEffect?: {
+    moves: { rowId: string; fromIndex: number; toIndex: number }[];
   };
 }
 

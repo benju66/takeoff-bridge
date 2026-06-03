@@ -5,7 +5,7 @@ import { parseTogalCSV } from "@/lib/parser";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { parseTogalXLSX, XlsxParseResult } from "@/lib/xlsx-reader";
 import { detectArchParams, ArchParamSuggestion } from "@/lib/archParamDetector";
-import { saveProjectRegistry } from "@/lib/db";
+import { saveProjectRegistry, recordClassificationResolution, createEstimateSnapshot } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
 // Pending Import state — holds parsed data between preview and confirm
@@ -138,6 +138,7 @@ export function useFileIngestion(
           rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
           isMapped: r.isMapped,
           dataFidelity: r.dataFidelity,
+          source: r.source || 'template',
         },
       });
     }
@@ -188,6 +189,7 @@ export function useFileIngestion(
           rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
           isMapped: r.isMapped,
           dataFidelity: r.dataFidelity,
+          source: r.source || 'csv_import',
         },
       });
     }
@@ -201,9 +203,21 @@ export function useFileIngestion(
       nextUnmapped: unmappedList,
     });
 
+    // Fire-and-forget: create pre-import snapshot before applying merge
+    createEstimateSnapshot(projectId, currentRows, 'pre_import', 'Before CSV import')
+      .catch(() => { /* silent — snapshot loss is non-critical */ });
+
+    // Fire-and-forget: batch-record classification resolutions for AI training
+    parsed
+      .filter(r => r.isMapped && r.classification && r.itemId)
+      .forEach(r => {
+        recordClassificationResolution(r.classification, r.itemId, projectId, 'seed')
+          .catch(() => { /* silent — training data loss is non-critical */ });
+      });
+
     setUnmappedTakeoffClassifications(unmappedList);
     setRows(updatedRows);
-  }, [appendData, commandHistory, globalRegistry, rowsRef, setRows, setUnmappedTakeoffClassifications, unmappedRef]);
+  }, [appendData, commandHistory, globalRegistry, projectId, rowsRef, setRows, setUnmappedTakeoffClassifications, unmappedRef]);
 
   // ---------------------------------------------------------------------------
   // Stage the import — parse file and set pendingImport for modal preview

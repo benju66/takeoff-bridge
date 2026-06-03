@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { ProcessedTakeoffRow, WorkbookCommand } from "@/types";
+import { ProcessedTakeoffRow, WorkbookCommand, EditCellCommand } from "@/types";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
+import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
+import { getDivisionCode } from "@/lib/division";
 
 // ---------------------------------------------------------------------------
 // useCellEditing — Cell editing state, handlers, and cascade logic
@@ -410,6 +411,84 @@ export function useCellEditing(
       }];
     }
 
+    // --- Division-aware row relocation (moveEffect) ---
+    // When an itemId edit changes the division code, relocate the edited row
+    // (and cascade siblings) to be contiguous with the target division group.
+    // Paste operations do NOT trigger relocation (by design — see deep review §4).
+    let moveEffect: EditCellCommand['moveEffect'] = undefined;
+
+    if (field === "itemId") {
+      const oldDiv = getDivisionCode(String(prevValue));
+      const newDiv = getDivisionCode(String(nextValue));
+
+      if (oldDiv && newDiv && oldDiv !== newDiv) {
+        // Collect all row IDs that need to move (edited row + cascade siblings)
+        const movingRowIds = new Set<string>([rowId]);
+        if (cascadeEffects) {
+          cascadeEffects.forEach(ce => movingRowIds.add(ce.rowId));
+        }
+
+        // Find the insertion point: after the last row in the target division
+        // that is NOT one of the rows we're about to move
+        const currentRows = rowsRef.current;
+        let targetInsertIndex = -1;
+        for (let i = currentRows.length - 1; i >= 0; i--) {
+          if (!movingRowIds.has(currentRows[i].id) && getDivisionCode(currentRows[i].itemId) === newDiv) {
+            targetInsertIndex = i + 1;
+            break;
+          }
+        }
+
+        // If no existing rows in target division, find where it should be inserted
+        // by scanning for the first division that sorts after newDiv
+        if (targetInsertIndex === -1) {
+          for (let i = 0; i < currentRows.length; i++) {
+            const rowDiv = getDivisionCode(currentRows[i].itemId);
+            if (rowDiv && rowDiv > newDiv && !movingRowIds.has(currentRows[i].id)) {
+              targetInsertIndex = i;
+              break;
+            }
+          }
+          // If still not found (e.g., new division is largest), append after everything
+          if (targetInsertIndex === -1) {
+            targetInsertIndex = currentRows.length;
+          }
+        }
+
+        // Build the moves array: record from/to for each moving row
+        const moves: { rowId: string; fromIndex: number; toIndex: number }[] = [];
+        const movingIndices: { rowId: string; fromIndex: number }[] = [];
+        currentRows.forEach((r, i) => {
+          if (movingRowIds.has(r.id)) {
+            movingIndices.push({ rowId: r.id, fromIndex: i });
+          }
+        });
+
+        // Calculate the effective to-index for each row after all removes
+        // We process removes from highest index to lowest to keep indices stable
+        const sortedByIndex = [...movingIndices].sort((a, b) => a.fromIndex - b.fromIndex);
+        let insertOffset = targetInsertIndex;
+        // Adjust insert offset: for each moving row that's before the insert point,
+        // the insert point shifts down by 1 after removal
+        const removedBeforeTarget = sortedByIndex.filter(m => m.fromIndex < targetInsertIndex).length;
+        insertOffset -= removedBeforeTarget;
+
+        sortedByIndex.forEach((m, i) => {
+          moves.push({
+            rowId: m.rowId,
+            fromIndex: m.fromIndex,
+            toIndex: insertOffset + i,
+          });
+        });
+
+        // Only create moveEffect if rows actually move
+        const hasActualMoves = moves.some(m => m.fromIndex !== m.toIndex);
+        if (hasActualMoves) {
+          moveEffect = { moves };
+        }
+      }
+    }
+
     // pushCommand (AGENTS.md guardrail: push before mutation for new edits;
     // here handleCellEdit already applied the edit on each keystroke,
     // so we push the full delta for undo/redo)
@@ -421,7 +500,26 @@ export function useCellEditing(
       nextValue,
       cascadeEffects,
       registryDelta,
+      moveEffect,
     });
+
+    // Apply moveEffect to the current rows
+    if (moveEffect) {
+      const current = [...rowsRef.current];
+      // Extract moving rows (by ID, preserving order)
+      const movingRows = moveEffect.moves.map(m => {
+        const ri = current.findIndex(r => r.id === m.rowId);
+        return current[ri];
+      });
+      // Remove all moving rows first (highest index first to keep stable indices)
+      const removeIndices = moveEffect.moves.map(m => current.findIndex(r => r.id === m.rowId)).sort((a, b) => b - a);
+      removeIndices.forEach(ri => current.splice(ri, 1));
+      // Insert at the computed target position
+      const insertAt = moveEffect.moves[0].toIndex;
+      current.splice(insertAt, 0, ...movingRows);
+      setRows(current);
+    }
+
     // Flush deferred registry writes to React state + DB on commit (Fix 1A)
     // This ensures setUserRegistry/setGlobalRegistry only fire once on blur,
     // not on every keystroke, preventing column useMemo invalidation.
@@ -432,8 +530,12 @@ export function useCellEditing(
       saveProjectRegistry(projectId, stagedUserReg).catch((err) => console.error('Registry persist failed:', err));
       setGlobalRegistry(stagedGlobalReg);
       saveGlobalRegistry(stagedGlobalReg).catch((err) => console.error('Global registry persist failed:', err));
+
+      // Record classification resolution for AI training data pipeline
+      recordClassificationResolution(classification, String(nextValue).trim(), projectId, 'user')
+        .catch(() => { /* silent — training data loss is non-critical */ });
     }
-  }, [commandHistory, projectId, setUserRegistry, setGlobalRegistry, applyCellEditDirect, globalRegistryRef, rowsRef, userRegistryRef]);
+  }, [commandHistory, projectId, setUserRegistry, setGlobalRegistry, setRows, applyCellEditDirect, globalRegistryRef, rowsRef, userRegistryRef]);
 
   /** Flush any active editing buffer — commit the pending value before switching cells (Amendment E) */
   const flushEditingBuffer = useCallback(() => {

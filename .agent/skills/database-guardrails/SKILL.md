@@ -30,7 +30,7 @@ Execute these enforcement checks whenever a proposed modification touches Supaba
   2. Write the corresponding `ALTER TABLE` / `CREATE FUNCTION` migration statement.
   3. Update `db.ts` mapper functions to handle the new fields.
   4. Present the migration plan to the user for approval before execution.
-* **CASCADE Awareness**: All child tables (`project_estimates`, `estimate_line_items`, `project_column_defs`, `project_locked_cells`, `project_registries`) use `ON DELETE CASCADE` from `projects`. Never manually delete child records — delete the parent `projects` row and let PostgreSQL handle cascading cleanup.
+* **CASCADE Awareness**: Child tables with `ON DELETE CASCADE` from `projects`: `project_estimates`, `estimate_line_items`, `project_column_defs`, `project_locked_cells`, `project_registries`, `estimate_snapshots`. The `classification_history` table uses `ON DELETE SET NULL` on `project_id` — deleting a project preserves training data with a null project reference. Never manually delete child records — delete the parent `projects` row and let PostgreSQL handle cleanup.
 
 ## 5. Debounce & Concurrency
 
@@ -50,3 +50,22 @@ Execute these enforcement checks whenever a proposed modification touches Supaba
 
 * **No Speculative Writes**: Do not invent, alter, or guess financial totals, markup percentages, or compounding formulas in the database layer. The calculation engine (`src/lib/calculations.ts`) is the sole authority for deriving `subtotal`, `generalLiability`, `fee`, and `totalCost`.
 * **Read-Only Totals**: The `project_estimates` table stores computed totals for persistence only. These values are recalculated on every edit cycle by the calculation engine and then persisted. Never use stored totals as inputs to further calculations.
+
+## 8. Classification History Integrity
+
+* **Append-Only**: The `classification_history` table is an immutable training data store. Agents must NEVER issue `UPDATE` or `DELETE` statements against this table. Each row is a permanent observation.
+* **Write Path**: All inserts MUST route through `recordClassificationResolution()` in `db.ts`. Direct `.from('classification_history').insert()` calls outside `db.ts` are forbidden.
+* **Fire-and-Forget**: All calls to `recordClassificationResolution()` from hooks MUST include `.catch(() => {})`. Training data loss is non-critical and must never block user workflows or cause unhandled promise rejections.
+* **Resolution Sources**: The `resolved_by` column MUST be one of: `'user'` (manual itemId edit), `'global'` (global registry resolution), `'seed'` (CSV import auto-mapping), `'ai'` (future AI classification).
+
+## 9. Snapshot Immutability
+
+* **Append-Only**: The `estimate_snapshots` table stores frozen state captures. Agents must NEVER issue `UPDATE` or `DELETE` statements against this table.
+* **Write Path**: All inserts MUST route through `createEstimateSnapshot()` in `db.ts`. Direct `.from('estimate_snapshots').insert()` calls outside `db.ts` are forbidden.
+* **Fire-and-Forget**: All calls to `createEstimateSnapshot()` from hooks MUST include `.catch(() => {})`. Snapshot failure must never block imports or user actions.
+* **Snapshot Types**: The `snapshot_type` column MUST be one of: `'auto'`, `'manual'`, `'pre_import'`, `'milestone'`.
+
+## 10. Source Provenance
+
+* **Required Column**: The `source` column on `estimate_line_items` tracks row origin. Valid values: `'template'` (default initialization), `'csv_import'` (parser output), `'manual'` (context menu insertion).
+* **Undo State**: The `source` field MUST be included in `MERGE_TAKEOFF_DATA` command `prevRowStates` and `nextRowStates` captures to ensure Ctrl+Z correctly restores original provenance tags.

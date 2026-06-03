@@ -132,11 +132,11 @@ StringCellInput.onBlur
 ```
 
 ### Cascade Rules (applyCellEditDirect)
-| Field Edited | Fields Cascaded to Sibling Rows (same classification) |
-|---|---|
-| `itemId` | 9 fields: itemId, description, procoreParentCode, unitPrice, uom, costType, matchedQty, total, isMapped |
-| `description` | 1 field: description |
-| `unitPrice` | 2 fields: unitPrice, total |
+| Field Edited | Fields Cascaded to Sibling Rows (same classification) | Side Effects |
+|---|---|---|
+| `itemId` | 9 fields: itemId, description, procoreParentCode, unitPrice, uom, costType, matchedQty, total, isMapped | `moveEffect`: if division changes (via `getDivisionCode()`), row group relocates to new division boundary. Classification history recorded via `recordClassificationResolution()`. |
+| `description` | 1 field: description | — |
+| `unitPrice` | 2 fields: unitPrice, total | — |
 
 ### Revert (Escape)
 ```
@@ -247,6 +247,7 @@ Active row (matching `selection.rowId`): `bg-blue-50/60 dark:bg-blue-950/40` + `
 - **Overscan**: 10 rows
 - **Row height estimate**: 42px data rows, 52px dividers
 - **Key function**: `getItemKey` returns `divider-{code}` or `row-{rowId}`
+- **Division derivation**: Division codes for divider rows are extracted via `getDivisionCode()` from `src/lib/division.ts` (NOT inline `split` or `substring`). Division labels come from `DIVISION_NAMES` in `src/lib/constants.ts`.
 
 ### Scroll-to-Row Pattern
 ```typescript
@@ -265,9 +266,10 @@ focusWithScroll(cellId, rowIndex, scrollToRowRef);
 
 - **Stack**: `useCommandHistory` maintains `undoStack` and `redoStack` of `WorkbookCommand` objects
 - **Global listener**: `page.tsx` registers `Ctrl+Z` / `Ctrl+Y` on `document`, calls `e.preventDefault()` to suppress native input undo
-- **Command types**: `EDIT_CELL`, `EDIT_CUSTOM_CELL`, `PASTE`, `INSERT_ROW`, `DELETE_ROW`, `TOGGLE_LOCK`, `ADD_COLUMN`, `DELETE_COLUMN`, `UPDATE_COLUMN`, `MERGE_TAKEOFF_DATA`
+- **Command types**: `EDIT_CELL` (with optional `moveEffect` for division-aware row relocation), `EDIT_CUSTOM_CELL`, `PASTE`, `INSERT_ROW`, `DELETE_ROW`, `TOGGLE_LOCK`, `ADD_COLUMN`, `DELETE_COLUMN`, `UPDATE_COLUMN`, `MERGE_TAKEOFF_DATA`
 - **Cascade capture**: `commitCellEdit` simulates cascade in both directions (prev→next) to produce timing-independent undo snapshots
-- **Import merge**: `MERGE_TAKEOFF_DATA` captures per-row `prevRowStates`/`nextRowStates` diffs for full undo/redo of bulk import operations
+- **Move effect**: When an `itemId` edit changes the division code, `moveEffect` captures `{ moves: [{ rowId, fromIndex, toIndex }] }` on the `EDIT_CELL` command. Forward applies remove→insert at `toIndex`; inverse reverses to `fromIndex`. Single Ctrl+Z undoes both edit and relocation.
+- **Import merge**: `MERGE_TAKEOFF_DATA` captures per-row `prevRowStates`/`nextRowStates` diffs (including `source` provenance) for full undo/redo of bulk import operations
 
 ---
 

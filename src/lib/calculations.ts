@@ -4,6 +4,7 @@
  */
 
 import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation } from "@/types";
+import { getDivisionCode } from "./division";
 import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
@@ -250,8 +251,8 @@ export function computeDivisionBreakdown(
   const divisionTotals: Record<string, number> = {};
 
   rows.forEach((row) => {
-    const code = row.itemId && row.itemId.length >= 2 ? row.itemId.substring(0, 2) : "";
-    const division = /^\d{2}$/.test(code) ? code : "Unmapped";
+    const code = getDivisionCode(row.itemId);
+    const division = code || "Unmapped";
     divisionTotals[division] = (divisionTotals[division] || 0) + (row.matchedQty * row.unitPrice);
   });
 
