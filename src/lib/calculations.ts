@@ -154,10 +154,13 @@ export function computeSiteOperations(
 
 export interface TakeoffSummary {
   subtotal: number;
-  overheadMarkup: number;
-  generalLiability: number;
-  contractorFee: number;
-  salesTax: number;
+  constructionContingency: number;
+  designContingency: number;
+  buildersRisk: number;
+  specialInsurance: number;
+  glInsurance: number;
+  bond: number;
+  fee: number;
   totalEstimatedCost: number;
   costPerSf: number;
   costPerUnit: number;
@@ -169,37 +172,45 @@ export interface TakeoffSummary {
  * AMENDMENT (BUG-1): Subtotal is computed as SUM(matchedQty × unitPrice)
  * per row, NOT from the cached row.total field, to prevent silent drift
  * between UI subtotal and exported subtotal.
+ *
+ * All 7 modifier rates are decimals (e.g., 0.05 = 5%), matching the
+ * company Excel template's "STEP 1 - PROJECT DATA" cells G18–G24.
  */
 export function computeTakeoffSummary(
   rows: ProcessedTakeoffRow[],
   squareFootage: number,
   unitCount: number,
   rates?: {
-    overheadRate: number;
+    constructionContingencyRate: number;
+    designContingencyRate: number;
+    buildersRiskRate: number;
+    specialInsuranceRate: number;
+    glInsuranceRate: number;
+    bondRate: number;
     feeRate: number;
-    liabilityRate: number;
-    taxRate: number;
     roundingRule: string;
   }
 ): TakeoffSummary {
   const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
 
-  const overheadRate = rates?.overheadRate ?? 10;
-  const feeRate = rates?.feeRate ?? 5;
-  const liabilityRate = rates?.liabilityRate ?? 1;
-  const taxRate = rates?.taxRate ?? 8.25;
+  // Extract rates (decimals) with template defaults
+  const ccRate = rates?.constructionContingencyRate ?? 0;
+  const dcRate = rates?.designContingencyRate ?? 0;
+  const brRate = rates?.buildersRiskRate ?? 0;
+  const siRate = rates?.specialInsuranceRate ?? 0;
+  const glRate = rates?.glInsuranceRate ?? 0.01;
+  const bondRate = rates?.bondRate ?? 0;
+  const feeRate = rates?.feeRate ?? 0.05;
   const roundingRule = rates?.roundingRule ?? "dollar";
 
-  // 1. Material Subtotal (for sales tax modifier)
-  const materialSubtotal = rows
-    .filter((r) => (r.costType || "M").toUpperCase() === "M")
-    .reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
-
-  // 2. Compute raw modifier values
-  const rawOverhead = subtotal * (overheadRate / 100);
-  const rawLiability = subtotal * (liabilityRate / 100);
-  const rawFee = subtotal * (feeRate / 100);
-  const rawTax = materialSubtotal * (taxRate / 100);
+  // Compute raw modifier values (subtotal × rate)
+  const rawCC = subtotal * ccRate;
+  const rawDC = subtotal * dcRate;
+  const rawBR = subtotal * brRate;
+  const rawSI = subtotal * siRate;
+  const rawGL = subtotal * glRate;
+  const rawBond = subtotal * bondRate;
+  const rawFee = subtotal * feeRate;
 
   // Helper function for rounding
   const applyRounding = (val: number): number => {
@@ -213,24 +224,31 @@ export function computeTakeoffSummary(
     return val; // "none"
   };
 
-  // 3. Apply rounding to each component for visual sum alignment (Zero Budget Leaks)
+  // Apply rounding to each component for visual sum alignment (Zero Budget Leaks)
   const roundedSubtotal = applyRounding(subtotal);
-  const overheadMarkup = applyRounding(rawOverhead);
-  const generalLiability = applyRounding(rawLiability);
-  const contractorFee = applyRounding(rawFee);
-  const salesTax = applyRounding(rawTax);
+  const constructionContingency = applyRounding(rawCC);
+  const designContingency = applyRounding(rawDC);
+  const buildersRisk = applyRounding(rawBR);
+  const specialInsurance = applyRounding(rawSI);
+  const glInsurance = applyRounding(rawGL);
+  const bond = applyRounding(rawBond);
+  const fee = applyRounding(rawFee);
 
-  // 4. Total Estimated Cost is the exact sum of the rounded components
-  const totalEstimatedCost = roundedSubtotal + overheadMarkup + generalLiability + contractorFee + salesTax;
+  // Total Estimated Cost is the exact sum of the rounded components
+  const totalEstimatedCost = roundedSubtotal + constructionContingency + designContingency
+    + buildersRisk + specialInsurance + glInsurance + bond + fee;
   const costPerSf = totalEstimatedCost / (squareFootage || 1);
   const costPerUnit = totalEstimatedCost / (unitCount || 1);
 
   return {
     subtotal: roundedSubtotal,
-    overheadMarkup,
-    generalLiability,
-    contractorFee,
-    salesTax,
+    constructionContingency,
+    designContingency,
+    buildersRisk,
+    specialInsurance,
+    glInsurance,
+    bond,
+    fee,
     totalEstimatedCost,
     costPerSf,
     costPerUnit,

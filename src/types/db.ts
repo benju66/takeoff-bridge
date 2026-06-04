@@ -17,10 +17,13 @@ export interface Project {
   expectedFinish?: string;
   tenantId?: string;
   createdBy?: string;
-  overheadRate?: number;
+  constructionContingencyRate?: number;
+  designContingencyRate?: number;
+  buildersRiskRate?: number;
+  specialInsuranceRate?: number;
+  glInsuranceRate?: number;
+  bondRate?: number;
   feeRate?: number;
-  liabilityRate?: number;
-  taxRate?: number;
   roundingRule?: string;
 }
 
@@ -28,7 +31,12 @@ export interface ProjectEstimate {
   id?: string;
   projectId: string;
   subtotal: number;
-  generalLiability: number;
+  constructionContingency: number;
+  designContingency: number;
+  buildersRisk: number;
+  specialInsurance: number;
+  glInsurance: number;
+  bond: number;
   fee: number;
   totalCost: number;
   items: ProcessedTakeoffRow[];

@@ -45,8 +45,8 @@
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-grid-border: var(--grid-border);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Century Gothic", "CenturyGothic", "AppleGothic", sans-serif;
+  --font-mono: "Century Gothic", "CenturyGothic", "AppleGothic", sans-serif;
 }
 
 body {

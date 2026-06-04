@@ -101,10 +101,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   const takeoffSummary = React.useMemo(
     () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, {
-      overheadRate: project?.overheadRate ?? 10,
-      feeRate: project?.feeRate ?? 5,
-      liabilityRate: project?.liabilityRate ?? 1,
-      taxRate: project?.taxRate ?? 8.25,
+      constructionContingencyRate: project?.constructionContingencyRate ?? 0,
+      designContingencyRate: project?.designContingencyRate ?? 0,
+      buildersRiskRate: project?.buildersRiskRate ?? 0,
+      specialInsuranceRate: project?.specialInsuranceRate ?? 0,
+      glInsuranceRate: project?.glInsuranceRate ?? 0.01,
+      bondRate: project?.bondRate ?? 0,
+      feeRate: project?.feeRate ?? 0.05,
       roundingRule: project?.roundingRule ?? "dollar"
     }),
     [filteredRows, squareFootage, unitCount, project]

@@ -66,129 +66,154 @@ describe('getMonthsBetween', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('computeTakeoffSummary', () => {
-  it('computes subtotal, GL at 1%, fee at 5%, and total at 1.06x', () => {
+  it('computes subtotal, GL at 1%, fee at 5%, and total correctly', () => {
     const rows = [
       makeRow({ matchedQty: 100, unitPrice: 10 }),
       makeRow({ matchedQty: 200, unitPrice: 5, id: 'row-2', itemId: '05-1000' }),
     ];
     const result = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 0,
-      feeRate: 5,
-      liabilityRate: 1,
-      taxRate: 0,
+      constructionContingencyRate: 0,
+      designContingencyRate: 0,
+      buildersRiskRate: 0,
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0.01,
+      bondRate: 0,
+      feeRate: 0.05,
       roundingRule: "none"
     });
 
     // subtotal = (100 * 10) + (200 * 5) = 2000
     expect(result.subtotal).toBe(2000);
-    expect(result.generalLiability).toBe(2000 * 0.01); // 20
-    expect(result.contractorFee).toBe(2000 * 0.05); // 100
-    expect(result.totalEstimatedCost).toBe(2000 * 1.06); // 2120
+    expect(result.glInsurance).toBe(2000 * 0.01); // 20
+    expect(result.fee).toBe(2000 * 0.05); // 100
+    expect(result.totalEstimatedCost).toBe(2000 + 20 + 100); // 2120
     expect(result.costPerSf).toBeCloseTo(2120 / 1000);
     expect(result.costPerUnit).toBeCloseTo(2120 / 10);
   });
 
-  it('computes dynamic rates, including material-only sales tax', () => {
+  it('computes all 7 modifiers independently', () => {
     const rows = [
-      makeRow({ matchedQty: 100, unitPrice: 10, costType: 'M' }), // Material: 1000
-      makeRow({ matchedQty: 200, unitPrice: 5, costType: 'L', id: 'row-2' }), // Labor: 1000
+      makeRow({ matchedQty: 100, unitPrice: 100 }), // subtotal = 10000
     ];
     const result = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 10,
-      feeRate: 5,
-      liabilityRate: 1.5,
-      taxRate: 8,
+      constructionContingencyRate: 0.03,
+      designContingencyRate: 0.02,
+      buildersRiskRate: 0.005,
+      specialInsuranceRate: 0.0075,
+      glInsuranceRate: 0.01,
+      bondRate: 0.015,
+      feeRate: 0.05,
       roundingRule: "none"
     });
 
-    expect(result.subtotal).toBe(2000);
-    expect(result.overheadMarkup).toBe(2000 * 0.1); // 200
-    expect(result.generalLiability).toBe(2000 * 0.015); // 30
-    expect(result.contractorFee).toBe(2000 * 0.05); // 100
-    expect(result.salesTax).toBe(1000 * 0.08); // 80 (8% of material subtotal 1000)
-    expect(result.totalEstimatedCost).toBe(2000 + 200 + 30 + 100 + 80); // 2410
+    expect(result.subtotal).toBe(10000);
+    expect(result.constructionContingency).toBe(10000 * 0.03);   // 300
+    expect(result.designContingency).toBe(10000 * 0.02);         // 200
+    expect(result.buildersRisk).toBe(10000 * 0.005);             // 50
+    expect(result.specialInsurance).toBe(10000 * 0.0075);        // 75
+    expect(result.glInsurance).toBe(10000 * 0.01);               // 100
+    expect(result.bond).toBe(10000 * 0.015);                     // 150
+    expect(result.fee).toBe(10000 * 0.05);                       // 500
+    expect(result.totalEstimatedCost).toBe(10000 + 300 + 200 + 50 + 75 + 100 + 150 + 500); // 11375
+    expect(result.costPerSf).toBeCloseTo(11375 / 1000);
+    expect(result.costPerUnit).toBeCloseTo(11375 / 10);
   });
 
   it('applies dollar rounding rules to summary components and total', () => {
     const rows = [
-      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // Material: 1025
+      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // subtotal = 1025
     ];
     const result = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 10,       // 102.5 -> rounds to 103
-      feeRate: 5,            // 51.25 -> rounds to 51
-      liabilityRate: 1.25,    // 12.8125 -> rounds to 13
-      taxRate: 8.25,         // 84.5625 -> rounds to 85
+      constructionContingencyRate: 0.10,  // 102.5 -> rounds to 103
+      designContingencyRate: 0.05,        // 51.25 -> rounds to 51
+      buildersRiskRate: 0.0125,           // 12.8125 -> rounds to 13
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0,
+      bondRate: 0,
+      feeRate: 0,
       roundingRule: "dollar"
     });
 
     expect(result.subtotal).toBe(1025);
-    expect(result.overheadMarkup).toBe(103);
-    expect(result.generalLiability).toBe(13);
-    expect(result.contractorFee).toBe(51);
-    expect(result.salesTax).toBe(85);
-    // 1025 + 103 + 13 + 51 + 85 = 1277
-    expect(result.totalEstimatedCost).toBe(1277);
+    expect(result.constructionContingency).toBe(103);
+    expect(result.designContingency).toBe(51);
+    expect(result.buildersRisk).toBe(13);
+    // 1025 + 103 + 51 + 13 = 1192
+    expect(result.totalEstimatedCost).toBe(1192);
   });
 
   it('applies ten and hundred rounding rules to components and total', () => {
     const rows = [
-      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // Material: 1025
+      makeRow({ matchedQty: 100, unitPrice: 10.25, costType: 'M' }), // subtotal = 1025
     ];
-    
+
     // Nearest $10 rounding
     const resultTen = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 10,       // 102.5 -> rounds to 100
-      feeRate: 5,            // 51.25 -> rounds to 50
-      liabilityRate: 1.25,    // 12.8125 -> rounds to 10
-      taxRate: 8.25,         // 84.5625 -> rounds to 80
+      constructionContingencyRate: 0.10,  // 102.5 -> rounds to 100
+      designContingencyRate: 0.05,        // 51.25 -> rounds to 50
+      buildersRiskRate: 0.0125,           // 12.8125 -> rounds to 10
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0,
+      bondRate: 0,
+      feeRate: 0,
       roundingRule: "ten"
     });
     expect(resultTen.subtotal).toBe(1030); // 1025 -> 1030
-    expect(resultTen.overheadMarkup).toBe(100);
-    expect(resultTen.generalLiability).toBe(10);
-    expect(resultTen.contractorFee).toBe(50);
-    expect(resultTen.salesTax).toBe(80);
-    expect(resultTen.totalEstimatedCost).toBe(1030 + 100 + 10 + 50 + 80); // 1270
+    expect(resultTen.constructionContingency).toBe(100);
+    expect(resultTen.designContingency).toBe(50);
+    expect(resultTen.buildersRisk).toBe(10);
+    expect(resultTen.totalEstimatedCost).toBe(1030 + 100 + 50 + 10); // 1190
 
     // Nearest $100 rounding
     const resultHundred = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 10,       // 102.5 -> rounds to 100
-      feeRate: 5,            // 51.25 -> rounds to 100
-      liabilityRate: 1.25,    // 12.8125 -> rounds to 0
-      taxRate: 8.25,         // 84.5625 -> rounds to 100
+      constructionContingencyRate: 0.10,  // 102.5 -> rounds to 100
+      designContingencyRate: 0.05,        // 51.25 -> rounds to 100
+      buildersRiskRate: 0.0125,           // 12.8125 -> rounds to 0
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0,
+      bondRate: 0,
+      feeRate: 0,
       roundingRule: "hundred"
     });
     expect(resultHundred.subtotal).toBe(1000); // 1025 -> 1000
-    expect(resultHundred.overheadMarkup).toBe(100);
-    expect(resultHundred.generalLiability).toBe(0);
-    expect(resultHundred.contractorFee).toBe(100);
-    expect(resultHundred.salesTax).toBe(100);
-    expect(resultHundred.totalEstimatedCost).toBe(1000 + 100 + 0 + 100 + 100); // 1300
+    expect(resultHundred.constructionContingency).toBe(100);
+    expect(resultHundred.designContingency).toBe(100);
+    expect(resultHundred.buildersRisk).toBe(0);
+    expect(resultHundred.totalEstimatedCost).toBe(1000 + 100 + 100 + 0); // 1200
   });
 
   it('returns all zeros for empty rows', () => {
     const result = computeTakeoffSummary([], 1000, 10, {
-      overheadRate: 10,
-      feeRate: 5,
-      liabilityRate: 1,
-      taxRate: 8.25,
+      constructionContingencyRate: 0.10,
+      designContingencyRate: 0.05,
+      buildersRiskRate: 0.01,
+      specialInsuranceRate: 0.0075,
+      glInsuranceRate: 0.01,
+      bondRate: 0.015,
+      feeRate: 0.05,
       roundingRule: "dollar"
     });
     expect(result.subtotal).toBe(0);
-    expect(result.overheadMarkup).toBe(0);
-    expect(result.generalLiability).toBe(0);
-    expect(result.contractorFee).toBe(0);
-    expect(result.salesTax).toBe(0);
+    expect(result.constructionContingency).toBe(0);
+    expect(result.designContingency).toBe(0);
+    expect(result.buildersRisk).toBe(0);
+    expect(result.specialInsurance).toBe(0);
+    expect(result.glInsurance).toBe(0);
+    expect(result.bond).toBe(0);
+    expect(result.fee).toBe(0);
     expect(result.totalEstimatedCost).toBe(0);
   });
 
   it('uses fallback divisor of 1 for zero squareFootage', () => {
     const rows = [makeRow({ matchedQty: 100, unitPrice: 10 })];
     const result = computeTakeoffSummary(rows, 0, 10, {
-      overheadRate: 0,
-      feeRate: 5,
-      liabilityRate: 1,
-      taxRate: 0,
+      constructionContingencyRate: 0,
+      designContingencyRate: 0,
+      buildersRiskRate: 0,
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0.01,
+      bondRate: 0,
+      feeRate: 0.05,
       roundingRule: "none"
     });
     // costPerSf should divide by 1, not crash on divide-by-zero
@@ -198,10 +223,13 @@ describe('computeTakeoffSummary', () => {
   it('uses fallback divisor of 1 for zero unitCount', () => {
     const rows = [makeRow({ matchedQty: 100, unitPrice: 10 })];
     const result = computeTakeoffSummary(rows, 1000, 0, {
-      overheadRate: 0,
-      feeRate: 5,
-      liabilityRate: 1,
-      taxRate: 0,
+      constructionContingencyRate: 0,
+      designContingencyRate: 0,
+      buildersRiskRate: 0,
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0.01,
+      bondRate: 0,
+      feeRate: 0.05,
       roundingRule: "none"
     });
     // costPerUnit should divide by 1, not crash on divide-by-zero
@@ -212,10 +240,13 @@ describe('computeTakeoffSummary', () => {
     // row.total is set to 999 (wrong value) — summary should ignore it
     const rows = [makeRow({ matchedQty: 50, unitPrice: 20, total: 999 })];
     const result = computeTakeoffSummary(rows, 1000, 10, {
-      overheadRate: 0,
-      feeRate: 5,
-      liabilityRate: 1,
-      taxRate: 0,
+      constructionContingencyRate: 0,
+      designContingencyRate: 0,
+      buildersRiskRate: 0,
+      specialInsuranceRate: 0,
+      glInsuranceRate: 0.01,
+      bondRate: 0,
+      feeRate: 0.05,
       roundingRule: "none"
     });
     // subtotal should be 50 * 20 = 1000, NOT 999
@@ -526,5 +557,3 @@ describe('evaluateMathExpression', () => {
     expect(evaluateMathExpression('10 / (2 - 2)')).toBeNaN();
   });
 });
-
-

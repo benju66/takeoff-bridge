@@ -13,15 +13,38 @@
 
 ## 3. Financial Ledger Precision
 * **Command History Integrity**: Validate that executing a manual row insertion, deletion, or cell modification calls `commandHistory.pushCommand()` with a `WorkbookCommand` payload prior to updating state arrays. Verify that the command captures cascade effects for `itemId`, `description`, and `unitPrice` edits on classified rows.
-* **Compounding Formula Audit**: Confirm that cumulative estimate totals accurately run the following compounding chain based on dynamic project rates and rounding rules:
+* **Compounding Formula Audit**: Confirm that cumulative estimate totals accurately run the following compounding chain based on dynamic project rates (stored as decimals) and rounding rules:
   * `Itemized Subtotal = Sum(Quantity × Unit Price)`
-  * `Overhead Markup = Itemized Subtotal × (overheadRate / 100)`
-  * `General Liability Insurance = Itemized Subtotal × (liabilityRate / 100)`
-  * `Contractor Fee = Itemized Subtotal × (feeRate / 100)`
-  * `Sales Tax (Material-Only) = Sum(Material-Only Quantities × Unit Price) × (taxRate / 100)`
-  * `Total Estimated Cost = Rounded(Subtotal) + Rounded(Overhead) + Rounded(GL) + Rounded(Fee) + Rounded(Tax)`
+  * `Construction Contingency = Subtotal × constructionContingencyRate`
+  * `Design Contingency = Subtotal × designContingencyRate`
+  * `Builders Risk Insurance = Subtotal × buildersRiskRate`
+  * `Special Insurance = Subtotal × specialInsuranceRate`
+  * `General Liability Insurance = Subtotal × glInsuranceRate` (default 0.01 = 1%)
+  * `Bond = Subtotal × bondRate`
+  * `Fee = Subtotal × feeRate` (default 0.05 = 5%)
+  * `Total Estimated Cost = Rounded(Subtotal) + Sum(Rounded(7 modifiers))`
 * **Zero Budget Leaks**: Verify that final tallies are completely free of floating-point rounding errors or JavaScript `NaN` leaks in the UI views.
 
 ## 4. Downstream Export Integration
 * **ExcelJS Equation Injections**: Open and verify generated spreadsheet binaries to confirm that summary fields use functional, executable string formulas (`SUM(...)`) rather than hardcoded static numbers.
 * **Procore Parent Rollups**: Audit exported budget payload object arrays to guarantee fine-grained child suffixes match cleanly with valid, structured parent cost codes.
+
+## 5. Post-Implementation Verification Gate
+
+### Step 1: Compilation Execution Validation
+* Spin up a local terminal process and execute **npm run build**.
+* Verify that the newly appended features or database hooks generate zero layout breaks, linter errors, or TypeScript type compilation warnings.
+
+### Step 2: Complete Unit Regression Suite
+* Execute **npm run test** in the terminal to trigger the workspace unit testing suite.
+* Confirm all 9 core unit test suites pass completely without regression.
+* Ensure calculations, workbook parsers, and Excel layout shifting logic operate properly, validating that no legacy cell ranges or lookup chains were damaged.
+
+### Step 3: End-to-End Browser Smoke Test
+* Execute **npm run test:e2e** to launch the headless browser engine via Playwright.
+* Verify the live application stream successfully passes the full system sequence: authentication login ➔ dashboard routing ➔ workspace load ➔ formula entry ➔ real-time UI grid cell matrix calculation and expression parsing.
+
+### Step 4: Zero-Failure Enforcement & Loop Stopping Condition
+* If any step logs a non-zero exit code or tracking failure, you are explicitly blocked from marking the task complete.
+* Read the terminal `stderr` stack trace directly, enter self-correction mode, fix the bug within a sandboxed file state, and run this verification skill sequentially from Step 1 again.
+* Do not request human review or close out the active agent session until the runtime test environment goes 100% green. If failures are determined to be pre-existing environment issues or out-of-scope infrastructure bottlenecks, document them clearly and request user review to address the blockage.

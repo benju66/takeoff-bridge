@@ -30,6 +30,10 @@ Execute these enforcement checks whenever a proposed modification touches Supaba
   2. Write the corresponding `ALTER TABLE` / `CREATE FUNCTION` migration statement.
   3. Update `db.ts` mapper functions to handle the new fields.
   4. Present the migration plan to the user for approval before execution.
+* **Supabase MCP Integration**:
+  * Leverage lazy-loaded Supabase MCP server tools (e.g., `list_tables`, `execute_sql`, `list_migrations`, `apply_migration`) to safely inspect live database structures and verify/run migrations.
+  * Run `generate_typescript_types` to refresh database type definitions in the codebase when schema changes occur to prevent typescript compilation drift.
+  * *Boundary reminder*: These MCP administrative tools are for development use only and do not change the "Single Gateway Enforcement" rule—all compiled application reads and writes must route through `src/lib/db.ts`.
 * **CASCADE Awareness**: Child tables with `ON DELETE CASCADE` from `projects`: `project_estimates`, `estimate_line_items`, `project_column_defs`, `project_locked_cells`, `project_registries`, `estimate_snapshots`. The `classification_history` table uses `ON DELETE SET NULL` on `project_id` — deleting a project preserves training data with a null project reference. Never manually delete child records — delete the parent `projects` row and let PostgreSQL handle cleanup.
 
 ## 5. Debounce & Concurrency

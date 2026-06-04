@@ -23,7 +23,7 @@ Conduct a strict structural isolation check for the targeted estimation workflow
 **Step 4: Pattern Alignment & Constraint Matching**
 Review **AGENTS.md** alongside all target sub-skills within the repository to extract required layout conventions.
 * Extract reusable patterns: Enforce the use of spreadsheet focus handlers (**ArrowUp**, **ArrowDown**, **Enter**, **Tab**), high-performance cell grids, or custom tab-delimited clipboard text processors.
-* Check for compounding overhead rules: Ensure that final price summary ledgers calculate **General Liability Insurance** factors at exactly **1%** and **Contractor Fees** at exactly **5%**.
+* Check for compounding overhead rules: Ensure that final price summary ledgers apply the 7 template-aligned estimate modifiers defined in `ESTIMATE_MODIFIERS` (from `src/lib/constants.ts`), with **General Liability Insurance** (`glInsuranceRate`) defaulting to **1%** (0.01) and **Fee** (`feeRate`) defaulting to **5%** (0.05).
 * Scan for forbidden anti-patterns: Flag and block raw numerical mutations bypassing the `commandHistory.pushCommand()` command pattern, untyped currency variables, missing client browser checks, or unmapped child suffix line items bypassing parent cost-code grouping filters.
 
 **Step 5: Contextual Summary & Blast Radius Profile**

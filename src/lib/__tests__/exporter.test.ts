@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateExcelPayload } from "../exporter";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import type { Project } from "@/types/db";
 
 describe("exporter - generateExcelPayload", () => {
   const mockColumns: ColumnDefinition[] = [
@@ -44,10 +45,13 @@ describe("exporter - generateExcelPayload", () => {
     unitCount: 10,
     bidDate: "2026-06-01",
     createdAt: new Date().toISOString(),
-    overheadRate: 0,
-    feeRate: 5,
-    liabilityRate: 1,
-    taxRate: 0,
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
     roundingRule: "none"
   };
 
@@ -64,10 +68,10 @@ describe("exporter - generateExcelPayload", () => {
     const csvContent = generateExcelPayload(mockRows, mockColumns, mockProject);
     const lines = csvContent.split("\r\n");
     const headers = lines[0].split(",");
-    
+
     // Notes header should be mapped to "Notes"
     expect(headers).toContain("Notes");
-    
+
     // Row values should contain the notes text
     const dataLine = lines[1];
     expect(dataLine).toContain("Use standard high-strength mix.");
@@ -77,11 +81,14 @@ describe("exporter - generateExcelPayload", () => {
     const csvContent = generateExcelPayload(mockRows, mockColumns, mockProject);
     const lines = csvContent.split("\r\n");
 
-    // Header + data row + 4 markup rows = 6 lines
-    expect(lines).toHaveLength(6);
-    expect(lines[2]).toContain("Overhead Markup (0%)");
-    expect(lines[3]).toContain("General Liability (1%)");
-    expect(lines[4]).toContain("Contractor Fee (5%)");
-    expect(lines[5]).toContain("Sales Tax (0%)");
+    // Header + data row + 7 markup rows = 9 lines
+    expect(lines).toHaveLength(9);
+    expect(lines[2]).toContain("Construction Contingency (0%)");
+    expect(lines[3]).toContain("Design Contingency (0%)");
+    expect(lines[4]).toContain("Builders Risk Insurance (0%)");
+    expect(lines[5]).toContain("Special Insurance (0%)");
+    expect(lines[6]).toContain("General Liability Insurance (1%)");
+    expect(lines[7]).toContain("Bond (0%)");
+    expect(lines[8]).toContain("Fee (5%)");
   });
 });

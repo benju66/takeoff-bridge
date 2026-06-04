@@ -1,6 +1,7 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
-import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS } from "./constants";
+import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS } from "./constants";
+import { computeTakeoffSummary } from "./calculations";
 import { escapeCSVField, buildNumFmt } from "./exportUtils";
 import ExcelJS from "exceljs";
 
@@ -10,7 +11,7 @@ export { getColumnLetter } from "./exportUtils";
 /**
  * Generates a clean Excel payload CSV string.
  * Formats columns dynamically to match user's custom and default workspace column definitions.
- * Incorporates standard markup layers (General Liability 1%, Contractor Fee 5%) cleanly at the bottom.
+ * Incorporates the 7 template-aligned modifier rows at the bottom, with rounding compliance.
  */
 export function generateExcelPayload(
   rows: ProcessedTakeoffRow[],
@@ -20,10 +21,7 @@ export function generateExcelPayload(
   const csvLines: string[] = [];
   const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
 
-  const overheadRate = project?.overheadRate ?? 10;
-  const feeRate = project?.feeRate ?? 5;
-  const liabilityRate = project?.liabilityRate ?? 1;
-  const taxRate = project?.taxRate ?? 8.25;
+
 
   // Populate dynamic headers based on activeCols
   const headers = activeCols.map((col) => {
@@ -95,125 +93,63 @@ export function generateExcelPayload(
     csvLines.push(rowValues.map(escapeCSVField).join(","));
   }
 
-  // Calculate dynamic subtotal and append standard markup layers
-  const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
-  if (subtotal > 0) {
-    const materialSubtotal = rows
-      .filter((r) => (r.costType || "M").toUpperCase() === "M")
-      .reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
+  // Calculate dynamic subtotal and append template-aligned modifier rows
+  const squareFootage = project?.squareFootage ?? 0;
+  const unitCount = project?.unitCount ?? 0;
+  const summary = computeTakeoffSummary(rows, squareFootage, unitCount, {
+    constructionContingencyRate: project?.constructionContingencyRate ?? 0,
+    designContingencyRate: project?.designContingencyRate ?? 0,
+    buildersRiskRate: project?.buildersRiskRate ?? 0,
+    specialInsuranceRate: project?.specialInsuranceRate ?? 0,
+    glInsuranceRate: project?.glInsuranceRate ?? 0.01,
+    bondRate: project?.bondRate ?? 0,
+    feeRate: project?.feeRate ?? 0.05,
+    roundingRule: project?.roundingRule ?? "dollar",
+  });
 
-    const overheadMarkup = subtotal * (overheadRate / 100);
-    const generalLiability = subtotal * (liabilityRate / 100);
-    const fee = subtotal * (feeRate / 100);
-    const salesTax = materialSubtotal * (taxRate / 100);
+  if (summary.subtotal > 0) {
+    const modifierValues: Record<string, number> = {
+      constructionContingency: summary.constructionContingency,
+      designContingency: summary.designContingency,
+      buildersRisk: summary.buildersRisk,
+      specialInsurance: summary.specialInsurance,
+      glInsurance: summary.glInsurance,
+      bond: summary.bond,
+      fee: summary.fee,
+    };
 
-    // Overhead Markup Row
-    const ohRow = activeCols.map((col) => {
-      if (col.type === "default") {
-        switch (col.id) {
-          case "costType":
-            return "TI";
-          case "itemId":
-            return "";
-          case "description":
-            return `Overhead Markup (${overheadRate}%)`;
-          case "matchedQty":
-            return 1;
-          case "uom":
-            return "LS";
-          case "unitPrice":
-            return overheadMarkup.toFixed(2);
-          case "total":
-            return overheadMarkup.toFixed(2);
-          default:
-            return "";
+    for (const mod of ESTIMATE_MODIFIERS) {
+      const modValue = modifierValues[mod.key] ?? 0;
+      const rateField = `${mod.key}Rate` as keyof Project;
+      const rateDecimal = (project?.[rateField] as number) ?? mod.defaultRate;
+      const ratePercent = (rateDecimal * 100).toFixed(2).replace(/\.?0+$/, '');
+
+      const modRow = activeCols.map((col) => {
+        if (col.type === "default") {
+          switch (col.id) {
+            case "costType":
+              return "O";
+            case "itemId":
+              return mod.code;
+            case "description":
+              return `${mod.label} (${ratePercent}%)`;
+            case "matchedQty":
+              return 1;
+            case "uom":
+              return "LS";
+            case "unitPrice":
+              return modValue.toFixed(2);
+            case "total":
+              return modValue.toFixed(2);
+            default:
+              return "";
+          }
+        } else {
+          return "";
         }
-      } else {
-        return "";
-      }
-    });
-    csvLines.push(ohRow.map(escapeCSVField).join(","));
-
-    // General Liability Row
-    const glRow = activeCols.map((col) => {
-      if (col.type === "default") {
-        switch (col.id) {
-          case "costType":
-            return "TI";
-          case "itemId":
-            return "";
-          case "description":
-            return `General Liability (${liabilityRate}%)`;
-          case "matchedQty":
-            return 1;
-          case "uom":
-            return "LS";
-          case "unitPrice":
-            return generalLiability.toFixed(2);
-          case "total":
-            return generalLiability.toFixed(2);
-          default:
-            return "";
-        }
-      } else {
-        return "";
-      }
-    });
-    csvLines.push(glRow.map(escapeCSVField).join(","));
-
-    // Contractor Fee Row
-    const feeRow = activeCols.map((col) => {
-      if (col.type === "default") {
-        switch (col.id) {
-          case "costType":
-            return "TI";
-          case "itemId":
-            return "";
-          case "description":
-            return `Contractor Fee (${feeRate}%)`;
-          case "matchedQty":
-            return 1;
-          case "uom":
-            return "LS";
-          case "unitPrice":
-            return fee.toFixed(2);
-          case "total":
-            return fee.toFixed(2);
-          default:
-            return "";
-        }
-      } else {
-        return "";
-      }
-    });
-    csvLines.push(feeRow.map(escapeCSVField).join(","));
-
-    // Sales Tax Row
-    const taxRow = activeCols.map((col) => {
-      if (col.type === "default") {
-        switch (col.id) {
-          case "costType":
-            return "TI";
-          case "itemId":
-            return "";
-          case "description":
-            return `Sales Tax (${taxRate}%)`;
-          case "matchedQty":
-            return 1;
-          case "uom":
-            return "LS";
-          case "unitPrice":
-            return salesTax.toFixed(2);
-          case "total":
-            return salesTax.toFixed(2);
-          default:
-            return "";
-        }
-      } else {
-        return "";
-      }
-    });
-    csvLines.push(taxRow.map(escapeCSVField).join(","));
+      });
+      csvLines.push(modRow.map(escapeCSVField).join(","));
+    }
   }
 
   // Use \r\n for universal Windows and Excel spreadsheet compliance
@@ -232,10 +168,7 @@ export function generateProcoreBudget(
 ): string {
   const csvLines: string[] = [];
 
-  const overheadRate = project?.overheadRate ?? 10;
-  const feeRate = project?.feeRate ?? 5;
-  const liabilityRate = project?.liabilityRate ?? 1;
-  const taxRate = project?.taxRate ?? 8.25;
+
 
   // Header line exactly matching Procore's standard budget importer columns
   csvLines.push(["Cost Code", "Cost Type", "Description", "Original Budget"].map(escapeCSVField).join(","));
@@ -285,45 +218,44 @@ export function generateProcoreBudget(
     csvLines.push(columns.map(escapeCSVField).join(","));
   }
 
-  // Calculate subtotal and append standard markup layers dynamically
-  const subtotal = rows.reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
-  if (subtotal > 0) {
-    const materialSubtotal = rows
-      .filter((r) => (r.costType || "M").toUpperCase() === "M")
-      .reduce((sum, r) => sum + r.matchedQty * r.unitPrice, 0);
+  // Calculate subtotal and append template-aligned modifier rows with rounding
+  const squareFootage = project?.squareFootage ?? 0;
+  const unitCount = project?.unitCount ?? 0;
+  const summary = computeTakeoffSummary(rows, squareFootage, unitCount, {
+    constructionContingencyRate: project?.constructionContingencyRate ?? 0,
+    designContingencyRate: project?.designContingencyRate ?? 0,
+    buildersRiskRate: project?.buildersRiskRate ?? 0,
+    specialInsuranceRate: project?.specialInsuranceRate ?? 0,
+    glInsuranceRate: project?.glInsuranceRate ?? 0.01,
+    bondRate: project?.bondRate ?? 0,
+    feeRate: project?.feeRate ?? 0.05,
+    roundingRule: project?.roundingRule ?? "dollar",
+  });
 
-    const overheadMarkup = subtotal * (overheadRate / 100);
-    const generalLiability = subtotal * (liabilityRate / 100);
-    const fee = subtotal * (feeRate / 100);
-    const salesTax = materialSubtotal * (taxRate / 100);
+  if (summary.subtotal > 0) {
+    const modifierValues: Record<string, number> = {
+      constructionContingency: summary.constructionContingency,
+      designContingency: summary.designContingency,
+      buildersRisk: summary.buildersRisk,
+      specialInsurance: summary.specialInsurance,
+      glInsurance: summary.glInsurance,
+      bond: summary.bond,
+      fee: summary.fee,
+    };
 
-    csvLines.push([
-      "1-30000.000",
-      "O",
-      `Overhead Markup (${overheadRate}%)`,
-      overheadMarkup.toFixed(2)
-    ].map(escapeCSVField).join(","));
+    for (const mod of ESTIMATE_MODIFIERS) {
+      const modValue = modifierValues[mod.key] ?? 0;
+      const rateField = `${mod.key}Rate` as keyof Project;
+      const rateDecimal = (project?.[rateField] as number) ?? mod.defaultRate;
+      const ratePercent = (rateDecimal * 100).toFixed(2).replace(/\.?0+$/, '');
 
-    csvLines.push([
-      "1-10000.000",
-      "O",
-      `General Liability (${liabilityRate}%)`,
-      generalLiability.toFixed(2)
-    ].map(escapeCSVField).join(","));
-
-    csvLines.push([
-      "1-20000.000",
-      "O",
-      `Fee (${feeRate}%)`,
-      fee.toFixed(2)
-    ].map(escapeCSVField).join(","));
-
-    csvLines.push([
-      "1-40000.000",
-      "O",
-      `Sales Tax (${taxRate}%)`,
-      salesTax.toFixed(2)
-    ].map(escapeCSVField).join(","));
+      csvLines.push([
+        mod.code,
+        "O",
+        `${mod.label} (${ratePercent}%)`,
+        modValue.toFixed(2)
+      ].map(escapeCSVField).join(","));
+    }
   }
 
   // Ensure Windows line endings (\r\n) for seamless ingestion
@@ -595,41 +527,48 @@ export async function generateExcelWorkbook(
   const subtotalCell = worksheet.getCell(`I${subtotalRowIdx}`);
   subtotalCell.value = { formula: `SUM(I10:I${subtotalRowIdx - 1})` };
 
-  // Always rewrite markup row formulas and inject customized project pricing rates into Column F
+  // Match template modifier rows by cost code in Column C (Amendment #3)
+  // Build lookup map from cost code → modifier config
+  const modifierByCostCode: Record<string, typeof ESTIMATE_MODIFIERS[number]> = {};
+  for (const mod of ESTIMATE_MODIFIERS) {
+    modifierByCostCode[mod.code] = mod;
+  }
+
   for (let offset = 2; offset <= 8; offset++) {
     const r = subtotalRowIdx + offset;
     const excelRow = worksheet.getRow(r);
-    const descCell = excelRow.getCell(4); // Column D
-    const descText = descCell.value ? String(descCell.value).toUpperCase() : "";
+    const costCodeCell = excelRow.getCell(3); // Column C
+    const costCode = costCodeCell.value ? String(costCodeCell.value).trim() : "";
+    const mod = modifierByCostCode[costCode];
 
-    // Determine the dynamic rate for this row based on its template description
-    let rate = 0;
-    if (projectMetadata) {
-      if (descText.includes("OVERHEAD")) {
-        rate = (projectMetadata.overheadRate ?? 10) / 100;
-        descCell.value = `Overhead Markup (${projectMetadata.overheadRate ?? 10}%)`;
-      } else if (descText.includes("LIABILITY") || descText.includes("GL")) {
-        rate = (projectMetadata.liabilityRate ?? 1) / 100;
-        descCell.value = `General Liability (${projectMetadata.liabilityRate ?? 1}%)`;
-      } else if (descText.includes("FEE") || descText.includes("PROFIT")) {
-        rate = (projectMetadata.feeRate ?? 5) / 100;
-        descCell.value = `Contractor Fee (${projectMetadata.feeRate ?? 5}%)`;
-      } else if (descText.includes("TAX")) {
-        rate = (projectMetadata.taxRate ?? 8.25) / 100;
-        descCell.value = `Sales Tax (${projectMetadata.taxRate ?? 8.25}%)`;
-      }
-    }
+    if (mod && projectMetadata) {
+      const rateField = `${mod.key}Rate` as keyof Project;
+      const rateDecimal = (projectMetadata[rateField] as number) ?? mod.defaultRate;
 
-    // If we matched a rate, write it into Column F (cell 6)
-    if (rate > 0) {
+      // Write rate into Column F
       const rateCell = excelRow.getCell(6);
-      rateCell.value = rate;
+      rateCell.value = rateDecimal;
       rateCell.numFmt = "0.00%";
     }
 
+    // Always rewrite formulas for computed value, cost/unit, cost/sf
     excelRow.getCell(9).value = { formula: `F${r}*$I$${subtotalRowIdx}` };
     excelRow.getCell(10).value = { formula: `IF($J$8=0, 0, I${r}/$J$8)` };
     excelRow.getCell(11).value = { formula: `IF($K$8=0, 0, I${r}/$K$8)` };
+  }
+
+  // Write project rates to STEP 1 cells G18–G24 (Amendment #4)
+  if (projectMetadata) {
+    const step1Sheet = workbook.getWorksheet('STEP 1 - PROJECT DATA');
+    if (step1Sheet) {
+      for (const mod of ESTIMATE_MODIFIERS) {
+        const rateField = `${mod.key}Rate` as keyof Project;
+        const rateDecimal = (projectMetadata[rateField] as number) ?? mod.defaultRate;
+        const cell = step1Sheet.getCell(mod.step1Cell);
+        cell.value = rateDecimal;
+        cell.numFmt = "0.00%";
+      }
+    }
   }
 
   // Rewrite Grand Total row formulas

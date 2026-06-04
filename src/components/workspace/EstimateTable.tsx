@@ -11,7 +11,7 @@ import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "luci
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project } from "@/types/db";
-import { DIVISION_LABELS } from "@/lib/constants";
+import { DIVISION_LABELS, ESTIMATE_MODIFIERS } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
@@ -120,14 +120,28 @@ export function EstimateTable({
 }: EstimateTableProps) {
   const {
     subtotal,
-    overheadMarkup,
-    generalLiability,
-    contractorFee: fee,
-    salesTax,
+    constructionContingency,
+    designContingency,
+    buildersRisk,
+    specialInsurance,
+    glInsurance,
+    bond,
+    fee,
     totalEstimatedCost,
     costPerSf,
     costPerUnit
   } = takeoffSummary;
+
+  /** Lookup map from modifier key to its computed value */
+  const modifierValues: Record<string, number> = {
+    constructionContingency,
+    designContingency,
+    buildersRisk,
+    specialInsurance,
+    glInsurance,
+    bond,
+    fee,
+  };
 
   // ---------------------------------------------------------------------------
   // Click-outside-to-deselect (E2)
@@ -725,77 +739,33 @@ export function EstimateTable({
                   <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
                 </tr>
 
-                {/* Overhead Markup Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
-                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
-                    let content: React.ReactNode = "";
-                    let alignClass = "text-left font-sans";
-                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "description") { content = `Overhead Markup (${project.overheadRate ?? 10}%)`; alignClass = "text-left font-sans"; }
-                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "unitPrice") { content = `$${overheadMarkup.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "total") { content = `$${overheadMarkup.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
-                    else if (column.id === "costPerUnit") { content = `$${(overheadMarkup / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "costPerSf") { content = `$${(overheadMarkup / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
-                  })}
-                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
-                </tr>
+                {/* Template-aligned modifier rows (data-driven from ESTIMATE_MODIFIERS) */}
+                {ESTIMATE_MODIFIERS.map((mod) => {
+                  const modValue = modifierValues[mod.key] ?? 0;
+                  const rateField = `${mod.key}Rate` as keyof Project;
+                  const rateDecimal = (project[rateField] as number) ?? mod.defaultRate;
+                  const ratePercent = (rateDecimal * 100).toFixed(2).replace(/\.?0+$/, '');
 
-                {/* General Liability Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
-                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
-                    let content: React.ReactNode = "";
-                    let alignClass = "text-left font-sans";
-                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "description") { content = `General Liability (${project.liabilityRate ?? 1}%)`; alignClass = "text-left font-sans"; }
-                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "unitPrice") { content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "total") { content = `$${generalLiability.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
-                    else if (column.id === "costPerUnit") { content = `$${(generalLiability / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "costPerSf") { content = `$${(generalLiability / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
-                  })}
-                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
-                </tr>
-
-                {/* Contractor Fee Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
-                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
-                    let content: React.ReactNode = "";
-                    let alignClass = "text-left font-sans";
-                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "description") { content = `Contractor Fee (${project.feeRate ?? 5}%)`; alignClass = "text-left font-sans"; }
-                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "unitPrice") { content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "total") { content = `$${fee.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
-                    else if (column.id === "costPerUnit") { content = `$${(fee / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "costPerSf") { content = `$${(fee / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
-                  })}
-                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
-                </tr>
-
-                {/* Sales Tax Row */}
-                <tr className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
-                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
-                    let content: React.ReactNode = "";
-                    let alignClass = "text-left font-sans";
-                    if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "description") { content = `Sales Tax (${project.taxRate ?? 8.25}%)`; alignClass = "text-left font-sans"; }
-                    else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "unitPrice") { content = `$${salesTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "total") { content = `$${salesTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
-                    else if (column.id === "costPerUnit") { content = `$${(salesTax / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    else if (column.id === "costPerSf") { content = `$${(salesTax / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                    return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
-                  })}
-                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
-                </tr>
+                  return (
+                    <tr key={mod.key} className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
+                      {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left font-sans";
+                        if (column.id === "itemId") { content = mod.code; alignClass = "text-center font-mono"; }
+                        else if (column.id === "costType") { content = "O"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "description") { content = `${mod.label} (${ratePercent}%)`; alignClass = "text-left font-sans"; }
+                        else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "unitPrice") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                        else if (column.id === "total") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                        else if (column.id === "costPerUnit") { content = `$${(modValue / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                        else if (column.id === "costPerSf") { content = `$${(modValue / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                        return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
+                      })}
+                      <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
+                    </tr>
+                  );
+                })}
 
                 {/* Total Estimated Cost Row */}
                 <tr className="border-t border-double border-l-4 border-l-transparent border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans" style={{ display: "flex", minWidth: "100%" }}>

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  GL_RATE,
-  FEE_RATE,
+  ESTIMATE_MODIFIERS,
   HOURS_PER_MONTH,
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
@@ -15,15 +14,35 @@ import {
   HIRED_CLEANING_RATE_PER_EA,
 } from "../constants";
 
-describe("Financial Markup Constants", () => {
-  it("GL_RATE is 1%", () => {
-    expect(GL_RATE).toBe(0.01);
+describe("Estimate Modifiers", () => {
+  it("has exactly 7 entries", () => {
+    expect(ESTIMATE_MODIFIERS).toHaveLength(7);
   });
 
-  it("FEE_RATE is 5%", () => {
-    expect(FEE_RATE).toBe(0.05);
+  it("all entries have unique keys", () => {
+    const keys = ESTIMATE_MODIFIERS.map((m) => m.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("all entries have unique cost codes", () => {
+    const codes = ESTIMATE_MODIFIERS.map((m) => m.code);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("GL Insurance default rate is 1% (0.01)", () => {
+    const gl = ESTIMATE_MODIFIERS.find((m) => m.key === "glInsurance");
+    expect(gl).toBeDefined();
+    expect(gl!.defaultRate).toBe(0.01);
+  });
+
+  it("Fee default rate is 5% (0.05)", () => {
+    const fee = ESTIMATE_MODIFIERS.find((m) => m.key === "fee");
+    expect(fee).toBeDefined();
+    expect(fee!.defaultRate).toBe(0.05);
+  });
+});
+
+describe("Financial Constants", () => {
   it("HOURS_PER_MONTH is standard 173.2", () => {
     expect(HOURS_PER_MONTH).toBe(173.2);
   });

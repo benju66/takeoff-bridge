@@ -113,14 +113,39 @@ export const OPERATIONAL_EXPENSE_DEFAULTS: OperationalExpenseConfig[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Financial Markup Rates
+// Estimate Modifier Definitions (Template-Aligned)
 // ---------------------------------------------------------------------------
 
-/** General Liability Insurance — 1% of subtotal */
-export const GL_RATE = 0.01;
+/** Configuration for a single estimate modifier row matching the company Excel template */
+export interface EstimateModifierConfig {
+  /** Internal lookup key (camelCase, matches TakeoffSummary field) */
+  key: string;
+  /** DB rate column suffix (snake_case, matches projects table column) */
+  rateColumn: string;
+  /** Human-readable label matching the template description */
+  label: string;
+  /** Cost code from STEP 4 - ESTIMATE (e.g., "60-1000.001") */
+  code: string;
+  /** Template default rate as a decimal (e.g., 0.05 = 5%) */
+  defaultRate: number;
+  /** Cell reference in "STEP 1 - PROJECT DATA" sheet */
+  step1Cell: string;
+}
 
-/** Contractor Fee — 5% of subtotal */
-export const FEE_RATE = 0.05;
+/**
+ * The 7 estimate modifier rows from the company Excel template.
+ * Drives the EstimateTable footer, calculations, exports, and
+ * ArchitecturalParametersStep UI. Eliminates magic strings.
+ */
+export const ESTIMATE_MODIFIERS: readonly EstimateModifierConfig[] = [
+  { key: 'constructionContingency', rateColumn: 'construction_contingency_rate', label: 'Construction Contingency', code: '60-1000.001', defaultRate: 0, step1Cell: 'G18' },
+  { key: 'designContingency', rateColumn: 'design_contingency_rate', label: 'Design Contingency', code: '60-1005.001', defaultRate: 0, step1Cell: 'G19' },
+  { key: 'buildersRisk', rateColumn: 'builders_risk_rate', label: 'Builders Risk Insurance', code: '60-2010.001', defaultRate: 0, step1Cell: 'G20' },
+  { key: 'specialInsurance', rateColumn: 'special_insurance_rate', label: 'Special Insurance', code: '60-2015.001', defaultRate: 0, step1Cell: 'G21' },
+  { key: 'glInsurance', rateColumn: 'gl_insurance_rate', label: 'General Liability Insurance', code: '60-2020.001', defaultRate: 0.01, step1Cell: 'G22' },
+  { key: 'bond', rateColumn: 'bond_rate', label: 'Bond', code: '60-2025.001', defaultRate: 0, step1Cell: 'G23' },
+  { key: 'fee', rateColumn: 'fee_rate', label: 'Fee', code: '60-4000.001', defaultRate: 0.05, step1Cell: 'G24' },
+];
 
 /** Standard Commodity threshold for lump sum evaluation */
 export const COMMODITY_THRESHOLD = 5000;

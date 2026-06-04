@@ -31,6 +31,7 @@
    - **Debounced auto-persist**: All auto-save effects use 1500ms debounce timers to prevent excessive network traffic during rapid keyboard-driven data entry.
    - **Classification registries** are persisted at two scopes: project-isolated (`project_registries`) and global corporate (`global_registry`). Lookup resolution follows the fallback chain: project registry → global registry → static constants. On import confirm, auto-extracted embedded cost codes are also persisted to the project registry for future import auto-mapping.
    - **Theme & Sidebar preference**: Layout themes and layout settings (such as sidebar hover auto-expand under `takeoff-bridge-sidebar-hover-expand`) are stored in browser `localStorage`. Realtime layout updates are communicated via window-level `CustomEvent` dispatches (e.g. `"sidebar-settings-updated"`) to prevent full-page refreshes.
+   - **Supabase MCP Integration**: The environment includes a `supabase` MCP server. Future agents can run lazy-loaded tools (such as `list_tables`, `execute_sql`, `list_migrations`, `apply_migration`, and `generate_typescript_types`) to inspect database tables, dry-run or apply migrations, and update TypeScript database typings. Note: These tools are strictly for development and agent environments; runtime application code database access must still strictly route through the `src/lib/db.ts` single gateway.
 8. **Export Core Pipeline**: Generates a structured paste-ready Excel CSV and a summarized Procore Budget CSV.
 
 ## Automated Test Infrastructure
@@ -71,11 +72,14 @@ To transition the ingestion grid from a rigid tabular layout into an elastic spr
 5. Window Blur Dismissal: An ambient event listener registers against the global `window` click target to automatically clear layout coordinate tracking and hide the panel on outside interaction clicks.
 
 ## Compounding Overhead Calculation Layer
-Upon establishing all mapped quantities and unit prices, the application dynamically aggregates takeoff values through a compounding overhead calculation layer using project-specific pricing modifiers:
+Upon establishing all mapped quantities and unit prices, the application dynamically aggregates takeoff values through a compounding overhead calculation layer using project-specific pricing modifiers. These 7 modifiers are defined in the company Excel template ("STEP 1 - PROJECT DATA" cells G18–G24) and stored as decimals in the `projects` table:
 1. **Itemized Subtotal**: Sum of all line items, where `Total Cost = Matched Quantity × Unit Price`.
-2. **Overhead Markup**: Calculated as `Subtotal × (overheadRate / 100)`.
-3. **General Liability Insurance**: Computed as `Subtotal × (liabilityRate / 100)`.
-4. **Contractor Fee**: Computed as `Subtotal × (feeRate / 100)`.
-5. **Sales Tax (Material-Only)**: Sums all line items where `costType === 'M'` (Materials) and multiplies by `(taxRate / 100)`.
-6. **Cell Rounding Rules**: Applied to each summary component individually (rounding to nearest $1, $10, or $100 depending on the project's `roundingRule`) before calculating the Grand Total to prevent floating-point leaks and ensure that spreadsheet column values match the total exactly.
-7. **Total Estimated Cost**: Cumulative sum of the rounded subtotal and rounded modifiers, displaying the live calculation across the terminal dashboards and top metrics panel.
+2. **Construction Contingency** (`60-1000.001`): Computed as `Subtotal × constructionContingencyRate`.
+3. **Design Contingency** (`60-1005.001`): Computed as `Subtotal × designContingencyRate`.
+4. **Builders Risk Insurance** (`60-2010.001`): Computed as `Subtotal × buildersRiskRate`.
+5. **Special Insurance** (`60-2015.001`): Computed as `Subtotal × specialInsuranceRate`.
+6. **General Liability Insurance** (`60-2020.001`): Computed as `Subtotal × glInsuranceRate` (default 1%).
+7. **Bond** (`60-2025.001`): Computed as `Subtotal × bondRate`.
+8. **Fee** (`60-4000.001`): Computed as `Subtotal × feeRate` (default 5%).
+9. **Cell Rounding Rules**: Applied to each summary component individually (rounding to nearest $1, $10, or $100 depending on the project's `roundingRule`) before calculating the Grand Total to prevent floating-point leaks and ensure that spreadsheet column values match the total exactly.
+10. **Total Estimated Cost**: Cumulative sum of the rounded subtotal and all 7 rounded modifiers, displaying the live calculation across the terminal dashboards and top metrics panel.

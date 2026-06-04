@@ -1,6 +1,7 @@
 import React from "react";
 import { Activity, DollarSign, HelpCircle } from "lucide-react";
 import { Project } from "@/types/db";
+import { ESTIMATE_MODIFIERS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // ArchitecturalParametersStep — Step 1 Panel
@@ -37,6 +38,17 @@ const fields: FieldConfig[] = [
   { label: "Woodframed Area (SF)", field: "woodframedArea", type: "number", numericDefault: 0 },
   { label: "Levels Above Podium", field: "levelsAbovePodium", type: "number", numericDefault: 0 },
 ];
+
+/** Map ESTIMATE_MODIFIERS key → Project rate field name */
+const MODIFIER_RATE_FIELDS: Record<string, keyof Project> = {
+  constructionContingency: 'constructionContingencyRate',
+  designContingency: 'designContingencyRate',
+  buildersRisk: 'buildersRiskRate',
+  specialInsurance: 'specialInsuranceRate',
+  glInsurance: 'glInsuranceRate',
+  bond: 'bondRate',
+  fee: 'feeRate',
+};
 
 export function ArchitecturalParametersStep({
   project,
@@ -83,71 +95,34 @@ export function ArchitecturalParametersStep({
         </div>
       </div>
 
-      {/* Container 2: Estimate Pricing & Markup Rules */}
+      {/* Container 2: Contingency, Fee & Insurance Rates */}
       <div className="bg-card border border-grid-border text-card-foreground p-6 rounded-xl shadow-sm animate-fade-in">
         <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 flex items-center gap-2">
-          <DollarSign size={16} className="text-blue-600 dark:text-blue-400" /> Estimate Pricing & Markup Rules
+          <DollarSign size={16} className="text-blue-600 dark:text-blue-400" /> Contingency, Fee & Insurance Rates
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans text-xs">
-          <div className="flex flex-col gap-2">
-            <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-              Overhead Markup Rate (%) <span title="Applied directly to gross estimate subtotal"><HelpCircle size={12} className="text-slate-500" /></span>
-            </label>
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="100"
-              className={inputClass}
-              value={project.overheadRate ?? 10}
-              onChange={(e) => onParamChange("overheadRate", parseFloat(e.target.value) || 0)}
-            />
-          </div>
+          {ESTIMATE_MODIFIERS.map((mod) => {
+            const rateField = MODIFIER_RATE_FIELDS[mod.key];
+            const rateDecimal = (project[rateField] as number) ?? mod.defaultRate;
+            const ratePercent = rateDecimal * 100;
 
-          <div className="flex flex-col gap-2">
-            <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
-              Contractor Fee (%) <span title="Fixed GC fee applied on top of subtotal"><HelpCircle size={12} className="text-slate-500" /></span>
-            </label>
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="100"
-              className={inputClass}
-              value={project.feeRate ?? 5}
-              onChange={(e) => onParamChange("feeRate", parseFloat(e.target.value) || 0)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
-              General Liability Modifier (%)
-            </label>
-            <input
-              type="number"
-              step="0.05"
-              min="0"
-              max="10"
-              className={inputClass}
-              value={project.liabilityRate ?? 1}
-              onChange={(e) => onParamChange("liabilityRate", parseFloat(e.target.value) || 0)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
-              Sales Tax Modifier (%)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="20"
-              className={inputClass}
-              value={project.taxRate ?? 8.25}
-              onChange={(e) => onParamChange("taxRate", parseFloat(e.target.value) || 0)}
-            />
-          </div>
+            return (
+              <div key={mod.key} className="flex flex-col gap-2">
+                <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1">
+                  {mod.label} (%) <span title={`Cost Code: ${mod.code} — Applied to gross estimate subtotal`}><HelpCircle size={12} className="text-slate-500" /></span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  className={inputClass}
+                  value={ratePercent}
+                  onChange={(e) => onParamChange(rateField, (parseFloat(e.target.value) || 0) / 100)}
+                />
+              </div>
+            );
+          })}
 
           <div className="flex flex-col gap-2">
             <label className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
