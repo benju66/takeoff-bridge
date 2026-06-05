@@ -23,6 +23,8 @@
 >   as ONE `PASTE` command (atomic Ctrl+Z); in-memory only — `procore_code` persistence is Phase 3.
 > - ⬜ **Phase 3** (scope ADDED 2026-06-04): also build a **mapping-editor UI in global settings**
 >   (view/edit `cost_code_map`, validated against Importer codes, writes via `db.ts`, `source='manual'`).
+>   **Sub-phased 2026-06-05 (user-approved, see §8.0):** 3a schema+persistence (ALL DDL in one
+>   migration) → 3b Storage/per-type templates → 3c mapping-editor UI. One fresh session each.
 > - Deferred/accepted: `db.ts` imports the 55KB catalog for `procoreCode` hydration (~15KB gzip on
 >   auth pages) until Phase 3's persisted `procore_code` column removes it.
 
@@ -161,7 +163,20 @@ Template internal coordinates (STEP 4 - ESTIMATE): header row 9; division ranges
 
 **Goal:** per-project-type templates + mappings; manual Procore overrides persisted; template off the public web.
 
-### 8.1 Schema changes — proposed DDL (update `supabase_schema.sql` first, then approve, then migrate)
+### 8.0 Sub-phasing — DECIDED 2026-06-05 (user-approved sequencing; one session each, fresh chat per sub-phase)
+
+**All schema lands in 3a's single migration** (one schema review beats three — including
+`project_type`, which 3a's code won't use yet). 3b and 3c are then pure app-code phases with
+zero migration risk, independently revertable, in forced dependency order (3c needs 3a's table;
+3b is orthogonal and may swap with 3c if priorities shift).
+
+| Sub-phase | Scope (from §8.1/§8.2) | Delivers / verifies |
+|---|---|---|
+| **3a — Schema + persistence** | ALL of §8.1 DDL in one migration (branch first, per §11); seed `cost_code_map` from the catalog; `db.ts` accessors (`getCostCodeMap`, `procore_code` in line-item load/save + RPC, `project_type` mapping); retire the `db.ts` 55KB catalog import. | Retires both accepted Phase 2 limitations (override-modal assignments lost on reload; +15KB auth-page bundles). Verified with existing Phase 2 export gates: export a real project, tie-out must hold. |
+| **3b — Storage + per-type templates** | Private Storage bucket; migrate template(s) out of `/public`; `project_type` wiring in UI; exporter layout anchors into `template_config.config_data` (the `exporter.ts` + `useExportHandlers.ts` rows of §8.2). | Own rollback story (§12): old template stays in `/public` until cutover verified. Export ties out for ≥1 project of each `project_type`. |
+| **3c — Mapping-editor UI** | Global-settings page over a live, seeded `cost_code_map`: view/edit mappings, validated against Importer codes, writes via `db.ts`, `source='manual'` (scope added 2026-06-04). | Pure app code; edit a mapping, re-export, confirm dollars move to the new code and still reconcile. |
+
+### 8.1 Schema changes — proposed DDL (update `supabase_schema.sql` first, then approve, then migrate — ALL applied in sub-phase 3a)
 ```
 -- New: per-template granular mapping (app-owned)
 CREATE TABLE cost_code_map (
@@ -191,8 +206,9 @@ ALTER TABLE template_config  ADD COLUMN project_type TEXT;
 | `src/hooks/useExportHandlers.ts` | `handleExportExcelWorkbook` (line 54) | Resolve template + mapping by `project.project_type`; fetch the .xlsx from a **private Supabase Storage bucket** via `db.ts` instead of `/public`. |
 | `public/templates/Company_Estimate_Template.xlsx` | — | Migrate into a private Storage bucket; remove from `/public`. Seed `cost_code_map` + per-type `template_config` rows. |
 | `src/lib/constants.ts` | `ESTIMATE_MODIFIERS` (line 140) | Keep modifier codes (`60-*`) authoritative; ensure they are present in `cost_code_map`. |
+| new mapping-editor UI (global settings) | sub-phase 3c | View/edit `cost_code_map` rows; new codes validated against Importer Data Fields; all writes via `db.ts`; manual edits stored with `source='manual'`. (Scope added 2026-06-04.) |
 
-**Verification (Phase 3):** use Supabase MCP `list_tables` / `apply_migration` against a branch; `generate_typescript_types`; full gate green; export still ties out per Phase 2 checks for at least one project of each `project_type`.
+**Verification (Phase 3):** use Supabase MCP `list_tables` / `apply_migration` against a branch; `generate_typescript_types`; full gate green; export still ties out per Phase 2 checks for at least one project of each `project_type`. Run the gate per sub-phase (§8.0), not once at the end.
 
 ---
 
