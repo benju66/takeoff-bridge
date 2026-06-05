@@ -37,6 +37,15 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // The mapping-verify spec temporarily edits a LIVE cost_code_map row
+      // (always self-reverting) — excluded from the routine suite and run
+      // deliberately via `npm run test:e2e:mapping` after mapping/export changes.
+      testIgnore: /phase3c-mapping-verify/,
+    },
+    {
+      name: "mapping-verify",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /phase3c-mapping-verify/,
     },
   ],
   webServer: {
