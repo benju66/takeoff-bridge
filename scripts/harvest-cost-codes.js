@@ -255,7 +255,9 @@ function resolveProcoreCode(internalCode, authoritativeMap) {
 
 async function main() {
   const rootDir = path.join(__dirname, '..');
-  const templatePath = path.join(rootDir, 'public', 'templates', 'Company_Estimate_Template.xlsx');
+  // Phase 3b: git-tracked canonical template (runtime copy lives in the
+  // private Supabase Storage 'templates' bucket)
+  const templatePath = path.join(rootDir, 'templates', 'Company_Estimate_Template.xlsx');
   const jsonOutputPath = path.join(rootDir, 'src', 'lib', 'estimate-catalog.json');
   const gapsOutputDir = path.join(__dirname, 'output');
   const gapsOutputPath = path.join(gapsOutputDir, 'cost-code-gaps.json');
@@ -294,7 +296,7 @@ async function main() {
   // Gap report buckets — every non-authoritative resolution is recorded here.
   const gaps = {
     generatedAt: new Date().toISOString(),
-    templatePath: 'public/templates/Company_Estimate_Template.xlsx',
+    templatePath: 'templates/Company_Estimate_Template.xlsx',
     summary: {},
     siblingInferred: [],
     userConfirmed: [],

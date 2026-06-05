@@ -9,6 +9,7 @@
     "lint": "eslint",
     "sync-codes": "node scripts/harvest-cost-codes.js",
     "generate-seed": "node scripts/generate-cost-code-map-seed.js",
+    "upload-template": "node --env-file=.env.local scripts/upload-template.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

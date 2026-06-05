@@ -8,17 +8,17 @@ import {
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
 import fs from "fs";
-import path from "path";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
-// Layout coordinates seeded in template_config for Company_Estimate_Template.xlsx
-const mockLayoutConfig = [
-  { division: "01", headerRow: 10, startRow: 11, endRow: 14 },
-  { division: "02", headerRow: 15, startRow: 16, endRow: 25 },
-  { division: "03", headerRow: 26, startRow: 27, endRow: 52 },
-  { division: "04", headerRow: 53, startRow: 54, endRow: 62 },
-];
+import {
+  layoutWithDivisions,
+  MASTER_TEMPLATE_PATH,
+} from "./fixtures/templateLayout";
+
+// Layout config mirroring the template_config seed (real anchors; divisions
+// limited to the ones these focused tests populate)
+const mockLayoutConfig = layoutWithDivisions("01", "02", "03", "04");
 
 describe("Excel Export Integrity & Relative Shifting Engine", () => {
   const mockColumns: ColumnDefinition[] = [
@@ -50,9 +50,8 @@ describe("Excel Export Integrity & Relative Shifting Engine", () => {
   };
 
   it("shifts coordinates and formulas correctly under Division 03 insertions", async () => {
-    // Read the template file from the filesystem
-    const templatePath = path.resolve(__dirname, "../../public/templates/Company_Estimate_Template.xlsx");
-    const templateBuffer = fs.readFileSync(templatePath);
+    // Read the git-tracked canonical template (runtime uses the Storage bucket)
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
 
     // Mock rows: 
     // - 2 existing pre-populated rows in Division 03 (Concrete)
@@ -126,13 +125,12 @@ describe("Excel Export Integrity & Relative Shifting Engine", () => {
     ];
 
     // Trigger the Excel workbook generation with dynamic shifting parameters
-    // Note: Cast the extra arguments to any if the current typescript signature doesn't support them yet.
-    const blob = await (generateExcelWorkbook as any)(
+    const blob = await generateExcelWorkbook(
       mockRows,
       mockProject,
       mockColumns,
       mockLayoutConfig,
-      templateBuffer
+      templateBuffer as unknown as ArrayBuffer
     );
 
     // Load output blob into ExcelJS to run assertions
@@ -394,8 +392,7 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
   });
 
   it("writes computed values into Budget Line Items and appends missing mapped codes", async () => {
-    const templatePath = path.resolve(__dirname, "../../public/templates/Company_Estimate_Template.xlsx");
-    const templateBuffer = fs.readFileSync(templatePath);
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
     const rows = [concreteRow, footingsRow, div02Row];
 
     const blob = await generateExcelWorkbook(

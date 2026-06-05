@@ -26,6 +26,7 @@ import {
   getCostCodeMap,
   getProjects,
 } from "../db";
+import { MASTER_TEMPLATE_NAME } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
 const makeRow = (overrides: Partial<ProcessedTakeoffRow> = {}): ProcessedTakeoffRow => ({
@@ -129,13 +130,13 @@ describe("Phase 3a — getCostCodeMap", () => {
     mockOrder.mockResolvedValueOnce({
       data: [
         {
-          template_name: "Company_Estimate_Template.xlsx",
+          template_name: MASTER_TEMPLATE_NAME,
           internal_code: "03-0000.002",
           procore_code: "3-30000.000",
           source: "sibling",
         },
         {
-          template_name: "Company_Estimate_Template.xlsx",
+          template_name: MASTER_TEMPLATE_NAME,
           internal_code: "12-3570.001",
           procore_code: "6-64100.000",
           source: "manual",
@@ -144,17 +145,17 @@ describe("Phase 3a — getCostCodeMap", () => {
       error: null,
     });
 
-    const entries = await getCostCodeMap("Company_Estimate_Template.xlsx");
+    const entries = await getCostCodeMap(MASTER_TEMPLATE_NAME);
 
     expect(entries).toEqual([
       {
-        templateName: "Company_Estimate_Template.xlsx",
+        templateName: MASTER_TEMPLATE_NAME,
         internalCode: "03-0000.002",
         procoreCode: "3-30000.000",
         source: "sibling",
       },
       {
-        templateName: "Company_Estimate_Template.xlsx",
+        templateName: MASTER_TEMPLATE_NAME,
         internalCode: "12-3570.001",
         procoreCode: "6-64100.000",
         source: "manual",
@@ -169,7 +170,7 @@ describe("Phase 3a — getCostCodeMap", () => {
     });
 
     await expect(
-      getCostCodeMap("Company_Estimate_Template.xlsx")
+      getCostCodeMap(MASTER_TEMPLATE_NAME)
     ).rejects.toThrow("Failed to fetch cost code map: Connection failed");
   });
 });

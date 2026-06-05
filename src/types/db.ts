@@ -110,15 +110,56 @@ export interface DivisionLayout {
   label?: string;
 }
 
+/**
+ * Bottom-of-sheet row geometry for the STEP 4 - ESTIMATE sheet.
+ * Values are ORIGINAL template row numbers (pre-insertion); the exporter
+ * applies its rowShift on top. Derived in code, not stored:
+ *   - auto-filter / print-area data boundary = subtotalRow - 1
+ *   - sheet dimension end = reconStartRow + 3 (4 reconciliation rows)
+ *   - data start row = divisions[0].headerRow; column-header row = that - 1
+ *   - grand total row = subtotalRow + grandTotalOffset
+ *   - modifier rows = subtotalRow + modifierStartOffset..modifierEndOffset
+ */
+export interface TemplateLayoutAnchors {
+  /** Itemized subtotal row (e.g. 331) */
+  subtotalRow: number;
+  /** First modifier row, as an offset from subtotalRow (e.g. 2 → row 333) */
+  modifierStartOffset: number;
+  /** Last modifier row, as an offset from subtotalRow (e.g. 8 → row 339) */
+  modifierEndOffset: number;
+  /** Grand total row, as an offset from subtotalRow (e.g. 10 → row 341) */
+  grandTotalOffset: number;
+  /** First of the 4 reconciliation rows (e.g. 346) */
+  reconStartRow: number;
+}
+
+/** Names of the Procore rollup sheets resolved by the exporter. */
+export interface TemplateSheetNames {
+  budgetLineItems: string;
+  importerDataFields: string;
+}
+
+/**
+ * Phase 3b: the self-describing layout object stored in
+ * template_config.config_data. The single source of truth for the exporter's
+ * row geometry — there is no hardcoded fallback (the app throws if this is
+ * missing or still in the legacy bare-array shape).
+ */
+export interface TemplateLayoutConfig {
+  divisions: DivisionLayout[];
+  anchors: TemplateLayoutAnchors;
+  sheetNames: TemplateSheetNames;
+}
+
 export interface TemplateConfig {
   id: string;
   templateName: string;
   sheetName: string;
   configType: string;
-  configData: DivisionLayout[];
+  configData: TemplateLayoutConfig;
   createdAt?: string;
   updatedAt?: string;
-  /** Phase 3a: per-project-type template selection (wired in Phase 3b) */
+  /** Phase 3a: per-project-type template selection (deferred — dormant) */
   projectType?: string | null;
 }
 

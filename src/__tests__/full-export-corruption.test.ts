@@ -7,11 +7,11 @@ import type { Project } from "@/types/db";
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
+import { MASTER_TEMPLATE_LAYOUT, MASTER_TEMPLATE_PATH } from "./fixtures/templateLayout";
 
 describe("Full Export Corruption Test", () => {
   it("should produce valid XLSX with all 230+ rows", async () => {
-    const templatePath = path.resolve(__dirname, "../../public/templates/Company_Estimate_Template.xlsx");
-    const templateBuffer = fs.readFileSync(templatePath);
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
 
     // Initialize all rows from catalog (just like the real app does)
     const sortedKeys = Object.keys(ESTIMATE_ITEMS_MASTER).sort();
@@ -85,12 +85,12 @@ describe("Full Export Corruption Test", () => {
 
     console.log(`Generating workbook with ${mockRows.length} rows...`);
 
-    const blob = await (generateExcelWorkbook as any)(
+    const blob = await generateExcelWorkbook(
       mockRows,
       mockProject,
       mockColumns,
-      null, // use DEFAULT_LAYOUT_CONFIG
-      templateBuffer
+      MASTER_TEMPLATE_LAYOUT, // canonical fixture (hardcoded fallback removed in Phase 3b)
+      templateBuffer as unknown as ArrayBuffer
     );
 
     const arrayBuffer = await blob.arrayBuffer();
@@ -138,6 +138,37 @@ describe("Full Export Corruption Test", () => {
       const dupes = rowNums.filter((v, i, a) => a.indexOf(v) !== i);
       if (dupes.length > 0) {
         issues.push(`${sheetFile}: duplicate row numbers: ${dupes.join(', ')}`);
+      }
+
+      // Rows must be in ascending order
+      const rowNumsInt = rowNums.map((r) => parseInt(r!, 10));
+      for (let i = 1; i < rowNumsInt.length; i++) {
+        if (rowNumsInt[i] <= rowNumsInt[i - 1]) {
+          issues.push(`${sheetFile}: row order violation ${rowNumsInt[i - 1]} -> ${rowNumsInt[i]}`);
+        }
+      }
+
+      // Within each row: cell refs must carry the row's number AND columns
+      // must be strictly ascending — Excel silently STRIPS out-of-order cells
+      // via repair ("Removed Records: Cell information"). Caught in the wild
+      // 2026-06-05: getOrCreateCell appended new cells (e.g. costType col A on
+      // inserted overflow rows) after existing higher columns.
+      const colToIdx = (letters: string) =>
+        letters.split("").reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
+      for (const rowMatch of xml.matchAll(/<row r="(\d+)"[^>]*?(?<!\/)>([\s\S]*?)<\/row>/g)) {
+        const rNum = rowMatch[1];
+        let prevColIdx = 0;
+        for (const cellMatch of rowMatch[2].matchAll(/<c r="([A-Z]+)(\d+)"/g)) {
+          const [, colLetters, cellRowNum] = cellMatch;
+          if (cellRowNum !== rNum) {
+            issues.push(`${sheetFile}: cell ${colLetters}${cellRowNum} inside row ${rNum}`);
+          }
+          const colIdx = colToIdx(colLetters);
+          if (colIdx <= prevColIdx) {
+            issues.push(`${sheetFile}: row ${rNum} cell column order violation at ${colLetters}${cellRowNum}`);
+          }
+          prevColIdx = colIdx;
+        }
       }
     }
 

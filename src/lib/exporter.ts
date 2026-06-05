@@ -1,5 +1,5 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
-import { Project, DivisionLayout } from "@/types/db";
+import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS } from "./constants";
 import { computeTakeoffSummary } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
@@ -349,36 +349,33 @@ export function validateExportReadiness(rows: ProcessedTakeoffRow[]): ExportRead
 }
 
 /**
- * Generates an Excel Workbook from a company template file, injects values
- * into "STEP 4 - ESTIMATE" sheet, recalculates markups, and returns a downloadable Blob.
+ * Asserts the layout config + template buffer are present and structurally
+ * sound before any XML surgery. Phase 3b removed the hardcoded
+ * DEFAULT_LAYOUT_CONFIG fallback: template_config.config_data (via db.ts,
+ * which validates the full shape) is the single source of truth, so a
+ * missing/invalid config must fail loudly instead of exporting with stale
+ * built-in coordinates.
  */
-const DEFAULT_LAYOUT_CONFIG: DivisionLayout[] = [
-  { division: "01", headerRow: 10, startRow: 11, endRow: 14 },
-  { division: "02", headerRow: 15, startRow: 16, endRow: 25 },
-  { division: "03", headerRow: 26, startRow: 27, endRow: 52 },
-  { division: "04", headerRow: 53, startRow: 54, endRow: 62 },
-  { division: "05", headerRow: 63, startRow: 64, endRow: 72 },
-  { division: "06", headerRow: 73, startRow: 74, endRow: 92 },
-  { division: "07", headerRow: 93, startRow: 94, endRow: 130 },
-  { division: "08", headerRow: 131, startRow: 132, endRow: 149 },
-  { division: "09", headerRow: 150, startRow: 151, endRow: 164 },
-  { division: "10", headerRow: 165, startRow: 166, endRow: 189 },
-  { division: "11", headerRow: 190, startRow: 191, endRow: 199 },
-  { division: "12", headerRow: 200, startRow: 201, endRow: 211 },
-  { division: "13", headerRow: 212, startRow: 213, endRow: 219 },
-  { division: "14", headerRow: 220, startRow: 221, endRow: 226 },
-  { division: "21", headerRow: 227, startRow: 228, endRow: 231 },
-  { division: "22", headerRow: 232, startRow: 233, endRow: 238 },
-  { division: "23", headerRow: 239, startRow: 240, endRow: 242 },
-  { division: "26", headerRow: 243, startRow: 244, endRow: 250 },
-  { division: "27", headerRow: 251, startRow: 252, endRow: 255 },
-  { division: "28", headerRow: 256, startRow: 257, endRow: 262 },
-  { division: "31", headerRow: 263, startRow: 264, endRow: 270 },
-  { division: "32", headerRow: 271, startRow: 272, endRow: 291 },
-  { division: "33", headerRow: 292, startRow: 293, endRow: 304 },
-  { division: "50", headerRow: 305, startRow: 306, endRow: 315 },
-  { division: "80", headerRow: 316, startRow: 317, endRow: 330 }
-];
+function assertWorkbookInputs(
+  layoutConfig: TemplateLayoutConfig | null | undefined,
+  templateBuffer: ArrayBuffer | null | undefined
+): asserts layoutConfig is TemplateLayoutConfig {
+  if (
+    !layoutConfig?.divisions?.length ||
+    !layoutConfig.anchors ||
+    !layoutConfig.sheetNames
+  ) {
+    throw new Error(
+      "generateExcelWorkbook requires a template layout config ({divisions, anchors, sheetNames}) " +
+      "from template_config.config_data — the hardcoded fallback was removed in Phase 3b."
+    );
+  }
+  if (!templateBuffer) {
+    throw new Error(
+      "generateExcelWorkbook requires the template file buffer — fetch it via downloadTemplateFile() in db.ts."
+    );
+  }
+}
 
 /**
  * Builds a row-shift resolver for cross-sheet formula fixup.
@@ -610,7 +607,23 @@ function getOrCreateCell(
   const existing = findCellInRow(rowEl, colLetter);
   if (existing) return existing;
   const newCell = createCellElement(`${colLetter}${rowNum}`, defaultStyleIdx);
-  rowEl.row.push(newCell);
+  // Excel requires <c> elements in ascending column order within a <row>;
+  // out-of-order cells are silently stripped by Excel's repair ("Removed
+  // Records: Cell information"). Insert in position — never append blindly.
+  // (Mirrors insertRowElement, which keeps <row> elements ordered.)
+  const newColIdx = colLetterToIndex(colLetter);
+  const children: ParsedElement[] = rowEl.row;
+  let insertIdx = children.length;
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].c === undefined) continue; // non-cell node
+    const ref = children[i][":@"]?.["@_r"] || "";
+    const { col } = parseCellRef(ref);
+    if (col && colLetterToIndex(col) > newColIdx) {
+      insertIdx = i;
+      break;
+    }
+  }
+  children.splice(insertIdx, 0, newCell);
   return newCell;
 }
 
@@ -773,23 +786,15 @@ export async function generateExcelWorkbook(
   rows: ProcessedTakeoffRow[],
   projectMetadata: Project | null | undefined,
   columnDefs: ColumnDefinition[],
-  layoutConfig?: DivisionLayout[] | null,
-  templateBuffer?: ArrayBuffer | null
+  layoutConfig: TemplateLayoutConfig,
+  templateBuffer: ArrayBuffer
 ): Promise<Blob> {
   // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
 
-  let buffer: ArrayBuffer;
-  if (templateBuffer) {
-    buffer = templateBuffer;
-  } else {
-    const response = await fetch("/templates/Company_Estimate_Template.xlsx");
-    if (!response.ok) {
-      throw new Error(`Failed to load corporate template Company_Estimate_Template.xlsx (Status: ${response.status})`);
-    }
-    buffer = await response.arrayBuffer();
-  }
+  assertWorkbookInputs(layoutConfig, templateBuffer);
+  const { anchors, sheetNames } = layoutConfig;
 
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = await JSZip.loadAsync(templateBuffer);
 
   let wbXml = await zip.file("xl/workbook.xml")!.async("string");
   let relsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
@@ -1036,8 +1041,10 @@ export async function generateExcelWorkbook(
   }
 
   const divisions = JSON.parse(
-    JSON.stringify(layoutConfig || DEFAULT_LAYOUT_CONFIG)
+    JSON.stringify(layoutConfig.divisions)
   ) as DivisionLayout[];
+  // Top of the STEP 4 data region (row 10); the column-header row sits above it.
+  const dataStartRow = divisions[0].headerRow;
   let rowShift = 0;
   const insertionsByDivision: Record<string, number> = {};
 
@@ -1179,18 +1186,20 @@ export async function generateExcelWorkbook(
   }
 
   // ── PHASE 2f: Subtotal, Modifiers, Grand Total, Reconciliation ─────────────
+  // Row geometry comes from template_config.config_data anchors (Phase 3b);
+  // all anchor values are ORIGINAL template rows, shifted by rowShift here.
 
-  const subtotalRowIdx = 331 + rowShift;
+  const subtotalRowIdx = anchors.subtotalRow + rowShift;
 
   // Subtotal formula
   const subtotalRowEl = findRowElement(sheetDataChildren, subtotalRowIdx);
   if (subtotalRowEl) {
     const iCell = findCellInRow(subtotalRowEl, "I");
-    if (iCell) setCellFormula(iCell, `SUM(I10:I${subtotalRowIdx - 1})`);
+    if (iCell) setCellFormula(iCell, `SUM(I${dataStartRow}:I${subtotalRowIdx - 1})`);
   }
 
-  // Modifier rows (subtotal + 2 through subtotal + 8)
-  for (let offset = 2; offset <= 8; offset++) {
+  // Modifier rows (subtotal + modifierStartOffset through subtotal + modifierEndOffset)
+  for (let offset = anchors.modifierStartOffset; offset <= anchors.modifierEndOffset; offset++) {
     const r = subtotalRowIdx + offset;
     const modRowEl = findRowElement(sheetDataChildren, r);
     if (!modRowEl) continue;
@@ -1222,12 +1231,12 @@ export async function generateExcelWorkbook(
     if (pModCell) setCellFormula(pModCell, `I${r}`);
   }
 
-  // Grand Total row
-  const totalRowIdx = subtotalRowIdx + 10;
+  // Grand Total row (= subtotal + grandTotalOffset; the SUM spans the rows between them)
+  const totalRowIdx = subtotalRowIdx + anchors.grandTotalOffset;
   const totalRowEl = findRowElement(sheetDataChildren, totalRowIdx);
   if (totalRowEl) {
     const iTotal = findCellInRow(totalRowEl, "I");
-    if (iTotal) setCellFormula(iTotal, `SUM(I${subtotalRowIdx}:I${subtotalRowIdx + 9})`);
+    if (iTotal) setCellFormula(iTotal, `SUM(I${subtotalRowIdx}:I${totalRowIdx - 1})`);
 
     const jTotal = findCellInRow(totalRowEl, "J");
     if (jTotal) setCellFormula(jTotal, `IF($J$8=0, 0, I${totalRowIdx}/$J$8)`);
@@ -1236,24 +1245,24 @@ export async function generateExcelWorkbook(
     if (kTotal) setCellFormula(kTotal, `IF($K$8=0, 0, I${totalRowIdx}/$K$8)`);
 
     const pTotal = findCellInRow(totalRowEl, "P");
-    if (pTotal) setCellFormula(pTotal, `SUM(P10:P${totalRowIdx - 1})`);
+    if (pTotal) setCellFormula(pTotal, `SUM(P${dataStartRow}:P${totalRowIdx - 1})`);
   }
 
-  // Reconciliation rows
-  const reconStartRow = 346 + rowShift;
+  // Reconciliation rows (4 rows starting at anchors.reconStartRow)
+  const reconStartRow = anchors.reconStartRow + rowShift;
 
-  // Row 346: "Totals from Column E"
+  // Recon row 1 (template row 346): "Totals from Column E"
   const reconRow1 = findRowElement(sheetDataChildren, reconStartRow);
   if (reconRow1) {
     const eRecon1 = findCellInRow(reconRow1, "E");
-    if (eRecon1) setCellFormula(eRecon1, `SUM(E10:E${reconStartRow - 1})`);
+    if (eRecon1) setCellFormula(eRecon1, `SUM(E${dataStartRow}:E${reconStartRow - 1})`);
   }
 
-  // Row 347: "Contingency, Insurance and Fee"
+  // Recon row 2 (template row 347): "Contingency, Insurance and Fee"
   const reconRow2 = findRowElement(sheetDataChildren, reconStartRow + 1);
   if (reconRow2) {
     const eRecon2 = findCellInRow(reconRow2, "E");
-    if (eRecon2) setCellFormula(eRecon2, `SUM(I${subtotalRowIdx + 1}:I${subtotalRowIdx + 9})`);
+    if (eRecon2) setCellFormula(eRecon2, `SUM(I${subtotalRowIdx + 1}:I${totalRowIdx - 1})`);
 
     const oRecon2 = findCellInRow(reconRow2, "O");
     if (oRecon2) setCellFormula(oRecon2, `I${totalRowIdx}-P${totalRowIdx}`);
@@ -1262,14 +1271,14 @@ export async function generateExcelWorkbook(
     if (pRecon2) setCellFormula(pRecon2, `O${reconStartRow + 1}/P${totalRowIdx}`);
   }
 
-  // Row 348: "Total"
+  // Recon row 3 (template row 348): "Total"
   const reconRow3 = findRowElement(sheetDataChildren, reconStartRow + 2);
   if (reconRow3) {
     const eRecon3 = findCellInRow(reconRow3, "E");
     if (eRecon3) setCellFormula(eRecon3, `SUM(E${reconStartRow}:E${reconStartRow + 1})`);
   }
 
-  // Row 349: "Equals Totals from Column I"
+  // Recon row 4 (template row 349): "Equals Totals from Column I"
   const reconRow4 = findRowElement(sheetDataChildren, reconStartRow + 3);
   if (reconRow4) {
     const eRecon4 = findCellInRow(reconRow4, "E");
@@ -1287,19 +1296,23 @@ export async function generateExcelWorkbook(
 
   // ── PHASE 3: Metadata Updates + ZIP Write ──────────────────────────────────
 
-  const originalDivisions = layoutConfig || DEFAULT_LAYOUT_CONFIG;
-  const shiftRow = buildRowShifter(originalDivisions, insertionsByDivision);
+  const shiftRow = buildRowShifter(layoutConfig.divisions, insertionsByDivision);
 
-  // 3a: Update AutoFilter range
+  // Derived boundaries (see TemplateLayoutAnchors): last data row sits just
+  // above the subtotal; the sheet ends at the last of the 4 recon rows.
+  const dataEndRow = anchors.subtotalRow - 1;
+  const sheetEndRow = anchors.reconStartRow + 3;
+
+  // 3a: Update AutoFilter range (column-header row spans the data region)
   step4Xml = step4Xml.replace(
     /(<autoFilter[^>]*ref=")[^"]+(")/,
-    `$1A9:K${330 + rowShift}$2`
+    `$1A${dataStartRow - 1}:K${dataEndRow + rowShift}$2`
   );
 
   // 3a: Update Dimension
   step4Xml = step4Xml.replace(
     /(<dimension[^>]*ref=")[^"]+(")/,
-    `$1B1:U${349 + rowShift}$2`
+    `$1B1:U${sheetEndRow + rowShift}$2`
   );
 
   // 3a: Update MergeCells — shift row numbers
@@ -1332,7 +1345,7 @@ export async function generateExcelWorkbook(
       (_match: string, prefix: string, rowStr: string, suffix: string) => {
         const origRow = parseInt(rowStr, 10);
         // Only shift rows in the range that's above the data region boundary
-        if (origRow > 330) {
+        if (origRow > dataEndRow) {
           return `${prefix}${origRow + rowShift}${suffix}`;
         }
         return `${prefix}${rowStr}${suffix}`;
@@ -1343,7 +1356,7 @@ export async function generateExcelWorkbook(
   // 3d: Cross-sheet formula row shifting + #REF! fix
   if (rowShift > 0) {
     const crossSheetNames = [
-      "COVER", "STEP 2 - GCs", "STEP 3 - SITE OPS", "PER DIEM", "Budget Line Items"
+      "COVER", "STEP 2 - GCs", "STEP 3 - SITE OPS", "PER DIEM", sheetNames.budgetLineItems
     ];
 
     for (const sheetName of crossSheetNames) {
@@ -1386,7 +1399,7 @@ export async function generateExcelWorkbook(
   const procoreRollup = rollupByProcoreCode(rows);
   let bliSheetFile: string | null = null;
   try {
-    bliSheetFile = resolveSheetFile(wbXml, relsXml, "Budget Line Items");
+    bliSheetFile = resolveSheetFile(wbXml, relsXml, sheetNames.budgetLineItems);
   } catch {
     bliSheetFile = null; // Template variant without a BLI sheet — skip phase
   }
@@ -1399,7 +1412,7 @@ export async function generateExcelWorkbook(
       // col B = official cost code description.
       const importerCodes = new Map<string, string>();
       try {
-        const impFile = resolveSheetFile(wbXml, relsXml, "Importer Data Fields");
+        const impFile = resolveSheetFile(wbXml, relsXml, sheetNames.importerDataFields);
         const impXml = await zip.file(`xl/${impFile}`)?.async("string");
         const impDataMatch = impXml?.match(/<sheetData>([\s\S]*)<\/sheetData>/);
         if (impDataMatch) {
@@ -1451,7 +1464,7 @@ export async function generateExcelWorkbook(
           // Writing would clobber the estimator's live formula; skipping would
           // silently drop dollars. Surface instead of guessing.
           throw new Error(
-            `Budget Line Items row for "${code}" is driven by a live STEP 2/3 formula, but app line items total $${amount.toFixed(2)} for it. Resolve the mapping before export.`
+            `${sheetNames.budgetLineItems} row for "${code}" is driven by a live STEP 2/3 formula, but app line items total $${amount.toFixed(2)} for it. Resolve the mapping before export.`
           );
         }
       }
@@ -1463,7 +1476,7 @@ export async function generateExcelWorkbook(
       for (const code of missingCodes) {
         if (importerCodes.size > 0 && !importerCodes.has(code)) {
           throw new Error(
-            `Procore code "${code}" is not present in the template's Importer Data Fields sheet — cannot append it to Budget Line Items.`
+            `Procore code "${code}" is not present in the template's ${sheetNames.importerDataFields} sheet — cannot append it to ${sheetNames.budgetLineItems}.`
           );
         }
         lastDataRowNum++;

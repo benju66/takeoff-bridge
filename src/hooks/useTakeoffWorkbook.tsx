@@ -30,6 +30,7 @@ import {
   getTemplateConfig,
 } from "@/lib/db";
 import { getFuzzySuggestions } from "@/lib/similarity";
+import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -332,7 +333,7 @@ export function useTakeoffWorkbook(
             getGlobalRegistry(),
             getProjectColumnDefs(projectId),
             getProjectLockedCells(projectId),
-            getTemplateConfig("Company_Estimate_Template.xlsx"),
+            getTemplateConfig(MASTER_TEMPLATE_NAME),
           ]);
 
         if (cancelled) return;
@@ -341,7 +342,8 @@ export function useTakeoffWorkbook(
         setUserRegistry(savedRegistry);
         setGlobalRegistry(savedGlobalReg);
         if (savedTemplateConfig) {
-          setLayoutConfig(savedTemplateConfig.configData);
+          // EstimateTable consumes the division ranges/labels only
+          setLayoutConfig(savedTemplateConfig.configData.divisions);
         }
 
         // Apply line items — honor sort_order from DB

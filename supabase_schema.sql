@@ -8,9 +8,11 @@
 --
 -- Tables: 13 (added cost_code_map — Phase 3a)
 -- RPC Functions: 1 (save_estimate_line_items)
--- RLS Policies: 15 (scoped, identity-aware tenant isolation filters)
+-- RLS Policies: 16 (15 tenant-scoped + 1 storage.objects read policy — Phase 3b)
+-- Storage buckets: 1 ('templates', private — Phase 3b)
 --
--- Last updated: 2026-06-05 (Phase 3a: cost_code_map, procore_code, project_type)
+-- Last updated: 2026-06-05 (Phase 3b: private templates bucket; config_data
+-- becomes the self-describing {divisions, anchors, sheetNames} object)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -449,12 +451,28 @@ CREATE POLICY "template_config_select_policy" ON template_config
   TO authenticated
   USING (true);
 
+-- Phase 3b: config_data is the self-describing layout object for the template.
+--   divisions  — STEP 4 division row ranges (also feeds UI division labels)
+--   anchors    — bottom-of-sheet row geometry. Derived in code (not stored):
+--                auto-filter/print-area boundary = subtotalRow - 1 (330);
+--                dimension end = reconStartRow + 3 (349);
+--                data start = divisions[0].headerRow (10), column headers = 9;
+--                grand total = subtotalRow + grandTotalOffset (341);
+--                modifier rows = subtotalRow + modifierStartOffset..modifierEndOffset (333–339)
+--   sheetNames — Procore rollup sheets resolved by the exporter
+-- The app THROWS if this row is missing or still in the legacy bare-array
+-- shape — there is no hardcoded fallback (Phase 3b removed DEFAULT_LAYOUT_CONFIG).
+--
+-- Rollback to the pre-3b shape (legacy array):
+--   UPDATE template_config SET config_data = config_data->'divisions', updated_at = now()
+--   WHERE template_name = 'Company_Estimate_Template.xlsx' AND jsonb_typeof(config_data) = 'object';
 INSERT INTO template_config (template_name, sheet_name, config_type, config_data)
 VALUES (
   'Company_Estimate_Template.xlsx',
   'STEP 4 - ESTIMATE',
   'layout',
-  '[
+  '{
+   "divisions": [
     {"division": "01", "headerRow": 10, "startRow": 11, "endRow": 14, "label": "DIVISION 01 — GENERAL CONDITIONS"},
     {"division": "02", "headerRow": 15, "startRow": 16, "endRow": 25, "label": "DIVISION 02 — SITE OPERATIONS"},
     {"division": "03", "headerRow": 26, "startRow": 27, "endRow": 52, "label": "DIVISION 03 — CONCRETE"},
@@ -480,13 +498,53 @@ VALUES (
     {"division": "33", "headerRow": 292, "startRow": 293, "endRow": 304, "label": "DIVISION 33 — UTILITIES"},
     {"division": "50", "headerRow": 305, "startRow": 306, "endRow": 315, "label": "DIVISION 50 — WINTER CONDITIONS"},
     {"division": "80", "headerRow": 316, "startRow": 317, "endRow": 330, "label": "DIVISION 80 — ALLOWANCES"}
-  ]'::jsonb
+   ],
+   "anchors": {
+    "subtotalRow": 331,
+    "modifierStartOffset": 2,
+    "modifierEndOffset": 8,
+    "grandTotalOffset": 10,
+    "reconStartRow": 346
+   },
+   "sheetNames": {
+    "budgetLineItems": "Budget Line Items",
+    "importerDataFields": "Importer Data Fields"
+   }
+  }'::jsonb
 )
 ON CONFLICT (template_name) DO UPDATE
 SET sheet_name = EXCLUDED.sheet_name,
     config_type = EXCLUDED.config_type,
     config_data = EXCLUDED.config_data,
     updated_at = now();
+
+-- ─────────────────────────────────────────────────
+-- Storage: 'templates' bucket (Phase 3b — private)
+-- ─────────────────────────────────────────────────
+--
+-- Holds corporate estimate template .xlsx files (runtime source for exports).
+-- Private: the file moved OUT of /public so it is no longer downloadable
+-- without authentication. The git-tracked canonical copy lives at
+-- templates/Company_Estimate_Template.xlsx; `npm run upload-template`
+-- (service role) pushes it into this bucket.
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('templates', 'templates', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Read: any signed-in user (mirrors template_config's access model).
+-- NO insert/update/delete policies: writes happen only via the
+-- service-role upload script / dashboard (service role bypasses RLS).
+CREATE POLICY "templates_bucket_select_policy" ON storage.objects
+  FOR SELECT
+  TO authenticated
+  USING (bucket_id = 'templates');
+
+-- Rollback (template file is also still served from /public until the
+-- post-verification cleanup commit removes it):
+--   DROP POLICY "templates_bucket_select_policy" ON storage.objects;
+--   DELETE FROM storage.objects WHERE bucket_id = 'templates';
+--   DELETE FROM storage.buckets WHERE id = 'templates';
 
 -- ─────────────────────────────────────────────────
 -- Table 11: cost_code_map (Phase 3a — app-owned granular Procore mapping)

@@ -2,7 +2,7 @@
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
 - **Date:** 2026-06-04 (updated 2026-06-05)
-- **Status:** PHASE 1 + 1.5 + 2 + **3a** COMPLETE (3a implemented 2026-06-05 on `2026.06.04`, awaiting user review) — migration `phase3a_cost_code_map_and_procore_persistence` APPLIED TO MAIN (verified on branch first). Next: Phase 3b (fresh session).
+- **Status:** PHASE 1 + 1.5 + 2 + 3a + **3b** COMPLETE (3b implemented + user-verified end-to-end 2026-06-05; Storage cutover live, /public copy removed post-verification). Next: Phase 3c mapping-editor UI (fresh session) — see the 3c MUST-DO in the 3a/3b progress entries.
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
 
 > **Progress log**
@@ -53,6 +53,29 @@
 >   auth pages) until Phase 3's persisted `procore_code` column removes it.~~ **RESOLVED in 3a** —
 >   import retired (catalog still ships in workspace bundles via `mock-data.ts` consumers, which is
 >   expected until 3c re-points row creation at `cost_code_map`).
+> - ✅ **Phase 3b** (2026-06-05, plan approved before code; RESCOPED per §8.0 — single master
+>   template, NO per-type/project_type wiring): private Storage bucket `templates` (authenticated
+>   SELECT only; service-role writes via `npm run upload-template`, round-trip byte-verified;
+>   public URL returns 400); `template_config.config_data` rewrapped live to
+>   `{divisions, anchors, sheetNames}` (exact payload + rollback SQL in `supabase_schema.sql`);
+>   exporter DEFAULT_LAYOUT_CONFIG + /public fetch fallback DELETED (config + buffer now required,
+>   throw if missing); `downloadTemplateFile()` in db.ts is the ONLY Storage access point;
+>   `MASTER_TEMPLATE_NAME`/`TEMPLATE_STORAGE_BUCKET` constants centralize the literal (3a finding #3);
+>   canonical .xlsx moved to git-tracked `templates/` (feeds tests, harvest script, upload script);
+>   drift guard `template-layout-sync.test.ts` pins fixture === schema seed. DB changes applied
+>   direct-to-main (user-approved; idempotent + rollback SQL; advisors unchanged — same 8
+>   pre-existing WARNs). Gate green: build, 170/170 unit, e2e; user verified a real export opens
+>   clean in Excel. /public copy deleted in a follow-up commit after that verification (§12 satisfied).
+>   **Bonus fix (pre-existing, found in user tie-out):** `getOrCreateCell` appended new cells
+>   out of column order (costType col A on inserted overflow rows) → Excel repair stripped them
+>   ("Removed Records: Cell information", sheet7 = STEP 4). Fixed with ordered insert;
+>   `full-export-corruption.test.ts` now asserts row order + per-row ascending cell columns.
+>   **Deferred findings for 3c / later:** (1) the 3a MUST-DO stands — add `resolveProcoreCode`
+>   chokepoint before the mapping editor ships; (2) deleted-project workspace guard: opening a
+>   stale URL to a deleted project silently initializes defaults and auto-save 403s (RLS correctly
+>   refuses) — show "project not found" + redirect instead; (3) `procoreParentCode` removal
+>   (redundant since 3a); (4) STEP 1/2/3/4, COVER, PER DIEM sheet names remain hardcoded by scope
+>   decision — fold into `sheetNames` when the per-type templates phase defines variants.
 
 ---
 
@@ -199,7 +222,7 @@ zero migration risk, independently revertable, in forced dependency order (3c ne
 | Sub-phase | Scope (from §8.1/§8.2) | Delivers / verifies |
 |---|---|---|
 | **3a — Schema + persistence** ✅ DONE 2026-06-05 | ALL of §8.1 DDL in one migration (branch first, per §11); seed `cost_code_map` from the catalog; `db.ts` accessors (`getCostCodeMap`, `procore_code` in line-item load/save + RPC, `project_type` mapping); retire the `db.ts` 55KB catalog import. | Retires both accepted Phase 2 limitations (override-modal assignments lost on reload; +15KB auth-page bundles). Verified with existing Phase 2 export gates: export a real project, tie-out must hold. **Done — see progress log for outcomes, scope deviation, and deferred findings.** |
-| **3b — Storage + config-driven layout** (RESCOPED 2026-06-05, user decision) | Private Storage bucket; migrate the single master template out of `/public`, fetched via `db.ts`; exporter layout anchors into `template_config.config_data`, delete hardcoded fallback (the `exporter.ts` + `useExportHandlers.ts` rows of §8.2); centralize the template-name literal (~9 sites) into one constant. **Per-type templates + `project_type` UI wiring DEFERRED** — only the master estimate form exists; per-type template contents are undefined. The `project_type` column/mapping from 3a stays dormant until a future templates phase defines MF/TI/Medical contents. | Own rollback story (§12): old template stays in `/public` until cutover verified. Export ties out with the single master template (Phase 2 checks). |
+| **3b — Storage + config-driven layout** ✅ DONE 2026-06-05 (RESCOPED, user decision) | Private Storage bucket; migrate the single master template out of `/public`, fetched via `db.ts`; exporter layout anchors into `template_config.config_data`, delete hardcoded fallback (the `exporter.ts` + `useExportHandlers.ts` rows of §8.2); centralize the template-name literal (~9 sites) into one constant. **Per-type templates + `project_type` UI wiring DEFERRED** — only the master estimate form exists; per-type template contents are undefined. The `project_type` column/mapping from 3a stays dormant until a future templates phase defines MF/TI/Medical contents. | Own rollback story (§12): old template stays in `/public` until cutover verified. Export ties out with the single master template (Phase 2 checks). |
 | **3c — Mapping-editor UI** | Global-settings page over a live, seeded `cost_code_map`: view/edit mappings, validated against Importer codes, writes via `db.ts`, `source='manual'` (scope added 2026-06-04). | Pure app code; edit a mapping, re-export, confirm dollars move to the new code and still reconcile. |
 
 ### 8.1 Schema changes — proposed DDL (update `supabase_schema.sql` first, then approve, then migrate — ALL applied in sub-phase 3a)

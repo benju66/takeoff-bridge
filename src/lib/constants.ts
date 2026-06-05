@@ -151,6 +151,24 @@ export const ESTIMATE_MODIFIERS: readonly EstimateModifierConfig[] = [
 export const COMMODITY_THRESHOLD = 5000;
 
 // ---------------------------------------------------------------------------
+// Corporate Estimate Template (Phase 3b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical filename of the single master estimate template.
+ * Keys template_config + cost_code_map rows and the Storage object name.
+ * (Per-project-type templates are deferred — see §8.0 of the Phase 3 plan.)
+ */
+export const MASTER_TEMPLATE_NAME = "Company_Estimate_Template.xlsx";
+
+/**
+ * Private Supabase Storage bucket holding the template .xlsx files.
+ * Read requires an authenticated session; writes go through
+ * `npm run upload-template` (service role) only.
+ */
+export const TEMPLATE_STORAGE_BUCKET = "templates";
+
+// ---------------------------------------------------------------------------
 // Grid Display Defaults
 // ---------------------------------------------------------------------------
 

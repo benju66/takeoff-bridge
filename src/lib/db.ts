@@ -1,5 +1,6 @@
-import { Project, ProjectEstimate, TemplateConfig, DivisionLayout, CostCodeMapEntry } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
 
@@ -799,7 +800,47 @@ export async function getSession() {
 // ═══════════════════════════════════════════════════════════════════
 
 /**
+ * Validates the raw config_data JSONB into a TemplateLayoutConfig.
+ * Phase 3b: config_data is the single source of truth for the exporter's row
+ * geometry — there is no hardcoded fallback, so an out-of-shape row must fail
+ * loudly here rather than silently exporting with stale coordinates.
+ */
+function parseTemplateLayoutConfig(templateName: string, raw: unknown): TemplateLayoutConfig {
+  if (Array.isArray(raw)) {
+    throw new Error(
+      `template_config.config_data for "${templateName}" is in the legacy bare-array shape — ` +
+      `apply the Phase 3b config migration in supabase_schema.sql ({divisions, anchors, sheetNames}).`
+    );
+  }
+  const config = raw as Partial<TemplateLayoutConfig> | null;
+  const anchors = config?.anchors;
+  const sheetNames = config?.sheetNames;
+  const valid =
+    Array.isArray(config?.divisions) &&
+    config.divisions.length > 0 &&
+    typeof anchors?.subtotalRow === "number" &&
+    typeof anchors.modifierStartOffset === "number" &&
+    typeof anchors.modifierEndOffset === "number" &&
+    typeof anchors.grandTotalOffset === "number" &&
+    typeof anchors.reconStartRow === "number" &&
+    anchors.modifierStartOffset <= anchors.modifierEndOffset &&
+    anchors.modifierEndOffset < anchors.grandTotalOffset &&
+    anchors.reconStartRow > anchors.subtotalRow &&
+    typeof sheetNames?.budgetLineItems === "string" &&
+    typeof sheetNames.importerDataFields === "string";
+  if (!valid) {
+    throw new Error(
+      `template_config.config_data for "${templateName}" is invalid — expected ` +
+      `{divisions[], anchors{subtotalRow, modifierStartOffset, modifierEndOffset, grandTotalOffset, reconStartRow}, ` +
+      `sheetNames{budgetLineItems, importerDataFields}} per supabase_schema.sql.`
+    );
+  }
+  return config as TemplateLayoutConfig;
+}
+
+/**
  * Retrieves the coordinate layout configuration for a specific spreadsheet template.
+ * Throws if the stored config_data fails Phase 3b shape validation.
  */
 export async function getTemplateConfig(
   templateName: string
@@ -822,11 +863,31 @@ export async function getTemplateConfig(
     templateName: data.template_name as string,
     sheetName: data.sheet_name as string,
     configType: data.config_type as string,
-    configData: data.config_data as DivisionLayout[],
+    configData: parseTemplateLayoutConfig(templateName, data.config_data),
     createdAt: data.created_at as string,
     updatedAt: data.updated_at as string,
     projectType: (data.project_type as string) ?? null,
   };
+}
+
+/**
+ * Downloads a template .xlsx from the private Storage bucket (Phase 3b —
+ * replaces the unauthenticated /public/templates/ fetch). Single-gateway
+ * rule applies to Storage too: this is the app's ONLY Storage access point.
+ */
+export async function downloadTemplateFile(templateName: string): Promise<ArrayBuffer> {
+  const { data, error } = await supabase.storage
+    .from(TEMPLATE_STORAGE_BUCKET)
+    .download(templateName);
+
+  if (error || !data) {
+    console.error(`Failed to download template "${templateName}" from Storage`, error);
+    throw new Error(
+      `Failed to download template "${templateName}" from the "${TEMPLATE_STORAGE_BUCKET}" bucket: ` +
+      `${error?.message ?? "empty response"}. Has it been uploaded (npm run upload-template)?`
+    );
+  }
+  return data.arrayBuffer();
 }
 
 /**

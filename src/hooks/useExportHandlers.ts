@@ -10,7 +10,8 @@ import {
   validateExportReadiness,
   ExportBlocker,
 } from "@/lib/exporter";
-import { getTemplateConfig } from "@/lib/db";
+import { getTemplateConfig, downloadTemplateFile } from "@/lib/db";
+import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // useExportHandlers — Export CSV / Excel / Procore budget download logic
@@ -105,21 +106,21 @@ export function useExportHandlers(
     setIsExportingExcel(true);
     setExportError(null);
     try {
-      const templateName = "Company_Estimate_Template.xlsx";
-
-      // 1. Fetch layout configuration from Supabase
-      const config = await getTemplateConfig(templateName);
-      const layoutConfig = config ? config.configData : null;
-
-      // 2. Fetch template file buffer
-      const response = await fetch(`/templates/${templateName}`);
-      if (!response.ok) {
-        throw new Error(`Failed to load corporate template ${templateName} (Status: ${response.status})`);
+      // 1. Fetch layout config (required, no fallback — Phase 3b: config_data
+      // is the single source of truth for row geometry) and the template file
+      // from the private Storage bucket, in parallel (both via db.ts).
+      const [config, templateBuffer] = await Promise.all([
+        getTemplateConfig(MASTER_TEMPLATE_NAME),
+        downloadTemplateFile(MASTER_TEMPLATE_NAME),
+      ]);
+      if (!config) {
+        throw new Error(
+          `No template_config row found for "${MASTER_TEMPLATE_NAME}" — seed it from supabase_schema.sql before exporting.`
+        );
       }
-      const templateBuffer = await response.arrayBuffer();
 
-      // 3. Generate Excel workbook using the relative shifting engine
-      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, layoutConfig, templateBuffer);
+      // 2. Generate Excel workbook using the relative shifting engine
+      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
