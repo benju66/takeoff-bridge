@@ -80,6 +80,7 @@ describe("Full Export Corruption Test", () => {
       bondRate: 0,
       feeRate: 0.05,
       roundingRule: "none",
+      bidDate: "",
     };
 
     console.log(`Generating workbook with ${mockRows.length} rows...`);
