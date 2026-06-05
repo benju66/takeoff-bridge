@@ -6,7 +6,7 @@
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
 - **Date authored:** 2026-06-05
-- **Status:** PENDING — (1) ✅ Phase 3c committed + merged to main 2026-06-05 (`0d3484b`, `6543a8e`); (2) waiting on user to finalize + save + close the template
+- **Status:** READY TO START — (1) ✅ Phase 3c committed + merged 2026-06-05 (`0d3484b`, `6543a8e`); (2) ✅ template finalized + closed (no lock file). Remaining: commit the template's pending changes, then run the §11 kickoff.
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
 - **Prerequisite session:** ✅ SATISFIED — Phase 3c fully committed and merged
 
@@ -65,7 +65,8 @@ confirmed both rollup targets — this is the AGENTS.md authorization to apply t
 - Preserve each item's `targetUom` / `defaultUnitPrice` / `costType` from the template during re-harvest
   (do NOT invent values).
 
-Re-sync steps for B-2 (gated on Phase 3c — harvest/seed scripts are entangled, see §9):
+Re-sync steps for B-2 (Phase 3c now committed — harvest/seed scripts are the live baseline, see §9;
+route all procoreCode assignment through the `resolveProcoreCode` chokepoint):
 1. Re-run `npm run sync-codes` against the finalized template → regenerates `estimate-catalog.json`.
    `32-1313.001` description becomes "Concrete Paving" (rollup unchanged); `32-1313.002–.005`
    disappear; `32-1613.002–.006` appear with `procoreCode: 32-321613.000`. ⚠️ Requires the template's
@@ -164,10 +165,10 @@ The export pipeline downloads from Storage; the repo copy is available for foren
 `src/lib/constants.ts`, `src/lib/estimate-catalog.json`, or the Supabase `cost_code_map`.
 
 **Gate checks before ANY code is written:**
-1. **Template finalized?** Confirm the user has saved and closed the template and there is no
-   `~$Company_Estimate_Template.xlsx` lock file. The forensic read is unreliable otherwise.
-2. **Phase 3c committed?** The harvest/seed scripts (§9) are entangled with Phase 3c. Do not
-   re-harvest until that work is committed.
+1. **Template finalized?** ✅ Confirmed 2026-06-05 — saved, closed, no `~$` lock file. (Commit the
+   template's pending changes before re-harvesting so the harvest runs against the tracked baseline.)
+2. **Phase 3c committed?** ✅ SATISFIED — Phase 3c merged 2026-06-05 (`0d3484b`, `6543a8e`). The
+   harvest/seed scripts and `resolveProcoreCode` chokepoint are now the committed baseline (see §9).
 3. **Forensic read** of the FINALIZED `templates/Company_Estimate_Template.xlsx` (unzip + parse XML,
    same method as Phase 1):
    - STEP 2 BLI SUMIF criteria (column G) for the 34 STEP-2-sourced rows
@@ -185,8 +186,9 @@ The export pipeline downloads from Storage; the repo copy is available for foren
 - **B-1** (`03-0000.010/.011/.012`, `03-4500.001`): verified in sync — no action.
 - **B-2** (`32-1313.001–.005` → `32-1613.002–.006`, rollup → `32-321613.000` Site Concrete):
   GENUINE drift, re-sync required. Full mapping table and the 4 re-sync steps are in §0.B.
-  Gated on Phase 3c (harvest/seed scripts entangled). Step 3 needs a migration (present DDL
-  for approval); step 4 surfaces affected `estimate_line_items` for user review — no silent rewrite.
+  Phase 3c committed — harvest/seed scripts are the live baseline; route procoreCode assignment
+  through `resolveProcoreCode`. Step 3 needs a migration (present DDL for approval); step 4 surfaces
+  affected `estimate_line_items` for user review — no silent rewrite.
 
 ---
 
@@ -307,10 +309,10 @@ row — more work. Defer to user at session start.
 
 ---
 
-## 9. Known Uncommitted Work — Do Not Touch
+## 9. Phase 3c Baseline — Now Committed (was "do not touch")
 
-At time of plan authoring, the following files have uncommitted changes from Phase 3c
-(mapping-editor UI, in progress in a separate session):
+Phase 3c merged 2026-06-05 (`0d3484b`, `6543a8e`). The files below were off-limits while 3c was
+in flight; they are now the **committed baseline** and may be modified by this work as needed:
 
 ```
 src/lib/db.ts
@@ -319,20 +321,19 @@ src/hooks/useCellEditing.ts
 src/hooks/useTakeoffWorkbook.tsx
 src/components/workspace/ExportOverrideModal.tsx
 src/components/layout/Sidebar.tsx
-scripts/harvest-cost-codes.js
-scripts/generate-cost-code-map-seed.js
+scripts/harvest-cost-codes.js          ← used by B-2 re-sync (`npm run sync-codes`)
+scripts/generate-cost-code-map-seed.js ← used by B-2 re-sync (`npm run generate-seed`)
+src/app/cost-codes/                     ← the mapping-editor UI (the cost_code_map UPDATE path)
+src/lib/costCodeResolver.ts             ← resolveProcoreCode chokepoint — single source for procoreCode
+src/lib/procore-valid-codes.json        ← Procore-code validation oracle (§0.D rule 4)
+e2e/*mapping-verify*.spec.ts            ← gated behind `npm run test:e2e:mapping`
 ```
 
-Untracked (Phase 3c new files):
-```
-src/app/cost-codes/
-src/lib/costCodeResolver.ts + tests
-src/lib/procoreValidCodes.ts + procore-valid-codes.json
-e2e/phase3c-mapping-verify.spec.ts
-```
-
-**Do not modify any of the above files in this session.** Wait for Phase 3c to be
-committed and merged before starting this work.
+**Important — build on the chokepoint, don't bypass it:** Phase 3c introduced
+`resolveProcoreCode` (`src/lib/costCodeResolver.ts`) as the single source of truth for a row's
+`procoreCode`, backed by `cost_code_map`. The B-2 re-sync and any new procoreCode assignment MUST
+go through it — do not reintroduce direct catalog lookups (that was the dual-source-of-truth risk
+3c was built to close).
 
 ---
 
@@ -364,12 +365,13 @@ Use this to start a fresh implementation session:
 > §0 (the four workstreams: A GC/Site Ops export, B-2 the 32-1313→32-1613 re-sync, C the
 > STEP 3→STEP 4 linkage, and D the source-of-truth rule), and §3 (gate checks before any code).
 >
-> Hard gates — do NOT write code until BOTH are true:
-> 1. Phase 3c (mapping-editor UI) is committed — the harvest/seed scripts and the files in §9 are
->    off-limits until then. If Phase 3c is not yet committed, stop and tell me.
-> 2. The template is finalized (saved/closed, no `~$` lock file).
+> Prerequisites (both ✅ satisfied as of 2026-06-05 — re-verify at start):
+> 1. Phase 3c committed (`0d3484b`, `6543a8e`) — harvest/seed scripts and the `resolveProcoreCode`
+>    chokepoint are the committed baseline. Build ON the chokepoint; do not bypass it (§9).
+> 2. Template finalized (saved/closed, no `~$` lock file). Commit its pending changes before
+>    re-harvesting so the harvest runs against the tracked baseline.
 >
-> Then, before any code:
+> Before any code:
 > 1. Encode my confirmed mappings (§0.B) into the catalog/cost_code_map as the EXPECTED set, then
 >    forensically read `templates/Company_Estimate_Template.xlsx` and DIFF against it — surface every
 >    disagreement; my mapping wins, the SUMIF is advisory only (§0.D).
