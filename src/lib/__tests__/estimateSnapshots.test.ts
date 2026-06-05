@@ -33,6 +33,7 @@ const mockRow: ProcessedTakeoffRow = {
   classification: "Slab on Grade",
   itemId: "03-3000.001",
   procoreParentCode: "3-30000.000",
+  procoreCode: "",
   description: "Concrete slab",
   matchedQty: 100,
   uom: "SF",

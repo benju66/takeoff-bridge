@@ -120,6 +120,7 @@ export function parseTogalCSV(
       classification,
       itemId,
       procoreParentCode: masterItem?.procoreParentCode || "",
+      procoreCode: masterItem?.procoreCode || "",
       description: masterItem?.description || "UNMAPPED - RECONCILE CODE",
       matchedQty: qty,
       uom: targetUom,

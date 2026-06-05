@@ -82,6 +82,7 @@ export function usePasteHandler(
           total: r.total,
           isMapped: r.isMapped,
           procoreParentCode: r.procoreParentCode,
+          procoreCode: r.procoreCode,
           uom: r.uom,
           costType: r.costType,
         };
@@ -98,6 +99,7 @@ export function usePasteHandler(
           total: r.total,
           isMapped: r.isMapped,
           procoreParentCode: r.procoreParentCode,
+          procoreCode: r.procoreCode,
           uom: r.uom,
           costType: r.costType,
         };
@@ -166,6 +168,7 @@ export function usePasteHandler(
             before.total !== after.total ||
             before.isMapped !== after.isMapped ||
             before.procoreParentCode !== after.procoreParentCode ||
+            before.procoreCode !== after.procoreCode ||
             before.uom !== after.uom ||
             before.costType !== after.costType
           ) {
@@ -191,6 +194,7 @@ export function usePasteHandler(
                 total: after.total,
                 isMapped: after.isMapped,
                 procoreParentCode: after.procoreParentCode,
+                procoreCode: after.procoreCode,
                 uom: after.uom,
                 costType: after.costType,
               },

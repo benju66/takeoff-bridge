@@ -6,6 +6,7 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
+import { captureRowFields, ITEM_ID_CASCADE_CAPTURE_FIELDS } from "@/lib/commandCapture";
 
 // ---------------------------------------------------------------------------
 // useCellEditing — Cell editing state, handlers, and cascade logic
@@ -103,6 +104,7 @@ export function useCellEditing(
       if (targetItem) {
         row.description = targetItem.description;
         row.procoreParentCode = targetItem.procoreParentCode;
+        row.procoreCode = targetItem.procoreCode;
         row.unitPrice = targetItem.defaultUnitPrice;
         row.uom = targetItem.targetUom;
         row.costType = targetItem.costType;
@@ -124,6 +126,7 @@ export function useCellEditing(
               updated[i].itemId = newCode;
               updated[i].description = targetItem.description;
               updated[i].procoreParentCode = targetItem.procoreParentCode;
+              updated[i].procoreCode = targetItem.procoreCode;
               updated[i].unitPrice = targetItem.defaultUnitPrice;
               updated[i].uom = targetItem.targetUom;
               updated[i].costType = targetItem.costType;
@@ -143,6 +146,7 @@ export function useCellEditing(
       } else {
         row.description = "UNMAPPED - RECONCILE CODE";
         row.procoreParentCode = "";
+        row.procoreCode = "";
         row.unitPrice = 0;
         row.total = 0;
         row.isMapped = false;
@@ -232,8 +236,8 @@ export function useCellEditing(
   //
   // C1 FIX (enterprise): applyCellEditDirect cascades three field types to
   // sibling rows sharing the same classification:
-  //   - itemId:     9 fields (itemId, description, procoreParentCode, unitPrice,
-  //                 uom, costType, matchedQty, total, isMapped)
+  //   - itemId:     10 fields (itemId, description, procoreParentCode, procoreCode,
+  //                 unitPrice, uom, costType, matchedQty, total, isMapped)
   //   - description: 1 field (description)
   //   - unitPrice:  2 fields (unitPrice, total)
   //
@@ -247,6 +251,13 @@ export function useCellEditing(
   //
   // This produces correct prev/next sibling snapshots regardless of whether
   // the actual mutation has already happened in React state.
+  //
+  // The SAME simulation also feeds two self-cascade entries (effects whose
+  // rowId === the edited row): itemId edits capture all derived fields on the
+  // primary row, and uom edits capture matchedQty/total (GAP-1). Without the
+  // primary self-capture, undo restored only itemId and left the row's
+  // derived fields (description, procoreCode, unitPrice, …) at post-edit
+  // values.
   // ---------------------------------------------------------------------------
   const commitCellEdit = useCallback((
     rowId: string,
@@ -268,25 +279,35 @@ export function useCellEditing(
       nextFields: Partial<ProcessedTakeoffRow>;
     }> | undefined;
 
-    if (CASCADE_FIELDS.has(field) && classification && classification !== "MANUAL ENTRY") {
-      // Deep-clone the rows for simulation. We need two clones:
-      // one to simulate the cascade with prevValue, one with nextValue.
-      const cloneRows = () => currentRows.map((r) => ({
-        ...r,
-        rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
-        customFields: { ...(r.customFields || {}) },
-      }));
+    // Deep-clone the rows for simulation. We need two clones:
+    // one to simulate the edit with prevValue, one with nextValue.
+    const cloneRows = () => currentRows.map((r) => ({
+      ...r,
+      rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
+      customFields: { ...(r.customFields || {}) },
+    }));
 
+    // Fields whose edit derives side-effect fields (on the edited row and/or
+    // siblings) — these need the before/after simulation. Simulated ONCE here
+    // and shared by the sibling-cascade, primary self-capture, and UOM blocks.
+    const hasSiblingCascade = CASCADE_FIELDS.has(field) && classification && classification !== "MANUAL ENTRY";
+    const needsSimulation = field === "itemId" || field === "uom" || hasSiblingCascade;
+
+    let simPrev: ProcessedTakeoffRow[] | null = null;
+    let simNext: ProcessedTakeoffRow[] | null = null;
+    if (needsSimulation) {
       const simRegistry = { ...userRegistryRef.current };
 
-      // Simulate cascade with prevValue → gives us the accurate "before" state
-      const simPrev = cloneRows();
+      // Simulate edit with prevValue → gives us the accurate "before" state
+      simPrev = cloneRows();
       applyCellEditDirect(simPrev, idx, field, prevValue as string | number, { ...simRegistry });
 
-      // Simulate cascade with nextValue → gives us the accurate "after" state
-      const simNext = cloneRows();
+      // Simulate edit with nextValue → gives us the accurate "after" state
+      simNext = cloneRows();
       applyCellEditDirect(simNext, idx, field, nextValue as string | number, { ...simRegistry });
+    }
 
+    if (hasSiblingCascade && simPrev && simNext) {
       cascadeEffects = [];
       for (let i = 0; i < currentRows.length; i++) {
         if (i !== idx && currentRows[i].classification === classification) {
@@ -299,32 +320,10 @@ export function useCellEditing(
           let nextCapture: Partial<ProcessedTakeoffRow>;
 
           if (field === "itemId") {
-            // itemId cascade touches: itemId, description, procoreParentCode,
-            // unitPrice, uom, costType, matchedQty, total, isMapped, dataFidelity
-            prevCapture = {
-              itemId: prevSibling.itemId,
-              description: prevSibling.description,
-              procoreParentCode: prevSibling.procoreParentCode,
-              unitPrice: prevSibling.unitPrice,
-              uom: prevSibling.uom,
-              costType: prevSibling.costType,
-              matchedQty: prevSibling.matchedQty,
-              total: prevSibling.total,
-              isMapped: prevSibling.isMapped,
-              dataFidelity: prevSibling.dataFidelity,
-            };
-            nextCapture = {
-              itemId: nextSibling.itemId,
-              description: nextSibling.description,
-              procoreParentCode: nextSibling.procoreParentCode,
-              unitPrice: nextSibling.unitPrice,
-              uom: nextSibling.uom,
-              costType: nextSibling.costType,
-              matchedQty: nextSibling.matchedQty,
-              total: nextSibling.total,
-              isMapped: nextSibling.isMapped,
-              dataFidelity: nextSibling.dataFidelity,
-            };
+            // itemId cascade touches every derived field — see
+            // ITEM_ID_CASCADE_CAPTURE_FIELDS (single source of truth).
+            prevCapture = captureRowFields(prevSibling, ITEM_ID_CASCADE_CAPTURE_FIELDS);
+            nextCapture = captureRowFields(nextSibling, ITEM_ID_CASCADE_CAPTURE_FIELDS);
           } else if (field === "description") {
             // description cascade touches: description only
             prevCapture = { description: prevSibling.description };
@@ -353,6 +352,26 @@ export function useCellEditing(
       if (cascadeEffects.length === 0) cascadeEffects = undefined;
     }
 
+    // Primary-row self-cascade for itemId edits (same GAP-1 pattern as the UOM
+    // self-cascade below): applyCellEditDirect derives description, Procore
+    // codes, unitPrice, uom, costType, matchedQty, total, isMapped and
+    // dataFidelity on the edited row itself, but the EDIT_CELL forward/inverse
+    // only re-applies cmd.field. Capture the simulated before/after states of
+    // the edited row so a single Ctrl+Z restores the whole row atomically.
+    // Runs for ALL itemId edits — including MANUAL ENTRY and unclassified rows
+    // that have no sibling cascade. Note: like the sibling captures, the
+    // "before" state is re-derived from the catalog (timing-independent
+    // simulation), so a manual unitPrice override entered after the previous
+    // itemId was set is restored to that itemId's catalog default on undo.
+    if (field === "itemId" && simPrev && simNext) {
+      const selfEffect = {
+        rowId,
+        prevFields: captureRowFields(simPrev[idx], ITEM_ID_CASCADE_CAPTURE_FIELDS),
+        nextFields: captureRowFields(simNext[idx], ITEM_ID_CASCADE_CAPTURE_FIELDS),
+      };
+      cascadeEffects = cascadeEffects ? [...cascadeEffects, selfEffect] : [selfEffect];
+    }
+
     // Build registry delta (only itemId edits write to registries)
     let registryDelta: {
       projectRegistry?: { key: string; prevValue: string; nextValue: string };
@@ -378,24 +397,8 @@ export function useCellEditing(
 
     // Build UOM self-cascade: UOM edits are row-local but change matchedQty + total
     // as side effects. Capture these in cascadeEffects on the SAME row so undo/redo
-    // reverts all three fields atomically (GAP-1 fix).
-    if (field === "uom") {
-      const cloneRows = () => currentRows.map((r) => ({
-        ...r,
-        rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
-        customFields: { ...(r.customFields || {}) },
-      }));
-
-      const simRegistry = { ...userRegistryRef.current };
-
-      // Simulate with prevValue → accurate "before" matchedQty/total
-      const simPrev = cloneRows();
-      applyCellEditDirect(simPrev, idx, field, prevValue as string | number, { ...simRegistry });
-
-      // Simulate with nextValue → accurate "after" matchedQty/total
-      const simNext = cloneRows();
-      applyCellEditDirect(simNext, idx, field, nextValue as string | number, { ...simRegistry });
-
+    // reverts all three fields atomically (GAP-1 fix). Uses the shared simulation.
+    if (field === "uom" && simPrev && simNext) {
       cascadeEffects = [{
         rowId,
         prevFields: {

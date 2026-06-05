@@ -10,7 +10,8 @@ export interface TogalRowPayload {
 
 export interface InternalEstimateItem {
   itemId: string;          // e.g., "04-0000.001"
-  procoreParentCode: string; // e.g., "4-40000.000"
+  procoreParentCode: string; // e.g., "4-40000.000" (coarse division parent, back-compat)
+  procoreCode: string;     // e.g., "4-40000.000" granular Budget Line Items code
   description: string;
   targetUom: string;       // e.g., "SF", "FT", "EA"
   defaultUnitPrice: number;
@@ -22,6 +23,8 @@ export interface ProcessedTakeoffRow {
   classification: string;
   itemId: string;
   procoreParentCode: string;
+  /** Granular Procore Budget Line Items code (e.g., "3-33543.000"); "" when unmapped */
+  procoreCode: string;
   description: string;
   matchedQty: number;
   uom: string;
@@ -104,7 +107,12 @@ export interface EditCellCommand {
   field: keyof ProcessedTakeoffRow;
   prevValue: string | number | boolean;
   nextValue: string | number | boolean;
-  /** Cascade side-effects for itemId edits that propagate to sibling rows */
+  /**
+   * Cascade side-effects applied on undo/redo after cmd.field is set.
+   * Entries may target sibling rows (itemId/description/unitPrice cascades)
+   * or the edited row itself (self-cascades: itemId derived-field capture,
+   * uom matchedQty/total capture) — dispatch merges them by rowId.
+   */
   cascadeEffects?: Array<{
     rowId: string;
     prevFields: Partial<ProcessedTakeoffRow>;

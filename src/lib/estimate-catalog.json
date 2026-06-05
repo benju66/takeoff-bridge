@@ -2,6 +2,7 @@
   "01-0000.001": {
     "itemId": "01-0000.001",
     "procoreParentCode": "1-10000.000",
+    "procoreCode": "1-10000.000",
     "description": "General Conditions",
     "targetUom": "LS",
     "defaultUnitPrice": 64698.85023333334,
@@ -10,6 +11,7 @@
   "01-0400.002": {
     "itemId": "01-0400.002",
     "procoreParentCode": "1-10000.000",
+    "procoreCode": "1-10000.000",
     "description": "Supervision",
     "targetUom": "LS",
     "defaultUnitPrice": 43300,
@@ -18,6 +20,7 @@
   "02-0000.001": {
     "itemId": "02-0000.001",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Site Operations",
     "targetUom": "LS",
     "defaultUnitPrice": 2.5,
@@ -26,6 +29,7 @@
   "02-4100.002": {
     "itemId": "02-4100.002",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Demolition",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -34,6 +38,7 @@
   "02-9005.003": {
     "itemId": "02-9005.003",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Final Cleaning",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -42,6 +47,7 @@
   "02-9070.004": {
     "itemId": "02-9070.004",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "SWPPP Permit",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -50,6 +56,7 @@
   "02-9200.005": {
     "itemId": "02-9200.005",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Survey and Layout",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -58,6 +65,7 @@
   "02-9300.006": {
     "itemId": "02-9300.006",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Building and Site Services",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -66,6 +74,7 @@
   "02-9400.007": {
     "itemId": "02-9400.007",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Site Equipment",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -74,6 +83,7 @@
   "02-9500.008": {
     "itemId": "02-9500.008",
     "procoreParentCode": "2-20000.000",
+    "procoreCode": "2-20000.000",
     "description": "Special Inspections",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -82,6 +92,7 @@
   "03-0000.001": {
     "itemId": "03-0000.001",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Cast In-Place Concrete",
     "targetUom": "LS",
     "defaultUnitPrice": 1,
@@ -90,6 +101,7 @@
   "03-0000.002": {
     "itemId": "03-0000.002",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Footings",
     "targetUom": "CY",
     "defaultUnitPrice": 575,
@@ -98,6 +110,7 @@
   "03-0000.003": {
     "itemId": "03-0000.003",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Concrete Strip Footing",
     "targetUom": "LF",
     "defaultUnitPrice": 55,
@@ -106,6 +119,7 @@
   "03-0000.004": {
     "itemId": "03-0000.004",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Concrete Fnd Pads",
     "targetUom": "EA",
     "defaultUnitPrice": 4000,
@@ -114,6 +128,7 @@
   "03-0000.005": {
     "itemId": "03-0000.005",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Concrete Walls",
     "targetUom": "SF",
     "defaultUnitPrice": 33,
@@ -122,6 +137,7 @@
   "03-0000.006": {
     "itemId": "03-0000.006",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Concrete Columns",
     "targetUom": "EA",
     "defaultUnitPrice": 1000,
@@ -130,6 +146,7 @@
   "03-0000.007": {
     "itemId": "03-0000.007",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "SOG",
     "targetUom": "SF",
     "defaultUnitPrice": 7,
@@ -138,6 +155,7 @@
   "03-0000.008": {
     "itemId": "03-0000.008",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Under-Slab Insulation",
     "targetUom": "SF",
     "defaultUnitPrice": 2,
@@ -146,6 +164,7 @@
   "03-0000.009": {
     "itemId": "03-0000.009",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Topping Slab on Precast Parking",
     "targetUom": "SF",
     "defaultUnitPrice": 6,
@@ -154,6 +173,7 @@
   "03-0000.010": {
     "itemId": "03-0000.010",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Amenity Deck Topping Slab and Finished Slab",
     "targetUom": "SF",
     "defaultUnitPrice": 6,
@@ -162,6 +182,7 @@
   "03-0000.011": {
     "itemId": "03-0000.011",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Post Tension Concrete",
     "targetUom": "CY",
     "defaultUnitPrice": 400,
@@ -170,6 +191,7 @@
   "03-0000.012": {
     "itemId": "03-0000.012",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-30000.000",
     "description": "Concrete Patios",
     "targetUom": "SF",
     "defaultUnitPrice": 7,
@@ -178,6 +200,7 @@
   "03-3543.001": {
     "itemId": "03-3543.001",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-33543.000",
     "description": "Polished Concrete",
     "targetUom": "SF",
     "defaultUnitPrice": 4,
@@ -186,14 +209,25 @@
   "03-4100.001": {
     "itemId": "03-4100.001",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-34100.000",
     "description": "Precast Structural Concrete",
     "targetUom": "SF",
     "defaultUnitPrice": 32,
     "costType": "M"
   },
+  "03-4500.001": {
+    "itemId": "03-4500.001",
+    "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-34500.000",
+    "description": "Precast Architectural Concrete",
+    "targetUom": "SF",
+    "defaultUnitPrice": 55,
+    "costType": "M"
+  },
   "03-5413.001": {
     "itemId": "03-5413.001",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-35413.000",
     "description": "Gypsum Cement Underlayment",
     "targetUom": "SF",
     "defaultUnitPrice": 2,
@@ -202,6 +236,7 @@
   "03-5413.002": {
     "itemId": "03-5413.002",
     "procoreParentCode": "3-30000.000",
+    "procoreCode": "3-35413.000",
     "description": "Gypsum Cement (Subtract Podium Level If Pt)",
     "targetUom": "SF",
     "defaultUnitPrice": -2,
@@ -210,6 +245,7 @@
   "04-0000.001": {
     "itemId": "04-0000.001",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -218,6 +254,7 @@
   "04-0000.002": {
     "itemId": "04-0000.002",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - CMU Backup Around Building",
     "targetUom": "SF",
     "defaultUnitPrice": 25,
@@ -226,6 +263,7 @@
   "04-0000.003": {
     "itemId": "04-0000.003",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - CMU In Garage",
     "targetUom": "SF",
     "defaultUnitPrice": 25,
@@ -234,6 +272,7 @@
   "04-0000.004": {
     "itemId": "04-0000.004",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - Modular Brick Veneer",
     "targetUom": "SF",
     "defaultUnitPrice": 60,
@@ -242,6 +281,7 @@
   "04-0000.005": {
     "itemId": "04-0000.005",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - Thin Brick",
     "targetUom": "SF",
     "defaultUnitPrice": 25,
@@ -250,6 +290,7 @@
   "04-0000.006": {
     "itemId": "04-0000.006",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - Arriscraft",
     "targetUom": "SF",
     "defaultUnitPrice": 95,
@@ -258,6 +299,7 @@
   "04-0000.007": {
     "itemId": "04-0000.007",
     "procoreParentCode": "4-40000.000",
+    "procoreCode": "4-40000.000",
     "description": "Masonry - PC Sill",
     "targetUom": "LF",
     "defaultUnitPrice": 50,
@@ -266,6 +308,7 @@
   "05-1200.001": {
     "itemId": "05-1200.001",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-51200.000",
     "description": "Structural Steel",
     "targetUom": "SF",
     "defaultUnitPrice": 55,
@@ -274,6 +317,7 @@
   "05-5000.001": {
     "itemId": "05-5000.001",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-55000.000",
     "description": "Metal Fabrications",
     "targetUom": "LS",
     "defaultUnitPrice": 10,
@@ -282,6 +326,7 @@
   "05-7210.001": {
     "itemId": "05-7210.001",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-57210.000",
     "description": "Aluminum Decks",
     "targetUom": "EA",
     "defaultUnitPrice": 3500,
@@ -290,6 +335,7 @@
   "05-7210.002": {
     "itemId": "05-7210.002",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-57210.000",
     "description": "Aluminum Decks - Juliette",
     "targetUom": "EA",
     "defaultUnitPrice": 2400,
@@ -298,6 +344,7 @@
   "05-7210.003": {
     "itemId": "05-7210.003",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-57210.000",
     "description": "Aluminum Decks - Railing Only Balcony",
     "targetUom": "EA",
     "defaultUnitPrice": 1000,
@@ -306,6 +353,7 @@
   "05-7210.004": {
     "itemId": "05-7210.004",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-57210.000",
     "description": "Aluminum Railings - F&I",
     "targetUom": "LF",
     "defaultUnitPrice": 150,
@@ -314,6 +362,7 @@
   "05-7210.005": {
     "itemId": "05-7210.005",
     "procoreParentCode": "5-50000.000",
+    "procoreCode": "5-57210.000",
     "description": "Aluminum Decks And Railings - Installation",
     "targetUom": "EA",
     "defaultUnitPrice": 800,
@@ -322,6 +371,7 @@
   "06-1000.001": {
     "itemId": "06-1000.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-61000.000",
     "description": "Rough Carpentry Materials (Loose and Joists)",
     "targetUom": "SF",
     "defaultUnitPrice": 13,
@@ -330,6 +380,7 @@
   "06-1010.001": {
     "itemId": "06-1010.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-61010.000",
     "description": "Rough Carpentry Installation",
     "targetUom": "SF",
     "defaultUnitPrice": 7,
@@ -338,6 +389,7 @@
   "06-1710.001": {
     "itemId": "06-1710.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-61710.000",
     "description": "Manufactured Wall Panels",
     "targetUom": "LS",
     "defaultUnitPrice": 0.001,
@@ -346,6 +398,7 @@
   "06-1753.001": {
     "itemId": "06-1753.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-61753.000",
     "description": "Shop-Fabricated Wood Trusses",
     "targetUom": "LS",
     "defaultUnitPrice": 0.001,
@@ -354,6 +407,7 @@
   "06-1800.001": {
     "itemId": "06-1800.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-61800.000",
     "description": "Glu-Laminated Construction",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -362,6 +416,7 @@
   "06-2000.001": {
     "itemId": "06-2000.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-62000.000",
     "description": "Finish Carpentry Installation",
     "targetUom": "EA",
     "defaultUnitPrice": 3600,
@@ -370,6 +425,7 @@
   "06-2000.002": {
     "itemId": "06-2000.002",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-62000.000",
     "description": "Finish Carpentry Installation - Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 450,
@@ -378,6 +434,7 @@
   "06-2200.003": {
     "itemId": "06-2200.003",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-62200.000",
     "description": "Millwork",
     "targetUom": "EA",
     "defaultUnitPrice": 986,
@@ -386,6 +443,7 @@
   "06-4100.001": {
     "itemId": "06-4100.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-64100.000",
     "description": "Architectural Casework and Millwork",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -394,6 +452,7 @@
   "06-6113.001": {
     "itemId": "06-6113.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-66113.000",
     "description": "Simulated Stone Fabrications",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -402,6 +461,7 @@
   "06-6116.001": {
     "itemId": "06-6116.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-66116.000",
     "description": "Solid Surfacing And Ctops",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -410,6 +470,7 @@
   "06-8316.001": {
     "itemId": "06-8316.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-68316.000",
     "description": "FRP Wall Paneling",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -418,6 +479,7 @@
   "06-7300.001": {
     "itemId": "06-7300.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-67300.000",
     "description": "Composite Decking",
     "targetUom": "EA",
     "defaultUnitPrice": 1200,
@@ -426,6 +488,7 @@
   "06-8700.001": {
     "itemId": "06-8700.001",
     "procoreParentCode": "6-60000.000",
+    "procoreCode": "6-68700.000",
     "description": "Pergolas",
     "targetUom": "EA",
     "defaultUnitPrice": 15000,
@@ -434,6 +497,7 @@
   "07-1000.001": {
     "itemId": "07-1000.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71000.000",
     "description": "Waterproofing",
     "targetUom": "SF",
     "defaultUnitPrice": 7,
@@ -442,6 +506,7 @@
   "07-1000.002": {
     "itemId": "07-1000.002",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71000.000",
     "description": "Elevator Waterproofing",
     "targetUom": "EA",
     "defaultUnitPrice": 5500,
@@ -450,6 +515,7 @@
   "07-1413.001": {
     "itemId": "07-1413.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71413.000",
     "description": "Hot-Fluid-Applied Waterproofing",
     "targetUom": "SF",
     "defaultUnitPrice": 8,
@@ -458,6 +524,7 @@
   "07-1413.002": {
     "itemId": "07-1413.002",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71413.000",
     "description": "Per 2\" Insulation",
     "targetUom": "SF",
     "defaultUnitPrice": 2,
@@ -466,6 +533,7 @@
   "07-1413.003": {
     "itemId": "07-1413.003",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71413.000",
     "description": "Patios",
     "targetUom": "SF",
     "defaultUnitPrice": 0,
@@ -474,6 +542,7 @@
   "07-1413.004": {
     "itemId": "07-1413.004",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71413.000",
     "description": "Sky Deck",
     "targetUom": "SF",
     "defaultUnitPrice": 0,
@@ -482,6 +551,7 @@
   "07-1413.005": {
     "itemId": "07-1413.005",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71413.000",
     "description": "Restaurant / Commercial Patios",
     "targetUom": "SF",
     "defaultUnitPrice": 0,
@@ -490,6 +560,7 @@
   "07-1800.001": {
     "itemId": "07-1800.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-71800.000",
     "description": "Traffic Coatings",
     "targetUom": "SF",
     "defaultUnitPrice": 8,
@@ -498,6 +569,7 @@
   "07-2100.001": {
     "itemId": "07-2100.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-72100.000",
     "description": "Thermal Insulation",
     "targetUom": "EA",
     "defaultUnitPrice": 3200,
@@ -506,6 +578,7 @@
   "07-2400.001": {
     "itemId": "07-2400.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-72400.000",
     "description": "Stucco, Plaster, Eifs",
     "targetUom": "SF",
     "defaultUnitPrice": 22,
@@ -514,6 +587,7 @@
   "07-2500.001": {
     "itemId": "07-2500.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-72500.000",
     "description": "Weather Barriers",
     "targetUom": "LS",
     "defaultUnitPrice": 1.2,
@@ -522,6 +596,7 @@
   "07-2700.001": {
     "itemId": "07-2700.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-72700.000",
     "description": "Spray-Applied Air Barriers",
     "targetUom": "SF",
     "defaultUnitPrice": 7,
@@ -530,6 +605,7 @@
   "07-3113.001": {
     "itemId": "07-3113.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-73113.000",
     "description": "Asphalt Shingles",
     "targetUom": "SF",
     "defaultUnitPrice": 5,
@@ -538,6 +614,7 @@
   "07-3113.002": {
     "itemId": "07-3113.002",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-73113.000",
     "description": "Gutters And Downspouts",
     "targetUom": "LF",
     "defaultUnitPrice": 15,
@@ -546,6 +623,7 @@
   "07-4213.001": {
     "itemId": "07-4213.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-74213.000",
     "description": "Metal Panel Siding",
     "targetUom": "SF",
     "defaultUnitPrice": 40,
@@ -554,6 +632,7 @@
   "07-4600.001": {
     "itemId": "07-4600.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-74600.000",
     "description": "Siding",
     "targetUom": "SF",
     "defaultUnitPrice": 18,
@@ -562,14 +641,25 @@
   "07-5000.001": {
     "itemId": "07-5000.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-75000.000",
     "description": "Membrane Roofing",
     "targetUom": "SF",
     "defaultUnitPrice": 15.7,
     "costType": "S"
   },
+  "07-6100.001": {
+    "itemId": "07-6100.001",
+    "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-76100.000",
+    "description": "Metal Roofing",
+    "targetUom": "SF",
+    "defaultUnitPrice": 25,
+    "costType": "S"
+  },
   "07-6200.002": {
     "itemId": "07-6200.002",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-76200.000",
     "description": "Sheet Metal Flashing",
     "targetUom": "LS",
     "defaultUnitPrice": 20000,
@@ -578,6 +668,7 @@
   "07-7600.003": {
     "itemId": "07-7600.003",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-77600.000",
     "description": "Roof Pavers",
     "targetUom": "SF",
     "defaultUnitPrice": 34,
@@ -586,6 +677,7 @@
   "07-8100.001": {
     "itemId": "07-8100.001",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-78100.000",
     "description": "Applied Fire Proofing",
     "targetUom": "EA",
     "defaultUnitPrice": 650,
@@ -594,6 +686,7 @@
   "07-8400.002": {
     "itemId": "07-8400.002",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-78400.000",
     "description": "Firestopping",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -602,6 +695,7 @@
   "07-9200.003": {
     "itemId": "07-9200.003",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-79200.000",
     "description": "Joint Sealants",
     "targetUom": "EA",
     "defaultUnitPrice": 900,
@@ -610,6 +704,7 @@
   "07-9500.004": {
     "itemId": "07-9500.004",
     "procoreParentCode": "7-70000.000",
+    "procoreCode": "7-79500.000",
     "description": "Expansion Joints",
     "targetUom": "EA",
     "defaultUnitPrice": 15000,
@@ -618,6 +713,7 @@
   "08-1000.001": {
     "itemId": "08-1000.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-81000.000",
     "description": "Doors, Frames and Hardware",
     "targetUom": "EA",
     "defaultUnitPrice": 6500,
@@ -626,6 +722,7 @@
   "08-3000.001": {
     "itemId": "08-3000.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-83000.000",
     "description": "Specialty Doors and Frames",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -634,6 +731,7 @@
   "08-3113.001": {
     "itemId": "08-3113.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-83113.000",
     "description": "Access Doors and Panels",
     "targetUom": "EA",
     "defaultUnitPrice": 288.94,
@@ -642,6 +740,7 @@
   "08-3613.001": {
     "itemId": "08-3613.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-83613.000",
     "description": "Overhead and Coiling Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 14000,
@@ -650,6 +749,7 @@
   "08-4000.001": {
     "itemId": "08-4000.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-84000.000",
     "description": "Aluminum Entrances and Storefronts",
     "targetUom": "SF",
     "defaultUnitPrice": 65,
@@ -658,6 +758,7 @@
   "08-4000.002": {
     "itemId": "08-4000.002",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-84000.000",
     "description": "Aluminum Storefront Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 6500,
@@ -666,6 +767,7 @@
   "08-4400.003": {
     "itemId": "08-4400.003",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-84400.000",
     "description": "Curtain Wall",
     "targetUom": "SF",
     "defaultUnitPrice": 0,
@@ -674,6 +776,7 @@
   "08-5113.001": {
     "itemId": "08-5113.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-85113.000",
     "description": "Aluminum Windows and Patio Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -682,6 +785,7 @@
   "08-5413.001": {
     "itemId": "08-5413.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-85413.000",
     "description": "Windows and Patio Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 5022,
@@ -690,6 +794,7 @@
   "08-5413.002": {
     "itemId": "08-5413.002",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-85413.000",
     "description": "Windows and Patio Doors - Installation",
     "targetUom": "EA",
     "defaultUnitPrice": 400,
@@ -698,6 +803,7 @@
   "08-6000.001": {
     "itemId": "08-6000.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-86000.000",
     "description": "Roof Windows and Skylights",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -706,6 +812,7 @@
   "08-8000.002": {
     "itemId": "08-8000.002",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-88000.000",
     "description": "Glazing",
     "targetUom": "EA",
     "defaultUnitPrice": 350,
@@ -714,6 +821,7 @@
   "08-8330.003": {
     "itemId": "08-8330.003",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-88330.000",
     "description": "Mirrors",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -722,6 +830,7 @@
   "08-8330.004": {
     "itemId": "08-8330.004",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-88330.000",
     "description": "Mirrors - Residential",
     "targetUom": "EA",
     "defaultUnitPrice": 500,
@@ -730,6 +839,7 @@
   "08-8700.001": {
     "itemId": "08-8700.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-88700.000",
     "description": "Window Film",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -738,6 +848,7 @@
   "08-9000.001": {
     "itemId": "08-9000.001",
     "procoreParentCode": "8-80000.000",
+    "procoreCode": "8-89000.000",
     "description": "Louvers and Vents",
     "targetUom": "LS",
     "defaultUnitPrice": 1500,
@@ -746,6 +857,7 @@
   "09-2116.001": {
     "itemId": "09-2116.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-92116.000",
     "description": "Gypsum Board Assemblies",
     "targetUom": "EA",
     "defaultUnitPrice": 10666,
@@ -754,6 +866,7 @@
   "09-2216.002": {
     "itemId": "09-2216.002",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-92216.000",
     "description": "Steel Stud Metal Framing",
     "targetUom": "SF",
     "defaultUnitPrice": 26,
@@ -762,6 +875,7 @@
   "09-3000.001": {
     "itemId": "09-3000.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-93000.000",
     "description": "Tile",
     "targetUom": "SF",
     "defaultUnitPrice": 10,
@@ -770,6 +884,7 @@
   "09-5123.001": {
     "itemId": "09-5123.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-95123.000",
     "description": "Acoustical Ceilings",
     "targetUom": "LS",
     "defaultUnitPrice": 5,
@@ -778,6 +893,7 @@
   "09-6400.001": {
     "itemId": "09-6400.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-96400.000",
     "description": "Wood Flooring",
     "targetUom": "SF",
     "defaultUnitPrice": 12,
@@ -786,6 +902,7 @@
   "09-6500.001": {
     "itemId": "09-6500.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-96500.000",
     "description": "Resilient Flooring",
     "targetUom": "LS",
     "defaultUnitPrice": 5,
@@ -794,6 +911,7 @@
   "09-6600.001": {
     "itemId": "09-6600.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-96600.000",
     "description": "Terrazzo Flooring",
     "targetUom": "LS",
     "defaultUnitPrice": 25,
@@ -802,6 +920,7 @@
   "09-6800.001": {
     "itemId": "09-6800.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-96800.000",
     "description": "Carpeting",
     "targetUom": "SY",
     "defaultUnitPrice": 36,
@@ -810,6 +929,7 @@
   "09-7200.001": {
     "itemId": "09-7200.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-97200.000",
     "description": "Wall Coverings",
     "targetUom": "SY",
     "defaultUnitPrice": 55,
@@ -818,6 +938,7 @@
   "09-9000.001": {
     "itemId": "09-9000.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-99000.000",
     "description": "Painting",
     "targetUom": "SF",
     "defaultUnitPrice": 2,
@@ -826,6 +947,7 @@
   "09-9646.001": {
     "itemId": "09-9646.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-99646.000",
     "description": "Intumescent Painting",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -834,6 +956,7 @@
   "09-9656.001": {
     "itemId": "09-9656.001",
     "procoreParentCode": "9-90000.000",
+    "procoreCode": "9-99656.000",
     "description": "Epoxy Flooring",
     "targetUom": "SF",
     "defaultUnitPrice": 8,
@@ -842,6 +965,7 @@
   "10-0000.001": {
     "itemId": "10-0000.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-100000.000",
     "description": "Specialties",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -850,6 +974,7 @@
   "10-1400.001": {
     "itemId": "10-1400.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-101400.000",
     "description": "Signage",
     "targetUom": "EA",
     "defaultUnitPrice": 250,
@@ -858,6 +983,7 @@
   "10-1400.002": {
     "itemId": "10-1400.002",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-101400.000",
     "description": "Signage - Exterior Building, Retail, Restaurant",
     "targetUom": "EA",
     "defaultUnitPrice": 7500,
@@ -866,6 +992,7 @@
   "10-1400.003": {
     "itemId": "10-1400.003",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-101400.000",
     "description": "Signage - Monument Sign",
     "targetUom": "EA",
     "defaultUnitPrice": 25000,
@@ -874,6 +1001,7 @@
   "10-1453.001": {
     "itemId": "10-1453.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-101453.000",
     "description": "Traffic Signage",
     "targetUom": "LS",
     "defaultUnitPrice": 1500,
@@ -882,6 +1010,7 @@
   "10-2113.001": {
     "itemId": "10-2113.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102113.000",
     "description": "Toilet Partitions",
     "targetUom": "EA",
     "defaultUnitPrice": 6500,
@@ -890,6 +1019,7 @@
   "10-2213.002": {
     "itemId": "10-2213.002",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102213.000",
     "description": "Wire Mesh Storage Cages",
     "targetUom": "EA",
     "defaultUnitPrice": 1350,
@@ -898,6 +1028,7 @@
   "10-2226.001": {
     "itemId": "10-2226.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102226.000",
     "description": "Operable Partitions",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -906,6 +1037,7 @@
   "10-2600.001": {
     "itemId": "10-2600.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102600.000",
     "description": "Wall and Door Protection",
     "targetUom": "EA",
     "defaultUnitPrice": 35,
@@ -914,6 +1046,7 @@
   "10-2800.001": {
     "itemId": "10-2800.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102800.000",
     "description": "Toilet and Bath Accessories",
     "targetUom": "EA",
     "defaultUnitPrice": 275,
@@ -922,6 +1055,7 @@
   "10-2819.001": {
     "itemId": "10-2819.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-102819.000",
     "description": "Tub and Shower Doors",
     "targetUom": "EA",
     "defaultUnitPrice": 1800,
@@ -930,6 +1064,7 @@
   "10-3100.001": {
     "itemId": "10-3100.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-103100.000",
     "description": "Manufactured Fireplaces - Commons",
     "targetUom": "EA",
     "defaultUnitPrice": 8500,
@@ -938,6 +1073,7 @@
   "10-3110.002": {
     "itemId": "10-3110.002",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-103110.000",
     "description": "Outdoor Fire Pits",
     "targetUom": "EA",
     "defaultUnitPrice": 8500,
@@ -946,6 +1082,7 @@
   "10-4413.001": {
     "itemId": "10-4413.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-104413.000",
     "description": "Fire Extinguishers and Cabinets",
     "targetUom": "EA",
     "defaultUnitPrice": 250,
@@ -954,6 +1091,7 @@
   "10-5100.001": {
     "itemId": "10-5100.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-105100.000",
     "description": "Lockers",
     "targetUom": "EA",
     "defaultUnitPrice": 100,
@@ -962,6 +1100,7 @@
   "10-5500.001": {
     "itemId": "10-5500.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-105500.000",
     "description": "Postal Specialties",
     "targetUom": "EA",
     "defaultUnitPrice": 148,
@@ -970,6 +1109,7 @@
   "10-5500.002": {
     "itemId": "10-5500.002",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-105500.000",
     "description": "Package Concierge",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -978,6 +1118,7 @@
   "10-5623.001": {
     "itemId": "10-5623.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-105623.000",
     "description": "Closet Shelving",
     "targetUom": "EA",
     "defaultUnitPrice": 252,
@@ -986,6 +1127,7 @@
   "10-7313.001": {
     "itemId": "10-7313.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-107313.000",
     "description": "Awnings and Canopies",
     "targetUom": "EA",
     "defaultUnitPrice": 3500,
@@ -994,6 +1136,7 @@
   "10-7500.001": {
     "itemId": "10-7500.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-107500.000",
     "description": "Flagpoles",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1002,6 +1145,7 @@
   "10-9000.001": {
     "itemId": "10-9000.001",
     "procoreParentCode": "10-100000.000",
+    "procoreCode": "10-109000.000",
     "description": "Golf Simulator",
     "targetUom": "EA",
     "defaultUnitPrice": 80000,
@@ -1010,6 +1154,7 @@
   "11-1313.001": {
     "itemId": "11-1313.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-111313.000",
     "description": "Loading Dock Equip",
     "targetUom": "LS",
     "defaultUnitPrice": 1,
@@ -1018,6 +1163,7 @@
   "11-2423.001": {
     "itemId": "11-2423.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-112423.000",
     "description": "Window Washing System",
     "targetUom": "LS",
     "defaultUnitPrice": 75000,
@@ -1026,6 +1172,7 @@
   "11-3100.001": {
     "itemId": "11-3100.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-113100.000",
     "description": "Appliances",
     "targetUom": "EA",
     "defaultUnitPrice": 6100,
@@ -1034,6 +1181,7 @@
   "11-3110.001": {
     "itemId": "11-3110.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-113110.000",
     "description": "Outdoor Gas Grill",
     "targetUom": "EA",
     "defaultUnitPrice": 3700,
@@ -1042,6 +1190,7 @@
   "11-4000.001": {
     "itemId": "11-4000.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-114000.000",
     "description": "Food Service Equipment",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1050,6 +1199,7 @@
   "11-6700.001": {
     "itemId": "11-6700.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-116700.000",
     "description": "Recreational Equipment",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1058,6 +1208,7 @@
   "11-8216.001": {
     "itemId": "11-8216.001",
     "procoreParentCode": "11-110000.000",
+    "procoreCode": "11-118216.000",
     "description": "Trash Compactors",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1066,6 +1217,7 @@
   "12-2000.001": {
     "itemId": "12-2000.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-122000.000",
     "description": "Window Treatments",
     "targetUom": "EA",
     "defaultUnitPrice": 1034,
@@ -1074,6 +1226,7 @@
   "12-3530.001": {
     "itemId": "12-3530.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-123530.000",
     "description": "Residential Casework - Material",
     "targetUom": "LS",
     "defaultUnitPrice": 6500,
@@ -1082,6 +1235,7 @@
   "12-3530.002": {
     "itemId": "12-3530.002",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-123530.000",
     "description": "Residential Casework - Installation",
     "targetUom": "LS",
     "defaultUnitPrice": 0.001,
@@ -1090,6 +1244,7 @@
   "12-3570.001": {
     "itemId": "12-3570.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "6-64100.000",
     "description": "Healthcare Casework and FFE",
     "targetUom": "LS",
     "defaultUnitPrice": 0.001,
@@ -1098,6 +1253,7 @@
   "12-3640.001": {
     "itemId": "12-3640.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-123640.000",
     "description": "Residential Countertops",
     "targetUom": "LS",
     "defaultUnitPrice": 3577,
@@ -1106,6 +1262,7 @@
   "12-3663.001": {
     "itemId": "12-3663.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-123663.000",
     "description": "Window Sills",
     "targetUom": "LS",
     "defaultUnitPrice": 0.001,
@@ -1114,6 +1271,7 @@
   "12-4000.001": {
     "itemId": "12-4000.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-124000.000",
     "description": "Furnishings and Accessories",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1122,6 +1280,7 @@
   "12-4813.001": {
     "itemId": "12-4813.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-124813.000",
     "description": "Entrance Floor Mats and Frames",
     "targetUom": "EA",
     "defaultUnitPrice": 3500,
@@ -1130,6 +1289,7 @@
   "12-9313.001": {
     "itemId": "12-9313.001",
     "procoreParentCode": "12-120000.000",
+    "procoreCode": "12-129313.000",
     "description": "Bike Equipment and Racks",
     "targetUom": "EA",
     "defaultUnitPrice": 450,
@@ -1138,6 +1298,7 @@
   "13-1100.001": {
     "itemId": "13-1100.001",
     "procoreParentCode": "13-130000.000",
+    "procoreCode": "13-131100.000",
     "description": "Swimming Pool",
     "targetUom": "EA",
     "defaultUnitPrice": 225000,
@@ -1146,6 +1307,7 @@
   "13-1100.002": {
     "itemId": "13-1100.002",
     "procoreParentCode": "13-130000.000",
+    "procoreCode": "13-131100.000",
     "description": "Spa",
     "targetUom": "EA",
     "defaultUnitPrice": 164167,
@@ -1154,6 +1316,7 @@
   "13-1900.001": {
     "itemId": "13-1900.001",
     "procoreParentCode": "13-130000.000",
+    "procoreCode": "13-131900.000",
     "description": "Pet Equipment",
     "targetUom": "EA",
     "defaultUnitPrice": 6000,
@@ -1162,6 +1325,7 @@
   "13-2416.001": {
     "itemId": "13-2416.001",
     "procoreParentCode": "13-130000.000",
+    "procoreCode": "13-132416.000",
     "description": "Saunas",
     "targetUom": "EA",
     "defaultUnitPrice": 32980,
@@ -1170,6 +1334,7 @@
   "13-3418.001": {
     "itemId": "13-3418.001",
     "procoreParentCode": "13-130000.000",
+    "procoreCode": "13-133418.000",
     "description": "Post Frame Building Systems",
     "targetUom": "SF",
     "defaultUnitPrice": 60,
@@ -1178,6 +1343,7 @@
   "14-0000.001": {
     "itemId": "14-0000.001",
     "procoreParentCode": "14-140000.000",
+    "procoreCode": "14-140000.000",
     "description": "Conveying Equipment",
     "targetUom": "LS",
     "defaultUnitPrice": 1,
@@ -1186,6 +1352,7 @@
   "14-2000.001": {
     "itemId": "14-2000.001",
     "procoreParentCode": "14-140000.000",
+    "procoreCode": "14-142000.000",
     "description": "Elevators",
     "targetUom": "STOP",
     "defaultUnitPrice": 31500,
@@ -1194,6 +1361,7 @@
   "14-4200.001": {
     "itemId": "14-4200.001",
     "procoreParentCode": "14-140000.000",
+    "procoreCode": "14-144200.000",
     "description": "Wheelchair Lifts",
     "targetUom": "LS",
     "defaultUnitPrice": 3,
@@ -1202,6 +1370,7 @@
   "14-9182.001": {
     "itemId": "14-9182.001",
     "procoreParentCode": "14-140000.000",
+    "procoreCode": "14-149182.000",
     "description": "Trash Chute",
     "targetUom": "FLR",
     "defaultUnitPrice": 3750,
@@ -1210,6 +1379,7 @@
   "21-0000.001": {
     "itemId": "21-0000.001",
     "procoreParentCode": "21-210000.000",
+    "procoreCode": "21-210000.000",
     "description": "Fire Suppression System",
     "targetUom": "SF",
     "defaultUnitPrice": 4,
@@ -1218,6 +1388,7 @@
   "21-0000.002": {
     "itemId": "21-0000.002",
     "procoreParentCode": "21-210000.000",
+    "procoreCode": "21-210000.000",
     "description": "Fire Pump",
     "targetUom": "EA",
     "defaultUnitPrice": 42000,
@@ -1226,6 +1397,7 @@
   "22-0000.001": {
     "itemId": "22-0000.001",
     "procoreParentCode": "22-220000.000",
+    "procoreCode": "22-220000.000",
     "description": "Plumbing",
     "targetUom": "EA",
     "defaultUnitPrice": 13500,
@@ -1234,6 +1406,7 @@
   "22-0000.002": {
     "itemId": "22-0000.002",
     "procoreParentCode": "22-220000.000",
+    "procoreCode": "22-220000.000",
     "description": "Plumbing - Fixtures",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -1242,6 +1415,7 @@
   "22-0000.003": {
     "itemId": "22-0000.003",
     "procoreParentCode": "22-220000.000",
+    "procoreCode": "22-220000.000",
     "description": "Domestic Water Pump",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1250,6 +1424,7 @@
   "22-4129.001": {
     "itemId": "22-4129.001",
     "procoreParentCode": "22-220000.000",
+    "procoreCode": "22-220000.000",
     "description": "Shower Pans",
     "targetUom": "EA",
     "defaultUnitPrice": 0,
@@ -1258,6 +1433,7 @@
   "23-0000.001": {
     "itemId": "23-0000.001",
     "procoreParentCode": "23-230000.000",
+    "procoreCode": "23-230000.000",
     "description": "HVAC",
     "targetUom": "EA",
     "defaultUnitPrice": 14500,
@@ -1266,6 +1442,7 @@
   "26-0000.001": {
     "itemId": "26-0000.001",
     "procoreParentCode": "26-260000.000",
+    "procoreCode": "26-260000.000",
     "description": "Electrical",
     "targetUom": "EA",
     "defaultUnitPrice": 15500,
@@ -1274,6 +1451,7 @@
   "26-0000.002": {
     "itemId": "26-0000.002",
     "procoreParentCode": "26-260000.000",
+    "procoreCode": "26-260000.000",
     "description": "Electrical - Fixtures",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1282,6 +1460,7 @@
   "26-0000.003": {
     "itemId": "26-0000.003",
     "procoreParentCode": "26-260000.000",
+    "procoreCode": "26-260000.000",
     "description": "Electrical - EV Charging",
     "targetUom": "EA",
     "defaultUnitPrice": 850,
@@ -1290,6 +1469,7 @@
   "26-0000.004": {
     "itemId": "26-0000.004",
     "procoreParentCode": "26-260000.000",
+    "procoreCode": "26-260000.000",
     "description": "Electrical - Site Lighting",
     "targetUom": "EA",
     "defaultUnitPrice": 3500,
@@ -1298,6 +1478,7 @@
   "26-0000.005": {
     "itemId": "26-0000.005",
     "procoreParentCode": "26-260000.000",
+    "procoreCode": "26-260000.000",
     "description": "Electrical - Fire Pump Wiring",
     "targetUom": "EA",
     "defaultUnitPrice": 12000,
@@ -1306,6 +1487,7 @@
   "27-2000.001": {
     "itemId": "27-2000.001",
     "procoreParentCode": "27-270000.000",
+    "procoreCode": "27-272000.000",
     "description": "Data Communications",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1314,6 +1496,7 @@
   "27-4000.001": {
     "itemId": "27-4000.001",
     "procoreParentCode": "27-270000.000",
+    "procoreCode": "27-274000.000",
     "description": "Audio-Video Communications",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1322,6 +1505,7 @@
   "28-1300.001": {
     "itemId": "28-1300.001",
     "procoreParentCode": "28-280000.000",
+    "procoreCode": "28-281300.000",
     "description": "Access Control",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1330,6 +1514,7 @@
   "28-3000.001": {
     "itemId": "28-3000.001",
     "procoreParentCode": "28-280000.000",
+    "procoreCode": "28-283000.000",
     "description": "Video Surveillance",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1338,6 +1523,7 @@
   "28-4600.001": {
     "itemId": "28-4600.001",
     "procoreParentCode": "28-280000.000",
+    "procoreCode": "28-284600.000",
     "description": "Fire Detection And Alarm",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1346,6 +1532,7 @@
   "28-9010.001": {
     "itemId": "28-9010.001",
     "procoreParentCode": "28-280000.000",
+    "procoreCode": "28-289010.000",
     "description": "Radio Amplification System",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1354,6 +1541,7 @@
   "31-0000.001": {
     "itemId": "31-0000.001",
     "procoreParentCode": "31-310000.000",
+    "procoreCode": "31-310000.000",
     "description": "Earthwork",
     "targetUom": "CY",
     "defaultUnitPrice": 34,
@@ -1362,6 +1550,7 @@
   "31-2113.001": {
     "itemId": "31-2113.001",
     "procoreParentCode": "31-310000.000",
+    "procoreCode": "31-312113.000",
     "description": "Radon Mitigation",
     "targetUom": "LS",
     "defaultUnitPrice": 2,
@@ -1370,6 +1559,7 @@
   "31-2500.001": {
     "itemId": "31-2500.001",
     "procoreParentCode": "31-310000.000",
+    "procoreCode": "31-312500.000",
     "description": "Erosion Control",
     "targetUom": "LS",
     "defaultUnitPrice": 3,
@@ -1378,6 +1568,7 @@
   "31-4000.001": {
     "itemId": "31-4000.001",
     "procoreParentCode": "31-310000.000",
+    "procoreCode": "31-314000.000",
     "description": "Shoring",
     "targetUom": "SF",
     "defaultUnitPrice": 55,
@@ -1386,6 +1577,7 @@
   "31-6000.001": {
     "itemId": "31-6000.001",
     "procoreParentCode": "31-310000.000",
+    "procoreCode": "31-316000.000",
     "description": "Piles, Piers And Caissons",
     "targetUom": "LS",
     "defaultUnitPrice": 5,
@@ -1394,6 +1586,7 @@
   "32-1216.001": {
     "itemId": "32-1216.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321216.000",
     "description": "Asphalt Paving",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1402,6 +1595,7 @@
   "32-1216.002": {
     "itemId": "32-1216.002",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321216.000",
     "description": "Asphalt Paving - Light Duty",
     "targetUom": "SY",
     "defaultUnitPrice": 40,
@@ -1410,6 +1604,7 @@
   "32-1216.003": {
     "itemId": "32-1216.003",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321216.000",
     "description": "Asphalt Paving - Heavy Duty",
     "targetUom": "SY",
     "defaultUnitPrice": 67,
@@ -1418,6 +1613,7 @@
   "32-1313.000": {
     "itemId": "32-1313.000",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "Concrete Paving",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1426,6 +1622,7 @@
   "32-1316.001": {
     "itemId": "32-1316.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321316.000",
     "description": "Decorative Concrete Paving",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1434,6 +1631,7 @@
   "32-1343.001": {
     "itemId": "32-1343.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321343.000",
     "description": "Pervious Concrete Paving",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1442,6 +1640,7 @@
   "32-1400.001": {
     "itemId": "32-1400.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321400.000",
     "description": "Unit Pavers",
     "targetUom": "SF",
     "defaultUnitPrice": 34,
@@ -1450,6 +1649,7 @@
   "32-1613.001": {
     "itemId": "32-1613.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321613.000",
     "description": "Site Concrete",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1458,6 +1658,7 @@
   "32-1313.001": {
     "itemId": "32-1313.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "Surmountable Curb",
     "targetUom": "LF",
     "defaultUnitPrice": 29,
@@ -1466,6 +1667,7 @@
   "32-1313.002": {
     "itemId": "32-1313.002",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "B612 Curb",
     "targetUom": "LF",
     "defaultUnitPrice": 29,
@@ -1474,6 +1676,7 @@
   "32-1313.003": {
     "itemId": "32-1313.003",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "Cross Gutter",
     "targetUom": "LF",
     "defaultUnitPrice": 48,
@@ -1482,6 +1685,7 @@
   "32-1313.004": {
     "itemId": "32-1313.004",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "Light Duty Concrete",
     "targetUom": "SF",
     "defaultUnitPrice": 11.5,
@@ -1490,6 +1694,7 @@
   "32-1313.005": {
     "itemId": "32-1313.005",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321313.000",
     "description": "Heavy Duty Concrete",
     "targetUom": "SF",
     "defaultUnitPrice": 14,
@@ -1498,6 +1703,7 @@
   "32-1700.001": {
     "itemId": "32-1700.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321700.000",
     "description": "Pavement Markings",
     "targetUom": "LS",
     "defaultUnitPrice": 1500,
@@ -1506,6 +1712,7 @@
   "32-1813.001": {
     "itemId": "32-1813.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-321813.000",
     "description": "Artificial Turf",
     "targetUom": "SF",
     "defaultUnitPrice": 14,
@@ -1514,6 +1721,7 @@
   "32-3100.001": {
     "itemId": "32-3100.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-323100.000",
     "description": "Fences and Gates",
     "targetUom": "LF",
     "defaultUnitPrice": 55,
@@ -1522,6 +1730,7 @@
   "32-3200.001": {
     "itemId": "32-3200.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-323200.000",
     "description": "Retaining Walls",
     "targetUom": "SF",
     "defaultUnitPrice": 55,
@@ -1530,6 +1739,7 @@
   "32-9000.001": {
     "itemId": "32-9000.001",
     "procoreParentCode": "32-320000.000",
+    "procoreCode": "32-329000.000",
     "description": "Landscaping And Irrigation",
     "targetUom": "SF",
     "defaultUnitPrice": 15,
@@ -1538,6 +1748,7 @@
   "33-0000.001": {
     "itemId": "33-0000.001",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Utilities",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1546,6 +1757,7 @@
   "33-0000.002": {
     "itemId": "33-0000.002",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Water",
     "targetUom": "LF",
     "defaultUnitPrice": 112,
@@ -1554,6 +1766,7 @@
   "33-0000.003": {
     "itemId": "33-0000.003",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Sanitary",
     "targetUom": "LF",
     "defaultUnitPrice": 104,
@@ -1562,6 +1775,7 @@
   "33-0000.004": {
     "itemId": "33-0000.004",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Sanitary - Structure",
     "targetUom": "EA",
     "defaultUnitPrice": 6500,
@@ -1570,6 +1784,7 @@
   "33-0000.005": {
     "itemId": "33-0000.005",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - 6\" - 10\"",
     "targetUom": "LF",
     "defaultUnitPrice": 90,
@@ -1578,6 +1793,7 @@
   "33-0000.006": {
     "itemId": "33-0000.006",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - 12\" - 18\"",
     "targetUom": "LF",
     "defaultUnitPrice": 120,
@@ -1586,6 +1802,7 @@
   "33-0000.007": {
     "itemId": "33-0000.007",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - 24\" - 36\"",
     "targetUom": "LF",
     "defaultUnitPrice": 200,
@@ -1594,6 +1811,7 @@
   "33-0000.008": {
     "itemId": "33-0000.008",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - 42\" - 60\"",
     "targetUom": "LF",
     "defaultUnitPrice": 350,
@@ -1602,6 +1820,7 @@
   "33-0000.009": {
     "itemId": "33-0000.009",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - Structure",
     "targetUom": "EA",
     "defaultUnitPrice": 6500,
@@ -1610,6 +1829,7 @@
   "33-0000.010": {
     "itemId": "33-0000.010",
     "procoreParentCode": "33-330000.000",
+    "procoreCode": "33-330000.000",
     "description": "Storm - UG Retention",
     "targetUom": "GAL",
     "defaultUnitPrice": 6,
@@ -1618,6 +1838,7 @@
   "50-2000.001": {
     "itemId": "50-2000.001",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Winter Conditions",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1626,6 +1847,7 @@
   "50-2000.002": {
     "itemId": "50-2000.002",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Temp Enclosures",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1634,6 +1856,7 @@
   "50-2000.003": {
     "itemId": "50-2000.003",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Temp Heaters",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1642,6 +1865,7 @@
   "50-2000.004": {
     "itemId": "50-2000.004",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Temp Gas",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1650,6 +1874,7 @@
   "50-2000.005": {
     "itemId": "50-2000.005",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Wiring for Temp Heaters",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1658,6 +1883,7 @@
   "50-2000.006": {
     "itemId": "50-2000.006",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Temp Gas Piping",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1666,6 +1892,7 @@
   "50-2000.007": {
     "itemId": "50-2000.007",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Poly Windows",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1674,6 +1901,7 @@
   "50-2000.008": {
     "itemId": "50-2000.008",
     "procoreParentCode": "50-500000.000",
+    "procoreCode": "50-502000.000",
     "description": "Snow Removal",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1682,6 +1910,7 @@
   "80-8001.001": {
     "itemId": "80-8001.001",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1690,6 +1919,7 @@
   "80-8002.002": {
     "itemId": "80-8002.002",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1698,6 +1928,7 @@
   "80-8003.003": {
     "itemId": "80-8003.003",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1706,6 +1937,7 @@
   "80-8004.004": {
     "itemId": "80-8004.004",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1714,6 +1946,7 @@
   "80-8005.005": {
     "itemId": "80-8005.005",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1722,6 +1955,7 @@
   "80-8006.006": {
     "itemId": "80-8006.006",
     "procoreParentCode": "80-800000.000",
+    "procoreCode": "80-800001.000",
     "description": "TBD",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1730,6 +1964,7 @@
   "01-0230.001": {
     "itemId": "01-0230.001",
     "procoreParentCode": "1-10000.000",
+    "procoreCode": "1-10230.000",
     "description": "Building Permit",
     "targetUom": "LS",
     "defaultUnitPrice": 2742.5310400000003,
@@ -1738,6 +1973,7 @@
   "01-0250.001": {
     "itemId": "01-0250.001",
     "procoreParentCode": "1-10000.000",
+    "procoreCode": "1-10250.000",
     "description": "Demolition Permit",
     "targetUom": "LS",
     "defaultUnitPrice": 0,
@@ -1746,6 +1982,7 @@
   "01-0260.001": {
     "itemId": "01-0260.001",
     "procoreParentCode": "1-10000.000",
+    "procoreCode": "1-10260.000",
     "description": "City Licenses and Misc Permits",
     "targetUom": "LS",
     "defaultUnitPrice": 0,

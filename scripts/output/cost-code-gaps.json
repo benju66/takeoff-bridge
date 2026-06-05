@@ -1,0 +1,531 @@
+{
+  "generatedAt": "2026-06-05T03:11:13.279Z",
+  "templatePath": "public/templates/Company_Estimate_Template.xlsx",
+  "summary": {
+    "catalogCodes": 221,
+    "authoritative": 137,
+    "siblingInferred": 67,
+    "userConfirmed": 7,
+    "handledBySteps2And3": 10,
+    "normalizedTypos": 2,
+    "unresolved": 0,
+    "invalidProcoreCodes": 0
+  },
+  "siblingInferred": [
+    {
+      "internalCode": "03-0000.002",
+      "description": "Footings",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.003",
+      "description": "Concrete Strip Footing",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.004",
+      "description": "Concrete Fnd Pads",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.005",
+      "description": "Concrete Walls",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.006",
+      "description": "Concrete Columns",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.007",
+      "description": "SOG",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.008",
+      "description": "Under-Slab Insulation",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.009",
+      "description": "Topping Slab on Precast Parking",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.010",
+      "description": "Amenity Deck Topping Slab and Finished Slab",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.011",
+      "description": "Post Tension Concrete",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-0000.012",
+      "description": "Concrete Patios",
+      "procoreCode": "3-30000.000",
+      "viaSibling": "03-0000.001"
+    },
+    {
+      "internalCode": "03-5413.002",
+      "description": "Gypsum Cement (Subtract Podium Level If Pt)",
+      "procoreCode": "3-35413.000",
+      "viaSibling": "03-5413.001"
+    },
+    {
+      "internalCode": "04-0000.002",
+      "description": "Masonry - CMU Backup Around Building",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "04-0000.003",
+      "description": "Masonry - CMU In Garage",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "04-0000.004",
+      "description": "Masonry - Modular Brick Veneer",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "04-0000.005",
+      "description": "Masonry - Thin Brick",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "04-0000.006",
+      "description": "Masonry - Arriscraft",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "04-0000.007",
+      "description": "Masonry - PC Sill",
+      "procoreCode": "4-40000.000",
+      "viaSibling": "04-0000.001"
+    },
+    {
+      "internalCode": "05-7210.002",
+      "description": "Aluminum Decks - Juliette",
+      "procoreCode": "5-57210.000",
+      "viaSibling": "05-7210.001"
+    },
+    {
+      "internalCode": "05-7210.003",
+      "description": "Aluminum Decks - Railing Only Balcony",
+      "procoreCode": "5-57210.000",
+      "viaSibling": "05-7210.001"
+    },
+    {
+      "internalCode": "05-7210.004",
+      "description": "Aluminum Railings - F&I",
+      "procoreCode": "5-57210.000",
+      "viaSibling": "05-7210.001"
+    },
+    {
+      "internalCode": "05-7210.005",
+      "description": "Aluminum Decks And Railings - Installation",
+      "procoreCode": "5-57210.000",
+      "viaSibling": "05-7210.001"
+    },
+    {
+      "internalCode": "06-2000.001",
+      "description": "Finish Carpentry Installation",
+      "procoreCode": "6-62000.000",
+      "viaSibling": "06-2000.002"
+    },
+    {
+      "internalCode": "07-1000.002",
+      "description": "Elevator Waterproofing",
+      "procoreCode": "7-71000.000",
+      "viaSibling": "07-1000.001"
+    },
+    {
+      "internalCode": "07-1413.002",
+      "description": "Per 2\" Insulation",
+      "procoreCode": "7-71413.000",
+      "viaSibling": "07-1413.001"
+    },
+    {
+      "internalCode": "07-1413.003",
+      "description": "Patios",
+      "procoreCode": "7-71413.000",
+      "viaSibling": "07-1413.001"
+    },
+    {
+      "internalCode": "07-1413.004",
+      "description": "Sky Deck",
+      "procoreCode": "7-71413.000",
+      "viaSibling": "07-1413.001"
+    },
+    {
+      "internalCode": "07-1413.005",
+      "description": "Restaurant / Commercial Patios",
+      "procoreCode": "7-71413.000",
+      "viaSibling": "07-1413.001"
+    },
+    {
+      "internalCode": "07-3113.002",
+      "description": "Gutters And Downspouts",
+      "procoreCode": "7-73113.000",
+      "viaSibling": "07-3113.001"
+    },
+    {
+      "internalCode": "08-4000.002",
+      "description": "Aluminum Storefront Doors",
+      "procoreCode": "8-84000.000",
+      "viaSibling": "08-4000.001"
+    },
+    {
+      "internalCode": "08-5413.002",
+      "description": "Windows and Patio Doors - Installation",
+      "procoreCode": "8-85413.000",
+      "viaSibling": "08-5413.001"
+    },
+    {
+      "internalCode": "08-8330.003",
+      "description": "Mirrors",
+      "procoreCode": "8-88330.000",
+      "viaSibling": "08-8330.004"
+    },
+    {
+      "internalCode": "10-1400.002",
+      "description": "Signage - Exterior Building, Retail, Restaurant",
+      "procoreCode": "10-101400.000",
+      "viaSibling": "10-1400.001"
+    },
+    {
+      "internalCode": "10-1400.003",
+      "description": "Signage - Monument Sign",
+      "procoreCode": "10-101400.000",
+      "viaSibling": "10-1400.001"
+    },
+    {
+      "internalCode": "10-5500.002",
+      "description": "Package Concierge",
+      "procoreCode": "10-105500.000",
+      "viaSibling": "10-5500.001"
+    },
+    {
+      "internalCode": "12-3530.002",
+      "description": "Residential Casework - Installation",
+      "procoreCode": "12-123530.000",
+      "viaSibling": "12-3530.001"
+    },
+    {
+      "internalCode": "13-1100.002",
+      "description": "Spa",
+      "procoreCode": "13-131100.000",
+      "viaSibling": "13-1100.001"
+    },
+    {
+      "internalCode": "21-0000.002",
+      "description": "Fire Pump",
+      "procoreCode": "21-210000.000",
+      "viaSibling": "21-0000.001"
+    },
+    {
+      "internalCode": "22-0000.002",
+      "description": "Plumbing - Fixtures",
+      "procoreCode": "22-220000.000",
+      "viaSibling": "22-0000.001"
+    },
+    {
+      "internalCode": "22-0000.003",
+      "description": "Domestic Water Pump",
+      "procoreCode": "22-220000.000",
+      "viaSibling": "22-0000.001"
+    },
+    {
+      "internalCode": "26-0000.002",
+      "description": "Electrical - Fixtures",
+      "procoreCode": "26-260000.000",
+      "viaSibling": "26-0000.001"
+    },
+    {
+      "internalCode": "26-0000.003",
+      "description": "Electrical - EV Charging",
+      "procoreCode": "26-260000.000",
+      "viaSibling": "26-0000.001"
+    },
+    {
+      "internalCode": "26-0000.004",
+      "description": "Electrical - Site Lighting",
+      "procoreCode": "26-260000.000",
+      "viaSibling": "26-0000.001"
+    },
+    {
+      "internalCode": "26-0000.005",
+      "description": "Electrical - Fire Pump Wiring",
+      "procoreCode": "26-260000.000",
+      "viaSibling": "26-0000.001"
+    },
+    {
+      "internalCode": "32-1216.002",
+      "description": "Asphalt Paving - Light Duty",
+      "procoreCode": "32-321216.000",
+      "viaSibling": "32-1216.001"
+    },
+    {
+      "internalCode": "32-1216.003",
+      "description": "Asphalt Paving - Heavy Duty",
+      "procoreCode": "32-321216.000",
+      "viaSibling": "32-1216.001"
+    },
+    {
+      "internalCode": "32-1313.001",
+      "description": "Surmountable Curb",
+      "procoreCode": "32-321313.000",
+      "viaSibling": "32-1313.000"
+    },
+    {
+      "internalCode": "32-1313.002",
+      "description": "B612 Curb",
+      "procoreCode": "32-321313.000",
+      "viaSibling": "32-1313.000"
+    },
+    {
+      "internalCode": "32-1313.003",
+      "description": "Cross Gutter",
+      "procoreCode": "32-321313.000",
+      "viaSibling": "32-1313.000"
+    },
+    {
+      "internalCode": "32-1313.004",
+      "description": "Light Duty Concrete",
+      "procoreCode": "32-321313.000",
+      "viaSibling": "32-1313.000"
+    },
+    {
+      "internalCode": "32-1313.005",
+      "description": "Heavy Duty Concrete",
+      "procoreCode": "32-321313.000",
+      "viaSibling": "32-1313.000"
+    },
+    {
+      "internalCode": "33-0000.002",
+      "description": "Water",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.003",
+      "description": "Sanitary",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.004",
+      "description": "Sanitary - Structure",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.005",
+      "description": "Storm - 6\" - 10\"",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.006",
+      "description": "Storm - 12\" - 18\"",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.007",
+      "description": "Storm - 24\" - 36\"",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.008",
+      "description": "Storm - 42\" - 60\"",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.009",
+      "description": "Storm - Structure",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "33-0000.010",
+      "description": "Storm - UG Retention",
+      "procoreCode": "33-330000.000",
+      "viaSibling": "33-0000.001"
+    },
+    {
+      "internalCode": "50-2000.002",
+      "description": "Temp Enclosures",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.003",
+      "description": "Temp Heaters",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.004",
+      "description": "Temp Gas",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.005",
+      "description": "Wiring for Temp Heaters",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.006",
+      "description": "Temp Gas Piping",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.007",
+      "description": "Poly Windows",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    },
+    {
+      "internalCode": "50-2000.008",
+      "description": "Snow Removal",
+      "procoreCode": "50-502000.000",
+      "viaSibling": "50-2000.001"
+    }
+  ],
+  "userConfirmed": [
+    {
+      "internalCode": "12-3570.001",
+      "description": "Healthcare Casework and FFE",
+      "procoreCode": "6-64100.000"
+    },
+    {
+      "internalCode": "22-4129.001",
+      "description": "Shower Pans",
+      "procoreCode": "22-220000.000"
+    },
+    {
+      "internalCode": "80-8002.002",
+      "description": "TBD",
+      "procoreCode": "80-800001.000"
+    },
+    {
+      "internalCode": "80-8003.003",
+      "description": "TBD",
+      "procoreCode": "80-800001.000"
+    },
+    {
+      "internalCode": "80-8004.004",
+      "description": "TBD",
+      "procoreCode": "80-800001.000"
+    },
+    {
+      "internalCode": "80-8005.005",
+      "description": "TBD",
+      "procoreCode": "80-800001.000"
+    },
+    {
+      "internalCode": "80-8006.006",
+      "description": "TBD",
+      "procoreCode": "80-800001.000"
+    }
+  ],
+  "handledBySteps2And3": [
+    {
+      "internalCode": "01-0000.001",
+      "description": "General Conditions",
+      "fallbackProcoreCode": "1-10000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "01-0400.002",
+      "description": "Supervision",
+      "fallbackProcoreCode": "1-10000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-0000.001",
+      "description": "Site Operations",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-4100.002",
+      "description": "Demolition",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9005.003",
+      "description": "Final Cleaning",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9070.004",
+      "description": "SWPPP Permit",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9200.005",
+      "description": "Survey and Layout",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9300.006",
+      "description": "Building and Site Services",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9400.007",
+      "description": "Site Equipment",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    },
+    {
+      "internalCode": "02-9500.008",
+      "description": "Special Inspections",
+      "fallbackProcoreCode": "2-20000.000",
+      "note": "Dollars roll up from STEP 2 - GCs / STEP 3 - SITE OPS; division base is a fallback so app-entered dollars never silently drop."
+    }
+  ],
+  "normalizedTypos": [
+    {
+      "row": 47,
+      "from": "03-4500.0002",
+      "to": "03-4500.001"
+    },
+    {
+      "row": 121,
+      "from": "07-6100.01",
+      "to": "07-6100.001"
+    }
+  ],
+  "unresolved": [],
+  "invalidProcoreCodes": []
+}

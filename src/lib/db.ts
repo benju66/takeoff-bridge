@@ -1,5 +1,6 @@
 import { Project, ProjectEstimate, TemplateConfig, DivisionLayout } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
 
@@ -72,11 +73,15 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
 }
 
 function mapLineItemFromRow(row: Record<string, unknown>): ProcessedTakeoffRow {
+  const itemId = (row.item_id as string) || "";
   return {
     id: row.id as string,
     classification: (row.classification as string) || "",
-    itemId: (row.item_id as string) || "",
+    itemId,
     procoreParentCode: (row.procore_parent_code as string) || "",
+    // Granular Procore code is app-owned catalog data (Phase 1); a persisted
+    // procore_code column with manual-override support lands in Phase 3.
+    procoreCode: ESTIMATE_ITEMS_MASTER[itemId]?.procoreCode || "",
     description: (row.description as string) || "",
     matchedQty: Number(row.matched_qty) || 0,
     uom: (row.uom as string) || "SF",

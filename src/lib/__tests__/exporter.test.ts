@@ -23,6 +23,7 @@ describe("exporter - generateExcelPayload", () => {
       classification: "Slab on Grade",
       itemId: "03-0000.001",
       procoreParentCode: "3-30000.000",
+      procoreCode: "3-30000.000",
       description: "Concrete slab",
       matchedQty: 100,
       uom: "SF",

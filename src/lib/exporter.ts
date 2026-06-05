@@ -1313,6 +1313,25 @@ export async function generateExcelWorkbook(
   zip.file("xl/workbook.xml", wbXml);
   zip.file("xl/_rels/workbook.xml.rels", relsXml);
 
+  // 3f: Clear cached error values (t="e") on formula cells across all sheets.
+  // The template ships stale cached errors (e.g. #DIV/0! in auxiliary sheets
+  // whose divisor cells are blank). Dropping the cached <v> and the error type
+  // marker — while keeping the formula — forces Excel to recompute the cell on
+  // open (calcChain was already removed in step 3b). Literal error values
+  // without a formula are left untouched.
+  const worksheetFiles = Object.keys(zip.files).filter(
+    (name) => name.startsWith("xl/worksheets/") && name.endsWith(".xml")
+  );
+  for (const wsName of worksheetFiles) {
+    const wsXml = await zip.file(wsName)?.async("string");
+    if (!wsXml || !wsXml.includes('t="e"')) continue;
+    const cleaned = wsXml.replace(
+      /(<c [^>]*?) t="e"([^>]*>)(<f[^>]*(?:\/>|>[^<]*<\/f>))<v>[^<]*<\/v>/g,
+      "$1$2$3"
+    );
+    if (cleaned !== wsXml) zip.file(wsName, cleaned);
+  }
+
   // Generate output
   const outBuffer = await zip.generateAsync({ type: "arraybuffer" });
   return new Blob([outBuffer], {

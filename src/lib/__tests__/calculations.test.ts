@@ -21,6 +21,7 @@ function makeRow(overrides: Partial<ProcessedTakeoffRow> = {}): ProcessedTakeoff
     classification: overrides.classification ?? 'Test Classification',
     itemId: overrides.itemId ?? '03-1000',
     procoreParentCode: overrides.procoreParentCode ?? '',
+    procoreCode: overrides.procoreCode ?? '',
     description: overrides.description ?? 'Test Item',
     matchedQty: overrides.matchedQty ?? 100,
     uom: overrides.uom ?? 'SF',
