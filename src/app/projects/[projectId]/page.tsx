@@ -29,6 +29,7 @@ import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
+import { ExportOverrideModal } from "@/components/workspace/ExportOverrideModal";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -74,6 +75,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     contextMenu, setContextMenu,
     unmappedTakeoffClassifications,
     isExportingExcel, exportError, setExportError,
+    exportBlockers, pendingExportKind, clearExportBlockers, applyProcoreOverrides,
     handleAddCustomColumn,
     handleDeleteColumn, handleRenameColumn,
     insertManualRow, deleteRow, handleToggleCellLock,
@@ -304,7 +306,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           {rows.length > 0 && (
             <>
               <button
-                onClick={handleExportExcelWorkbook}
+                onClick={() => handleExportExcelWorkbook()}
                 disabled={unmappedCount > 0 || isExportingExcel}
                 className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
@@ -319,7 +321,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
                 <FileDown size={18} /> Export Excel Payload
               </button>
               <button
-                onClick={handleExportProcore}
+                onClick={() => handleExportProcore()}
                 disabled={unmappedCount > 0}
                 className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-955/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
@@ -431,6 +433,26 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       {activeTab === "settings" && (
         <ErrorBoundary>
           <ProjectSettingsStep projectId={projectId} />
+        </ErrorBoundary>
+      )}
+
+      {/* Export Override Modal — unmapped Procore dollars require explicit user assignment */}
+      {exportBlockers.length > 0 && (
+        <ErrorBoundary>
+          <ExportOverrideModal
+            blockers={exportBlockers}
+            onApply={(assignments) => {
+              const updatedRows = applyProcoreOverrides(assignments);
+              const retryKind = pendingExportKind;
+              clearExportBlockers();
+              if (retryKind === "procore") {
+                handleExportProcore(updatedRows);
+              } else {
+                handleExportExcelWorkbook(updatedRows);
+              }
+            }}
+            onCancel={clearExportBlockers}
+          />
         </ErrorBoundary>
       )}
 

@@ -159,10 +159,13 @@ export function generateExcelPayload(
 }
 
 /**
- * Groups fine-grained suffix costs into unified Procore parent codes and cost types,
- * summing the budget values and structuring exactly matching Procore's budget importer schema.
+ * Groups fine-grained suffix costs into granular Procore Budget Line Items
+ * codes and cost types, summing the budget values and structuring exactly
+ * matching Procore's budget importer schema.
  * Columns: "Cost Code","Cost Type","Description","Original Budget"
  * Incorporates dynamic markup layers based on project settings.
+ * Grouping key is the granular procoreCode; procoreParentCode is only a
+ * back-compat fallback for rows the completeness gate would block upstream.
  */
 export function generateProcoreBudget(
   rows: ProcessedTakeoffRow[],
@@ -175,9 +178,9 @@ export function generateProcoreBudget(
   // Header line exactly matching Procore's standard budget importer columns
   csvLines.push(["Cost Code", "Cost Type", "Description", "Original Budget"].map(escapeCSVField).join(","));
 
-  // Maintain groups using a combination key of parent cost code + cost type
+  // Maintain groups using a combination key of granular cost code + cost type
   const groupings: Record<string, {
-    parentCode: string;
+    costCode: string;
     costType: string;
     descriptions: Set<string>;
     totalCost: number;
@@ -185,16 +188,16 @@ export function generateProcoreBudget(
 
   // Group and sum mapped rows only to guarantee database cleanliness
   for (const row of rows) {
-    if (!row.isMapped || !row.procoreParentCode) continue;
+    const costCode = ((row.procoreCode || "").trim() || (row.procoreParentCode || "").trim());
+    if (!row.isMapped || !costCode) continue;
 
-    const parentCode = row.procoreParentCode.trim();
     const costType = row.costType.trim();
-    const groupKey = `${parentCode}::${costType}`;
+    const groupKey = `${costCode}::${costType}`;
     const calculatedTotal = row.matchedQty * row.unitPrice;
 
     if (!groupings[groupKey]) {
       groupings[groupKey] = {
-        parentCode,
+        costCode,
         costType,
         descriptions: new Set<string>(),
         totalCost: 0
@@ -211,7 +214,7 @@ export function generateProcoreBudget(
     const consolidatedDescription = Array.from(group.descriptions).join("; ");
 
     const columns = [
-      group.parentCode,
+      group.costCode,
       group.costType,
       consolidatedDescription,
       group.totalCost.toFixed(2)
@@ -262,6 +265,87 @@ export function generateProcoreBudget(
 
   // Ensure Windows line endings (\r\n) for seamless ingestion
   return csvLines.join("\r\n");
+}
+
+// ─── PROCORE ROLLUP + EXPORT GATES (Phase 2) ────────────────────────────────
+
+/**
+ * The template's STEP 4 column C carries two known typo'd internal codes.
+ * Normalized on read so app rows land on their pre-populated template rows
+ * instead of being inserted as overflow duplicates.
+ */
+const TEMPLATE_CODE_NORMALIZATIONS: Record<string, string> = {
+  "03-4500.0002": "03-4500.001",
+  "07-6100.01": "07-6100.001",
+};
+
+/** Rounding tolerance for all dollar tie-out comparisons. */
+const RECONCILIATION_TOLERANCE = 0.01;
+
+/**
+ * Groups takeoff rows by granular Procore Budget Line Items code and sums
+ * matchedQty * unitPrice. Rows with an empty procoreCode are skipped — the
+ * completeness gate (validateExportReadiness) blocks them upstream when they
+ * carry dollars. Single source of truth for both export paths (workbook BLI
+ * sheet and Procore budget CSV).
+ */
+export function rollupByProcoreCode(rows: ProcessedTakeoffRow[]): Record<string, number> {
+  const rollup: Record<string, number> = {};
+  for (const row of rows) {
+    const code = (row.procoreCode || "").trim();
+    if (!code) continue;
+    rollup[code] = (rollup[code] || 0) + row.matchedQty * row.unitPrice;
+  }
+  return rollup;
+}
+
+/** A row whose dollars cannot be placed on any Procore Budget Line Items code. */
+export interface ExportBlocker {
+  rowId: string;
+  itemId: string;
+  description: string;
+  amount: number;
+}
+
+export interface ExportReadiness {
+  ok: boolean;
+  /** Rows carrying unmapped dollars — must be resolved via the user-override interface. */
+  blockers: ExportBlocker[];
+  /** Line-item total vs Procore rollup total tie-out (tolerance $0.01). */
+  reconciliation: { lineItemTotal: number; rollupTotal: number; delta: number; ok: boolean };
+}
+
+/**
+ * Export gates — run BEFORE any download:
+ * 1. Completeness: every row carrying dollars must have a granular procoreCode.
+ *    Zero-dollar unmapped rows do not block (no dollars to lose).
+ * 2. Reconciliation: Σ line items must equal Σ Procore rollup within $0.01.
+ * Never auto-assigns a mapping — blockers route to the interactive override UI
+ * (AGENTS.md: No AI Autonomy Over Financials).
+ */
+export function validateExportReadiness(rows: ProcessedTakeoffRow[]): ExportReadiness {
+  const blockers: ExportBlocker[] = [];
+  let lineItemTotal = 0;
+  for (const row of rows) {
+    const amount = row.matchedQty * row.unitPrice;
+    lineItemTotal += amount;
+    if (!(row.procoreCode || "").trim() && Math.abs(amount) > RECONCILIATION_TOLERANCE) {
+      blockers.push({
+        rowId: row.id,
+        itemId: row.itemId,
+        description: row.description,
+        amount,
+      });
+    }
+  }
+  const rollupTotal = Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0);
+  const delta = lineItemTotal - rollupTotal;
+  const reconciliationOk = Math.abs(delta) <= RECONCILIATION_TOLERANCE;
+  return {
+    ok: blockers.length === 0 && reconciliationOk,
+    blockers,
+    reconciliation: { lineItemTotal, rollupTotal, delta, ok: reconciliationOk },
+  };
 }
 
 /**
@@ -974,7 +1058,9 @@ export async function generateExcelWorkbook(
       if (!cellC) continue;
       const codeStr = readCellText(cellC).trim();
       if (codeStr && codeStr.length >= 6 && codeStr.includes("-")) {
-        prepopulatedRowsMap[codeStr] = r;
+        // Normalize known template typos so catalog itemIds match their rows
+        const normalized = TEMPLATE_CODE_NORMALIZATIONS[codeStr] || codeStr;
+        prepopulatedRowsMap[normalized] = r;
       }
     }
 
@@ -1270,11 +1356,8 @@ export async function generateExcelWorkbook(
 
       let sheetXml = await zip.file(`xl/${sheetFile}`)?.async("string");
       if (!sheetXml || !sheetXml.includes("STEP 4 - ESTIMATE")) {
-        // Also handle #REF! for Budget Line Items even without STEP 4 refs
-        if (sheetName === "Budget Line Items" && sheetXml?.includes("#REF!")) {
-          sheetXml = sheetXml.replace(/<f>[^<]*#REF![^<]*<\/f>/g, "");
-          zip.file(`xl/${sheetFile}`, sheetXml);
-        }
+        // Budget Line Items #REF! repair is handled by the dedicated rollup
+        // phase (3d-2) below — nothing to shift here.
         continue;
       }
 
@@ -1288,23 +1371,154 @@ export async function generateExcelWorkbook(
         }
       );
 
-      // Fix #REF! formulas (pre-existing in Budget Line Items)
-      if (sheetName === "Budget Line Items" && sheetXml.includes("#REF!")) {
-        sheetXml = sheetXml.replace(/<f>[^<]*#REF![^<]*<\/f>/g, "");
-      }
-
       zip.file(`xl/${sheetFile}`, sheetXml);
     }
-  } else {
-    // Even without row shift, fix #REF! in Budget Line Items
-    try {
-      const bliFile = resolveSheetFile(wbXml, relsXml, "Budget Line Items");
-      let bliXml = await zip.file(`xl/${bliFile}`)?.async("string");
-      if (bliXml && bliXml.includes("#REF!")) {
-        bliXml = bliXml.replace(/<f>[^<]*#REF![^<]*<\/f>/g, "");
-        zip.file(`xl/${bliFile}`, bliXml);
+  }
+
+  // 3d-2: Budget Line Items — deterministic computed rollup (§7, decided: computed values).
+  // Column H gets a computed VALUE on every row whose formula sources STEP 4
+  // (the app owns STEP 4 data) and on the template's broken #REF! row
+  // (1-10000.000). Live SUMIFs sourcing STEP 2/3 stay intact — estimators fill
+  // those sheets in Excel after export. Mapped codes absent from the sheet
+  // (e.g. 2-20000.000) are appended after validation against the
+  // "Importer Data Fields" sheet. Values come exclusively from
+  // rollupByProcoreCode (matchedQty * unitPrice) — no invented financials.
+  const procoreRollup = rollupByProcoreCode(rows);
+  let bliSheetFile: string | null = null;
+  try {
+    bliSheetFile = resolveSheetFile(wbXml, relsXml, "Budget Line Items");
+  } catch {
+    bliSheetFile = null; // Template variant without a BLI sheet — skip phase
+  }
+
+  if (bliSheetFile) {
+    let bliXml = await zip.file(`xl/${bliSheetFile}`)?.async("string");
+    const bliDataMatch = bliXml?.match(/<sheetData>([\s\S]*)<\/sheetData>/);
+    if (bliXml && bliDataMatch) {
+      // Validation oracle: Importer Data Fields col A = valid Procore codes,
+      // col B = official cost code description.
+      const importerCodes = new Map<string, string>();
+      try {
+        const impFile = resolveSheetFile(wbXml, relsXml, "Importer Data Fields");
+        const impXml = await zip.file(`xl/${impFile}`)?.async("string");
+        const impDataMatch = impXml?.match(/<sheetData>([\s\S]*)<\/sheetData>/);
+        if (impDataMatch) {
+          const parsedImp: ParsedElement[] = parser.parse(`<sheetData>${impDataMatch[1]}</sheetData>`);
+          const impChildren: ParsedElement[] = parsedImp[0].sheetData || [];
+          for (const rowEl of getRowElements(impChildren)) {
+            if (getRowNum(rowEl) < 2) continue; // header row
+            const aCell = findCellInRow(rowEl, "A");
+            if (!aCell) continue;
+            const code = readCellText(aCell).trim();
+            if (!code || !code.includes("-")) continue;
+            const bCell = findCellInRow(rowEl, "B");
+            importerCodes.set(code, bCell ? readCellText(bCell).trim() : "");
+          }
+        }
+      } catch { /* Importer Data Fields sheet not found — append validation skipped */ }
+
+      const parsedBli: ParsedElement[] = parser.parse(`<sheetData>${bliDataMatch[1]}</sheetData>`);
+      const bliChildren: ParsedElement[] = parsedBli[0].sheetData || [];
+
+      const seenCodes = new Set<string>();
+      let writtenTotal = 0;
+      let lastDataRowEl: ParsedElement | null = null;
+      let lastDataRowNum = 1;
+
+      for (const rowEl of getRowElements(bliChildren)) {
+        const rowNum = getRowNum(rowEl);
+        if (rowNum < 2) continue; // header row
+        const aCell = findCellInRow(rowEl, "A");
+        if (!aCell) continue;
+        const code = readCellText(aCell).trim();
+        if (!code || !code.includes("-")) continue;
+        seenCodes.add(code);
+        if (rowNum > lastDataRowNum) {
+          lastDataRowNum = rowNum;
+          lastDataRowEl = rowEl;
+        }
+
+        const hCell = findCellInRow(rowEl, "H");
+        if (!hCell) continue;
+        const formula = getCellFormula(hCell);
+        const amount = procoreRollup[code] ?? 0;
+        if (formula !== null && (formula.includes("STEP 4 - ESTIMATE") || formula.includes("#REF!"))) {
+          // App-owned rollup row (or the broken #REF! row): computed value
+          setCellValue(hCell, amount);
+          writtenTotal += amount;
+        } else if (Math.abs(amount) > RECONCILIATION_TOLERANCE) {
+          // Live STEP 2/3 SUMIF row, but the app carries dollars for this code.
+          // Writing would clobber the estimator's live formula; skipping would
+          // silently drop dollars. Surface instead of guessing.
+          throw new Error(
+            `Budget Line Items row for "${code}" is driven by a live STEP 2/3 formula, but app line items total $${amount.toFixed(2)} for it. Resolve the mapping before export.`
+          );
+        }
       }
-    } catch { /* Budget Line Items not found, skip */ }
+
+      // Append rows for mapped codes absent from the sheet (e.g. 2-20000.000)
+      const missingCodes = Object.keys(procoreRollup)
+        .filter((code) => !seenCodes.has(code) && Math.abs(procoreRollup[code]) > RECONCILIATION_TOLERANCE)
+        .sort();
+      for (const code of missingCodes) {
+        if (importerCodes.size > 0 && !importerCodes.has(code)) {
+          throw new Error(
+            `Procore code "${code}" is not present in the template's Importer Data Fields sheet — cannot append it to Budget Line Items.`
+          );
+        }
+        lastDataRowNum++;
+        const newRow: ParsedElement = lastDataRowEl
+          ? cloneRowElement(lastDataRowEl, lastDataRowNum)
+          : { row: [], ":@": { "@_r": String(lastDataRowNum) } };
+        const styleOf = (col: string) => (lastDataRowEl ? getStyleFromRow(lastDataRowEl, col) : "0");
+        setCellInlineString(getOrCreateCell(newRow, "A", lastDataRowNum, styleOf("A")), code);
+        // Template-wide BLI convention for data rows: Cost Type "Material",
+        // Unit Qty 1, UOM "ls" (mirrors every pre-populated BLI row)
+        setCellInlineString(getOrCreateCell(newRow, "B", lastDataRowNum, styleOf("B")), "Material");
+        setCellInlineString(getOrCreateCell(newRow, "C", lastDataRowNum, styleOf("C")), importerCodes.get(code) || "");
+        setCellValue(getOrCreateCell(newRow, "E", lastDataRowNum, styleOf("E")), 1);
+        setCellInlineString(getOrCreateCell(newRow, "F", lastDataRowNum, styleOf("F")), "ls");
+        setCellValue(getOrCreateCell(newRow, "H", lastDataRowNum, styleOf("H")), procoreRollup[code]);
+        insertRowElement(bliChildren, newRow);
+        writtenTotal += procoreRollup[code];
+      }
+
+      // Internal tie-out: dollars written/appended must equal the rollup.
+      // (Live STEP 2/3 rows cannot hold rollup dollars — enforced above.)
+      const rollupTotal = Object.values(procoreRollup).reduce((s, v) => s + v, 0);
+      if (Math.abs(writtenTotal - rollupTotal) > RECONCILIATION_TOLERANCE) {
+        throw new Error(
+          `Budget Line Items reconciliation failed: wrote $${writtenTotal.toFixed(2)} but rollup totals $${rollupTotal.toFixed(2)}.`
+        );
+      }
+
+      const newBliSheetData = fixXmlEntities(builder.build(parsedBli));
+      const bliInner = newBliSheetData.replace(/^<sheetData>/, "").replace(/<\/sheetData>$/, "");
+      bliXml = bliXml.replace(
+        /<sheetData>[\s\S]*<\/sheetData>/,
+        `<sheetData>${bliInner}</sheetData>`
+      );
+
+      // Extend dimension + autoFilter over appended rows
+      if (missingCodes.length > 0) {
+        bliXml = bliXml.replace(/(<dimension[^>]*ref="A1:[A-Z]+)\d+(")/, `$1${lastDataRowNum}$2`);
+        bliXml = bliXml.replace(/(<autoFilter[^>]*ref="A1:[A-Z]+)\d+(")/, `$1${lastDataRowNum}$2`);
+      }
+
+      zip.file(`xl/${bliSheetFile}`, bliXml);
+    }
+  }
+
+  // 3d-3: Force full recalculation on open so all remaining live formulas
+  // (STEP 2/3 SUMIFs, STEP 4 column I, division headers) recompute against
+  // the injected values (calcChain was removed in 3b).
+  if (/<calcPr[^>]*\/>/.test(wbXml)) {
+    wbXml = wbXml.replace(/<calcPr([^>]*?)\s*\/>/, (_match: string, attrs: string) => {
+      const cleaned = attrs.replace(/\s*fullCalcOnLoad="[^"]*"/, "");
+      return `<calcPr${cleaned} fullCalcOnLoad="1"/>`;
+    });
+  } else {
+    wbXml = wbXml.replace("</workbook>", `<calcPr fullCalcOnLoad="1"/></workbook>`);
   }
 
   // 3e: Write modified files to ZIP

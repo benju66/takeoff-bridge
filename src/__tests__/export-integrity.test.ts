@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { generateExcelWorkbook } from "../lib/exporter";
+import {
+  generateExcelWorkbook,
+  generateProcoreBudget,
+  validateExportReadiness,
+  rollupByProcoreCode,
+} from "../lib/exporter";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
 import fs from "fs";
@@ -276,4 +281,200 @@ describe("Excel Export Integrity & Relative Shifting Engine", () => {
       expect(xml).not.toContain("#REF!");
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Procore Rollup, Export Gates & Budget Line Items computed values
+// ---------------------------------------------------------------------------
+
+describe("Procore Rollup & Export Gates (Phase 2)", () => {
+  const mockColumnsShared: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProjectShared: Project = {
+    id: "project-2",
+    name: "Phase 2 Rollup Test Project",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-05",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0.02,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x",
+    classification: "",
+    itemId: "",
+    procoreParentCode: "",
+    procoreCode: "",
+    description: "",
+    matchedQty: 0,
+    uom: "LS",
+    unitPrice: 0,
+    total: 0,
+    isMapped: true,
+    rawQuantities: [],
+    costType: "S",
+    customFields: {},
+    source: "template",
+    ...overrides,
+  });
+
+  // Fixture: two Div-03 rows sharing 3-30000.000 (incl. former orphan
+  // 03-0000.002 Footings) + one Div-02 row on the 2-20000.000 fallback code
+  // (absent from the template's Budget Line Items sheet → exercises append).
+  const concreteRow = baseRow({
+    id: "row-03-0000.001", itemId: "03-0000.001",
+    procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+    description: "Cast In-Place Concrete", matchedQty: 150, unitPrice: 120, total: 18000, uom: "CY",
+  });
+  const footingsRow = baseRow({
+    id: "row-03-0000.002", itemId: "03-0000.002",
+    procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+    description: "Footings", matchedQty: 80, unitPrice: 180, total: 14400, uom: "CY",
+  });
+  const div02Row = baseRow({
+    id: "row-02-0000.001", itemId: "02-0000.001",
+    procoreParentCode: "2-20000.000", procoreCode: "2-20000.000",
+    description: "Demolition Allowance", matchedQty: 1, unitPrice: 5000, total: 5000,
+  });
+  const unmappedWithDollars = baseRow({
+    id: "manual-unmapped-dollars", itemId: "03-2000.001",
+    description: "Manual Rebar Mesh", matchedQty: 500, unitPrice: 2.5, total: 1250,
+    isMapped: true, source: "manual",
+  });
+  const unmappedZeroDollar = baseRow({
+    id: "manual-unmapped-zero", itemId: "",
+    description: "Empty manual stub", matchedQty: 0, unitPrice: 99,
+    isMapped: false, source: "manual",
+  });
+
+  it("blocks export when unmapped rows carry dollars; zero-dollar unmapped rows do not block", () => {
+    const readiness = validateExportReadiness([
+      concreteRow, unmappedWithDollars, unmappedZeroDollar,
+    ]);
+    expect(readiness.ok).toBe(false);
+    expect(readiness.blockers).toHaveLength(1);
+    expect(readiness.blockers[0]).toMatchObject({
+      rowId: "manual-unmapped-dollars",
+      itemId: "03-2000.001",
+      amount: 1250,
+    });
+    // Unmapped dollars are excluded from the rollup → reconciliation also fails
+    expect(readiness.reconciliation.ok).toBe(false);
+    expect(readiness.reconciliation.delta).toBeCloseTo(1250, 2);
+  });
+
+  it("reconciliation ties out on a fully mapped fixture", () => {
+    const readiness = validateExportReadiness([concreteRow, footingsRow, div02Row]);
+    expect(readiness.ok).toBe(true);
+    expect(readiness.blockers).toHaveLength(0);
+    expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(37400, 2);
+    expect(readiness.reconciliation.rollupTotal).toBeCloseTo(37400, 2);
+    expect(Math.abs(readiness.reconciliation.delta)).toBeLessThanOrEqual(0.01);
+
+    const rollup = rollupByProcoreCode([concreteRow, footingsRow, div02Row]);
+    expect(rollup["3-30000.000"]).toBeCloseTo(32400, 2);
+    expect(rollup["2-20000.000"]).toBeCloseTo(5000, 2);
+  });
+
+  it("writes computed values into Budget Line Items and appends missing mapped codes", async () => {
+    const templatePath = path.resolve(__dirname, "../../public/templates/Company_Estimate_Template.xlsx");
+    const templateBuffer = fs.readFileSync(templatePath);
+    const rows = [concreteRow, footingsRow, div02Row];
+
+    const blob = await generateExcelWorkbook(
+      rows,
+      mockProjectShared,
+      mockColumnsShared,
+      mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer
+    );
+    const arrayBuffer = await blob.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(arrayBuffer) as never);
+
+    const bli = workbook.getWorksheet("Budget Line Items");
+    expect(bli).toBeDefined();
+    if (!bli) throw new Error("Budget Line Items sheet not found");
+
+    // Index Budget Amount (col H) cells by Cost Code (col A)
+    const byCode = new Map<string, ExcelJS.CellValue>();
+    bli.eachRow((row, rowNum) => {
+      if (rowNum < 2) return;
+      const code = String(row.getCell(1).value ?? "").trim();
+      if (code) byCode.set(code, row.getCell(8).value);
+    });
+
+    // (c) Former orphan 03-0000.002 Footings rolls into 3-30000.000 as a static value
+    const concreteVal = byCode.get("3-30000.000");
+    expect(typeof concreteVal).toBe("number");
+    expect(concreteVal as number).toBeCloseTo(32400, 2);
+
+    // The template's broken #REF! row (1-10000.000) is value-written, not formula-stripped
+    const gcVal = byCode.get("1-10000.000");
+    expect(typeof gcVal).toBe("number");
+    expect(gcVal as number).toBeCloseTo(0, 2);
+
+    // Missing mapped code 2-20000.000 is appended with its rollup value
+    const div02Val = byCode.get("2-20000.000");
+    expect(typeof div02Val).toBe("number");
+    expect(div02Val as number).toBeCloseTo(5000, 2);
+
+    // Live STEP 2/3 SUMIFs are left intact; no formula still sources STEP 4
+    const outputZip = await JSZip.loadAsync(arrayBuffer);
+    let bliSheetXml = "";
+    for (const name of Object.keys(outputZip.files)) {
+      if (!name.startsWith("xl/worksheets/") || !name.endsWith(".xml")) continue;
+      const xml = await outputZip.file(name)!.async("string");
+      if (xml.includes("Budget") || xml.includes("SUMIF('STEP 2 - GCs'")) {
+        // Identify the BLI sheet by its surviving STEP 2 SUMIFs
+        if (/<f>SUMIF\('STEP 2 - GCs'/.test(xml) && /<f>SUMIF\('STEP 3 - SITE OPS'/.test(xml)) {
+          bliSheetXml = xml;
+          break;
+        }
+      }
+    }
+    expect(bliSheetXml).not.toBe("");
+    expect(bliSheetXml).not.toContain("#REF!");
+    expect(bliSheetXml).not.toContain("SUMIF('STEP 4 - ESTIMATE'");
+
+    // (d) generateProcoreBudget and the workbook BLI agree on totals
+    const csv = generateProcoreBudget(rows, mockProjectShared);
+    const lines = csv.split("\r\n").slice(1); // drop header
+    let csvDetailTotal = 0;
+    const csvCodes = new Set<string>();
+    for (const line of lines) {
+      const cols = line.split(",");
+      const code = cols[0].replace(/^"|"$/g, "");
+      // Detail rows only — modifier rows use the template modifier codes (no division prefix match)
+      if (code === "3-30000.000" || code === "2-20000.000") {
+        csvCodes.add(code);
+        csvDetailTotal += parseFloat(cols[cols.length - 1].replace(/^"|"$/g, ""));
+      }
+    }
+    expect(csvCodes).toEqual(new Set(["3-30000.000", "2-20000.000"]));
+    const bliWrittenTotal = (concreteVal as number) + (div02Val as number);
+    expect(csvDetailTotal).toBeCloseTo(bliWrittenTotal, 2);
+    expect(csvDetailTotal).toBeCloseTo(37400, 2);
+
+    // fullCalcOnLoad is set so surviving live formulas recompute on open
+    const wbXmlOut = await outputZip.file("xl/workbook.xml")!.async("string");
+    expect(wbXmlOut).toMatch(/<calcPr[^>]*fullCalcOnLoad="1"/);
+  }, 30000);
 });

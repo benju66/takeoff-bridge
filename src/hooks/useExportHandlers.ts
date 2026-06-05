@@ -3,20 +3,36 @@
 import { useState } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
-import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
+import {
+  generateExcelPayload,
+  generateProcoreBudget,
+  generateExcelWorkbook,
+  validateExportReadiness,
+  ExportBlocker,
+} from "@/lib/exporter";
 import { getTemplateConfig } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
 // useExportHandlers — Export CSV / Excel / Procore budget download logic
+//
+// Phase 2 gate: validateExportReadiness runs BEFORE any Procore-bound download.
+// Rows with unmapped dollars populate exportBlockers (opens the interactive
+// override modal — no download happens); reconciliation mismatches surface
+// via exportError. Mappings are never auto-assigned (AGENTS.md).
 // ---------------------------------------------------------------------------
+
+export type PendingExportKind = "workbook" | "procore";
 
 export interface UseExportHandlersReturn {
   isExportingExcel: boolean;
   exportError: string | null;
   setExportError: React.Dispatch<React.SetStateAction<string | null>>;
+  exportBlockers: ExportBlocker[];
+  pendingExportKind: PendingExportKind | null;
+  clearExportBlockers: () => void;
   handleExportExcel: () => void;
-  handleExportProcore: () => void;
-  handleExportExcelWorkbook: () => Promise<void>;
+  handleExportProcore: (overrideRows?: ProcessedTakeoffRow[]) => void;
+  handleExportExcelWorkbook: (overrideRows?: ProcessedTakeoffRow[]) => Promise<void>;
 }
 
 export function useExportHandlers(
@@ -28,6 +44,36 @@ export function useExportHandlers(
   // Export state
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportBlockers, setExportBlockers] = useState<ExportBlocker[]>([]);
+  const [pendingExportKind, setPendingExportKind] = useState<PendingExportKind | null>(null);
+
+  const clearExportBlockers = () => {
+    setExportBlockers([]);
+    setPendingExportKind(null);
+  };
+
+  /**
+   * Completeness + reconciliation gates. Returns true when the export may
+   * proceed. Blockers open the override modal; reconciliation failures set
+   * exportError. Remembers which export to retry after overrides are applied.
+   */
+  const runExportGate = (effectiveRows: ProcessedTakeoffRow[], kind: PendingExportKind): boolean => {
+    const readiness = validateExportReadiness(effectiveRows);
+    if (readiness.ok) {
+      clearExportBlockers();
+      return true;
+    }
+    if (readiness.blockers.length > 0) {
+      setPendingExportKind(kind);
+      setExportBlockers(readiness.blockers);
+    } else {
+      const { lineItemTotal, rollupTotal, delta } = readiness.reconciliation;
+      setExportError(
+        `Export blocked: line items total $${lineItemTotal.toFixed(2)} but the Procore rollup totals $${rollupTotal.toFixed(2)} (Δ $${delta.toFixed(2)}).`
+      );
+    }
+    return false;
+  };
 
   const downloadCSVFile = (content: string, filename: string) => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
@@ -46,17 +92,21 @@ export function useExportHandlers(
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 
-  const handleExportProcore = () => {
-    const payload = generateProcoreBudget(rows, project);
+  const handleExportProcore = (overrideRows?: ProcessedTakeoffRow[]) => {
+    const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
+    if (!runExportGate(effectiveRows, "procore")) return;
+    const payload = generateProcoreBudget(effectiveRows, project);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
   };
 
-  const handleExportExcelWorkbook = async () => {
+  const handleExportExcelWorkbook = async (overrideRows?: ProcessedTakeoffRow[]) => {
+    const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
+    if (!runExportGate(effectiveRows, "workbook")) return;
     setIsExportingExcel(true);
     setExportError(null);
     try {
       const templateName = "Company_Estimate_Template.xlsx";
-      
+
       // 1. Fetch layout configuration from Supabase
       const config = await getTemplateConfig(templateName);
       const layoutConfig = config ? config.configData : null;
@@ -69,7 +119,7 @@ export function useExportHandlers(
       const templateBuffer = await response.arrayBuffer();
 
       // 3. Generate Excel workbook using the relative shifting engine
-      const blob = await generateExcelWorkbook(rows, project, columnDefs, layoutConfig, templateBuffer);
+      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, layoutConfig, templateBuffer);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
@@ -92,6 +142,9 @@ export function useExportHandlers(
     isExportingExcel,
     exportError,
     setExportError,
+    exportBlockers,
+    pendingExportKind,
+    clearExportBlockers,
     handleExportExcel,
     handleExportProcore,
     handleExportExcelWorkbook,

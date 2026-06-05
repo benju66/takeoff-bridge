@@ -2,7 +2,7 @@
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
 - **Date:** 2026-06-04 (updated 2026-06-05)
-- **Status:** PHASE 1 + 1.5 COMPLETE (commit `e475f6b` on `2026.06.04`) — Phase 2 NOT STARTED, awaiting plan-table approval. No migration run.
+- **Status:** PHASE 1 + 1.5 + 2 COMPLETE (Phase 2 implemented 2026-06-05 on `2026.06.04`, awaiting user review) — Phase 3 NOT STARTED. No migration run.
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
 
 > **Progress log**
@@ -11,7 +11,16 @@
 >   values (`t="e"`) so the pre-existing `full-export-corruption` red test is green; itemId EDIT_CELL
 >   commands carry a primary-row self-cascade (`src/lib/commandCapture.ts`) so undo restores all 11
 >   derived fields atomically. Gate fully green: build clean, 159/159 unit, e2e pass.
-> - ⬜ **Phase 2** next: present implementation table for approval before code.
+> - ✅ **Phase 2** (2026-06-05, plan table user-approved before code): deterministic rollup + gates +
+>   template correctness — see §7 outcomes below. Gate fully green: build clean, 162/162 unit
+>   (159 + 3 new), e2e pass. Key build decisions (from template forensics): only the **144 STEP-4-sourced**
+>   BLI column-H formulas (+ the broken `1-10000.000` `#REF!` row) are value-written; the 35 STEP-2 /
+>   38 STEP-3 live SUMIFs stay intact (estimators fill those sheets post-export, `fullCalcOnLoad="1"`
+>   recomputes them). `2-20000.000` has NO row in the template BLI → handled by the append path
+>   (validated against Importer Data Fields, read from the same zip). Gates live in
+>   `useExportHandlers` (not inside `generateExcelWorkbook`) so direct exporter tests stay valid;
+>   zero-dollar unmapped rows don't block (no dollars to lose). Override modal applies assignments
+>   as ONE `PASTE` command (atomic Ctrl+Z); in-memory only — `procore_code` persistence is Phase 3.
 > - ⬜ **Phase 3** (scope ADDED 2026-06-04): also build a **mapping-editor UI in global settings**
 >   (view/edit `cost_code_map`, validated against Importer codes, writes via `db.ts`, `source='manual'`).
 > - Deferred/accepted: `db.ts` imports the 55KB catalog for `procoreCode` hydration (~15KB gzip on
@@ -117,7 +126,7 @@ Template internal coordinates (STEP 4 - ESTIMATE): header row 9; division ranges
 
 ---
 
-## 7. Phase 2 — Deterministic rollup, gates, template correctness (correctness lands here)
+## 7. Phase 2 — Deterministic rollup, gates, template correctness (correctness lands here) ✅ COMPLETE
 
 **Goal:** the app computes the Procore numbers and refuses to emit anything that doesn't tie out.
 

@@ -13,7 +13,8 @@ import {
   Table,
 } from "@tanstack/react-table";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand } from "@/types";
+import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
 import { SelectCellInput } from "@/components/workspace/SelectCellInput";
@@ -70,6 +71,10 @@ export interface UseTakeoffWorkbookReturn {
   isExportingExcel: boolean;
   exportError: string | null;
   setExportError: React.Dispatch<React.SetStateAction<string | null>>;
+  exportBlockers: ExportBlocker[];
+  pendingExportKind: "workbook" | "procore" | null;
+  clearExportBlockers: () => void;
+  applyProcoreOverrides: (assignments: Record<string, string>) => ProcessedTakeoffRow[];
   rowVersion: number;
 
   // Filter state (Phase 4)
@@ -98,8 +103,8 @@ export interface UseTakeoffWorkbookReturn {
   setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
   scrollToRowRef: React.MutableRefObject<((index: number) => void) | undefined>;
   handleExportExcel: () => void;
-  handleExportProcore: () => void;
-  handleExportExcelWorkbook: () => Promise<void>;
+  handleExportProcore: (overrideRows?: ProcessedTakeoffRow[]) => void;
+  handleExportExcelWorkbook: (overrideRows?: ProcessedTakeoffRow[]) => Promise<void>;
   handleUndo: () => void;
   handleRedo: () => void;
 
@@ -223,8 +228,43 @@ export function useTakeoffWorkbook(
 
   const {
     isExportingExcel, exportError, setExportError,
+    exportBlockers, pendingExportKind, clearExportBlockers,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
   } = useExportHandlers(rows, columnDefs, project, projectId);
+
+  // ---------------------------------------------------------------------------
+  // Export override — assign granular Procore codes to blocker rows.
+  // One PASTE command = one atomic undo unit (AGENTS.md history preservation).
+  // In-memory for Phase 2; procore_code persistence lands with the Phase 3
+  // schema column. Returns the updated rows so the caller can retry the
+  // export immediately without waiting for a re-render.
+  // ---------------------------------------------------------------------------
+  const applyProcoreOverrides = (assignments: Record<string, string>): ProcessedTakeoffRow[] => {
+    const edits: PasteCommand["edits"] = [];
+    for (const [rowId, assigned] of Object.entries(assignments)) {
+      const code = (assigned || "").trim();
+      if (!code) continue;
+      const row = rows.find((r) => r.id === rowId);
+      if (!row || row.procoreCode === code) continue;
+      edits.push({
+        rowId,
+        field: "procoreCode",
+        prevFields: { procoreCode: row.procoreCode },
+        nextFields: { procoreCode: code },
+      });
+    }
+    if (edits.length === 0) return rows;
+
+    // pushCommand BEFORE state setter (AGENTS.md guardrail)
+    commandHistory.pushCommand({ type: "PASTE", edits });
+
+    const updated = rows.map((r) => {
+      const code = (assignments[r.id] || "").trim();
+      return code && code !== r.procoreCode ? { ...r, procoreCode: code } : r;
+    });
+    setRows(updated);
+    return updated;
+  };
 
   const {
     handleUndo, handleRedo,
@@ -1158,6 +1198,10 @@ export function useTakeoffWorkbook(
     isExportingExcel,
     exportError,
     setExportError,
+    exportBlockers,
+    pendingExportKind,
+    clearExportBlockers,
+    applyProcoreOverrides,
     rowVersion,
     globalFilter,
     setGlobalFilter,
