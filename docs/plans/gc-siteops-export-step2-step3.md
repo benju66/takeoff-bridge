@@ -352,33 +352,15 @@ Run after every sub-step. All must pass before delivery.
 
 ---
 
-## 11. Session Kickoff Prompt
+## 11. Session Kickoff Prompts
 
-Use this to start a fresh implementation session:
+**Run ONE phase per fresh context window** (per project convention — fresh context yields higher
+implementation quality). Each phase ends with: tests green → commit → a short handoff note appended
+to §13 for the next phase. Do not start the next phase in the same window.
 
----
-
-> I need you to implement the plan at:
-> `docs/plans/gc-siteops-export-step2-step3.md`
->
-> Read that file start to finish first — it is self-contained. Pay special attention to
-> §0 (the four workstreams: A GC/Site Ops export, B-2 the 32-1313→32-1613 re-sync, C the
-> STEP 3→STEP 4 linkage, and D the source-of-truth rule), and §3 (gate checks before any code).
->
-> Prerequisites (both ✅ satisfied as of 2026-06-05 — re-verify at start):
-> 1. Phase 3c committed (`0d3484b`, `6543a8e`) — harvest/seed scripts and the `resolveProcoreCode`
->    chokepoint are the committed baseline. Build ON the chokepoint; do not bypass it (§9).
-> 2. Template finalized (saved/closed, no `~$` lock file). Commit its pending changes before
->    re-harvesting so the harvest runs against the tracked baseline.
->
-> Before any code:
-> 1. Encode my confirmed mappings (§0.B) into the catalog/cost_code_map as the EXPECTED set, then
->    forensically read `templates/Company_Estimate_Template.xlsx` and DIFF against it — surface every
->    disagreement; my mapping wins, the SUMIF is advisory only (§0.D).
-> 2. Trace the STEP 3 → STEP 4 cross-sheet links (§0.C) — this drives the export write order.
-> 3. Present an implementation plan table for my approval before touching any file (AGENTS.md).
->
-> Model: Claude Opus (latest) for the forensic/architecture work.
+The per-phase scope, dependencies, exit criteria, and copy-paste kickoff prompts live in
+**§13 — Phasing & Sequencing**. Start with **Phase 1 (read-only forensic verify)** — it is safe to
+run immediately and de-risks everything downstream.
 
 ---
 
@@ -393,6 +375,99 @@ Use this to start a fresh implementation session:
 | 5 | Reconciliation gate: Option A or B | Recommend A (full coverage) |
 | 6 | Write GC/Site Ops detail into STEP 2/3 sheets | Blank (simple) vs written (better UX) |
 | 7 | Make GC staff rates editable per project | Scope in or defer — hook already supports `rateOverrides` |
+
+---
+
+## 13. Phasing & Sequencing
+
+**One phase per fresh context window.** Each phase: implement → `npm run build` + `npm run test`
+green → commit → append a 3–5 line handoff note under "Handoff log" below. Workstream **D**
+(source-of-truth rule, §0.D) governs every phase — it is a principle, not a phase.
+
+Dependency order: **P1 → P2 → P3 → P4**. P1 is read-only and can run today. P2 depends on P1's
+confirmed mapping. P3 depends on P2's corrected catalog + P1's linkage map. P4 is optional polish.
+
+### Phase 1 — Forensic Verification (READ-ONLY, no source changes)
+- **Goal:** prove the template's formulas agree with the user's confirmed mappings BEFORE any code.
+- **Do:**
+  1. Encode the §0.B confirmed mappings as an "expected" table (scratch/doc artifact, not source yet).
+  2. Forensic read of `templates/Company_Estimate_Template.xlsx` (unzip + parse XML, Phase 1 method):
+     STEP 2 BLI SUMIF criteria (34 rows), STEP 3 BLI SUMIF criteria (38 rows), the STEP 3→STEP 4
+     cross-sheet references (§0.C), and the 32-1313 / 32-1613 codes.
+  3. DIFF expected vs actual; validate every procoreCode against `src/lib/procore-valid-codes.json`.
+  4. Produce a findings doc: confirmed mapping table + STEP 3→STEP 4 dependency map + discrepancy
+     list. Surface discrepancies to the user; user signs off (their mapping wins, §0.D).
+- **Exit:** findings doc written under `docs/plans/` and committed (DOCS ONLY — zero source/catalog/DB
+  changes). User has signed off on any discrepancy.
+- **Output for next phase:** the confirmed mapping + dependency map P2/P3 build on.
+
+### Phase 2 — B-2 Catalog / DB Re-Sync
+- **Goal:** bring `estimate-catalog.json` + `cost_code_map` in line with the corrected template.
+- **Do (per §0.B B-2 steps):** `npm run sync-codes` → `npm run generate-seed` → migration
+  (present DDL for approval: INSERT `32-1613.002–.006`, UPDATE `32-1313.001` desc, DELETE
+  `32-1313.002–.005`) → query + surface affected `estimate_line_items` (no silent rewrite).
+  Route all procoreCode assignment through `resolveProcoreCode` (do not bypass the chokepoint).
+- **Guardrails:** migration runs on a Supabase branch first (AGENTS.md); `supabase_schema.sql`
+  updated first if schema changes; line-item writes only via the RPC.
+- **Exit:** build + test green; migration verified on branch then applied; committed. Catalog +
+  `cost_code_map` match the template; SQL tie-out passes.
+
+### Phase 3 — GC + Site Ops Export (workstreams A + C)
+- **Goal:** write GC + Site Ops computed values into all 34 + 38 BLI rows; no surviving SUMIFs.
+- **Do (per §4–§7):** thread `gcCalcResult` / `gcEquipment` / `siteOpsCalcResult` into
+  `generateExcelWorkbook` (§5); write the BLI rows using the §6 logic and the P1 dependency map for
+  STEP 3→STEP 4 write order; update `constants.ts` GC/Site Ops codes to the P1-confirmed criteria;
+  extend `validateExportReadiness` to include GC + Site Ops (§7 Option A); add the §5 tests.
+- **Exit:** build + test green; manual export of a known project ties out (BLI shows computed GC +
+  Site Ops values, reconciliation passes); committed.
+
+### Phase 4 — Optional Polish (independently shippable)
+- Write GC/Site Ops line detail into STEP 2/3 sheets for estimator reference (§8).
+- Make GC staff rates editable per project (hook already accepts `rateOverrides`).
+- Each is its own small phase/commit; do only if the user wants them.
+
+### Handoff log
+(Each phase appends 3–5 lines here on completion: what landed, commit hash, anything the next
+phase must know. Empty until Phase 1 runs.)
+
+- _(none yet)_
+
+---
+
+## 14. Per-Phase Kickoff Prompts
+
+Copy the block for the phase you are starting into a fresh window.
+
+### → Phase 1 (read-only forensic verify — safe to run now)
+
+> Implement **Phase 1 only** of `docs/plans/gc-siteops-export-step2-step3.md`. Read the whole plan
+> first (esp. §0, §3, §13). Phase 1 is READ-ONLY: do not change any source, catalog, or DB.
+> Encode my confirmed mappings (§0.B) as an expected table, forensically read
+> `templates/Company_Estimate_Template.xlsx` (STEP 2 + STEP 3 BLI SUMIF criteria, the STEP 3→STEP 4
+> cross-sheet links, and the 32-1313/32-1613 codes), DIFF expected vs actual, validate every
+> procoreCode against `src/lib/procore-valid-codes.json`, and write a findings doc under `docs/plans/`
+> with a discrepancy list for my sign-off. My mapping is authoritative; the SUMIFs are advisory (§0.D).
+> Commit the findings doc only, then append a handoff note to §13. Model: Claude Opus (latest).
+
+### → Phase 2 (catalog/DB re-sync — after P1 sign-off)
+
+> Implement **Phase 2 only** of `docs/plans/gc-siteops-export-step2-step3.md` (§0.B B-2, §13).
+> Read the plan and the Phase 1 findings/handoff first. Re-sync the catalog + `cost_code_map` to the
+> corrected template via `npm run sync-codes` → `npm run generate-seed` → a migration (present the
+> DDL for my approval BEFORE running it; run on a Supabase branch first per AGENTS.md). Surface any
+> existing `estimate_line_items` on `32-1313.001–.005` for my review — no silent rewrite. Route all
+> procoreCode assignment through `resolveProcoreCode`. Get build + tests green, commit, append a
+> handoff note to §13. Invoke the supabase skill before touching DB code. Model: Claude Opus (latest).
+
+### → Phase 3 (GC + Site Ops export — after P2)
+
+> Implement **Phase 3 only** of `docs/plans/gc-siteops-export-step2-step3.md` (workstreams A + C;
+> §4–§7, §13). Read the plan and the Phase 1 + Phase 2 handoffs first. Thread the GC and Site Ops
+> calc results into `generateExcelWorkbook`, write computed values into all 34 GC + 38 Site Ops BLI
+> rows (use the Phase 1 STEP 3→STEP 4 dependency map for write order), update `constants.ts` codes to
+> the Phase 1-confirmed criteria, extend `validateExportReadiness` to cover GC + Site Ops (§7 Option
+> A), and add the §5 tests. Present a plan table for my approval before editing. Get build + tests
+> green, verify a manual export ties out, commit, append a handoff note. Model: Claude Opus (latest).
 
 **Resolved (B-1):** `03-0000.010/.011/.012` and `03-4500.001` verified in sync — no changes needed.
 **Resolved:** `32-1313` empty-parent question — `32-1313.001` is repurposed as the Concrete Paving line, so the group is not empty.
