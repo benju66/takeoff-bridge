@@ -5,6 +5,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---------------------------------------------------------------------------
 const mockOrder = vi.fn();
 const mockRpc = vi.fn();
+const mockUpdate = vi.fn();
+const mockSingle = vi.fn();
 
 vi.mock("../supabase", () => ({
   supabase: {
@@ -15,6 +17,19 @@ vi.mock("../supabase", () => ({
         })),
         order: mockOrder,
       })),
+      // .update(payload).eq().eq().select().single() — Phase 3c mapping editor
+      update: (payload: unknown) => {
+        mockUpdate(payload);
+        return {
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              select: vi.fn(() => ({
+                single: mockSingle,
+              })),
+            })),
+          })),
+        };
+      },
     })),
     rpc: (...args: unknown[]) => mockRpc(...args),
   },
@@ -24,6 +39,7 @@ import {
   getEstimateLineItems,
   saveEstimateLineItems,
   getCostCodeMap,
+  updateCostCodeMapping,
   getProjects,
 } from "../db";
 import { MASTER_TEMPLATE_NAME } from "../constants";
@@ -172,6 +188,58 @@ describe("Phase 3a — getCostCodeMap", () => {
     await expect(
       getCostCodeMap(MASTER_TEMPLATE_NAME)
     ).rejects.toThrow("Failed to fetch cost code map: Connection failed");
+  });
+});
+
+describe("Phase 3c — updateCostCodeMapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("stamps source='manual' on the UPDATE payload and returns the mapped entry", async () => {
+    mockSingle.mockResolvedValueOnce({
+      data: {
+        template_name: MASTER_TEMPLATE_NAME,
+        internal_code: "03-0000.002",
+        procore_code: "6-64100.000",
+        source: "manual",
+      },
+      error: null,
+    });
+
+    const entry = await updateCostCodeMapping(
+      MASTER_TEMPLATE_NAME,
+      "03-0000.002",
+      "6-64100.000"
+    );
+
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        procore_code: "6-64100.000",
+        source: "manual",
+      })
+    );
+    expect(entry).toEqual({
+      templateName: MASTER_TEMPLATE_NAME,
+      internalCode: "03-0000.002",
+      procoreCode: "6-64100.000",
+      source: "manual",
+    });
+  });
+
+  it("throws on Supabase error and on no-row-updated", async () => {
+    mockSingle.mockResolvedValueOnce({
+      data: null,
+      error: { message: "permission denied" },
+    });
+    await expect(
+      updateCostCodeMapping(MASTER_TEMPLATE_NAME, "03-0000.002", "6-64100.000")
+    ).rejects.toThrow("Failed to update cost code mapping: permission denied");
+
+    mockSingle.mockResolvedValueOnce({ data: null, error: null });
+    await expect(
+      updateCostCodeMapping(MASTER_TEMPLATE_NAME, "99-9999.999", "6-64100.000")
+    ).rejects.toThrow("Failed to update cost code mapping: no row updated");
   });
 });
 

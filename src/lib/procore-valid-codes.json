@@ -1,0 +1,898 @@
+[
+  {
+    "code": "1-10000.000",
+    "description": "General Conditions"
+  },
+  {
+    "code": "1-10001.000",
+    "description": "Preconstruction Fees"
+  },
+  {
+    "code": "1-10130.000",
+    "description": "Design - Architecture"
+  },
+  {
+    "code": "1-10160.000",
+    "description": "Design - Civil"
+  },
+  {
+    "code": "1-10180.000",
+    "description": "Design - MEP"
+  },
+  {
+    "code": "1-10210.000",
+    "description": "Design - Structural"
+  },
+  {
+    "code": "1-10230.000",
+    "description": "Building Permit"
+  },
+  {
+    "code": "1-10250.000",
+    "description": "Demolition Permit"
+  },
+  {
+    "code": "1-10260.000",
+    "description": "City Licenses/Misc Permits"
+  },
+  {
+    "code": "1-10310.000",
+    "description": "Project Executive"
+  },
+  {
+    "code": "1-10320.000",
+    "description": "Sr Project Manager"
+  },
+  {
+    "code": "1-10330.000",
+    "description": "Project Manager"
+  },
+  {
+    "code": "1-10340.000",
+    "description": "Project Engineer"
+  },
+  {
+    "code": "1-10410.000",
+    "description": "Sr Superintendent"
+  },
+  {
+    "code": "1-10420.000",
+    "description": "Superintendent"
+  },
+  {
+    "code": "1-10430.000",
+    "description": "Asst. Superintendent"
+  },
+  {
+    "code": "1-10440.000",
+    "description": "General Labor"
+  },
+  {
+    "code": "1-10510.000",
+    "description": "Project Assistant"
+  },
+  {
+    "code": "1-10610.000",
+    "description": "Safety Consultant, Visit Bi-Weekly"
+  },
+  {
+    "code": "1-11000.000",
+    "description": "Small Tools"
+  },
+  {
+    "code": "1-11200.000",
+    "description": "Fuel and Vehicle Charges"
+  },
+  {
+    "code": "1-11400.000",
+    "description": "Travel and Meals"
+  },
+  {
+    "code": "1-11600.000",
+    "description": "Procore"
+  },
+  {
+    "code": "1-14010.000",
+    "description": "Quality"
+  },
+  {
+    "code": "1-15110.000",
+    "description": "Temp Office and Set up"
+  },
+  {
+    "code": "1-15111.000",
+    "description": "Cell Phone"
+  },
+  {
+    "code": "1-15112.000",
+    "description": "Jobsite Office Equipment"
+  },
+  {
+    "code": "1-15114.000",
+    "description": "Project Computers / Internet"
+  },
+  {
+    "code": "1-15120.000",
+    "description": "Storage Trailer"
+  },
+  {
+    "code": "1-15130.000",
+    "description": "Dumpsters"
+  },
+  {
+    "code": "1-15140.000",
+    "description": "Temporary Toilets"
+  },
+  {
+    "code": "1-15150.000",
+    "description": "Temporary Fire Extinguishers"
+  },
+  {
+    "code": "1-15160.000",
+    "description": "Temporary Project Signs"
+  },
+  {
+    "code": "1-15170.000",
+    "description": "Temporary Electric"
+  },
+  {
+    "code": "1-15180.000",
+    "description": "Temporary Gas (not winter heat)"
+  },
+  {
+    "code": "1-15190.000",
+    "description": "Temporary Water"
+  },
+  {
+    "code": "1-16010.000",
+    "description": "Courier services"
+  },
+  {
+    "code": "1-16020.000",
+    "description": "Plan Reproduction"
+  },
+  {
+    "code": "1-17010.000",
+    "description": "Legal Fees"
+  },
+  {
+    "code": "2-20000.000",
+    "description": "Site Operations"
+  },
+  {
+    "code": "2-23200.000",
+    "description": "Soil Borings"
+  },
+  {
+    "code": "2-24100.000",
+    "description": "Demolition"
+  },
+  {
+    "code": "2-25100.000",
+    "description": "FFE Relocation"
+  },
+  {
+    "code": "2-28213.000",
+    "description": "Abatement"
+  },
+  {
+    "code": "2-29005.000",
+    "description": "Final Cleaning"
+  },
+  {
+    "code": "2-29010.000",
+    "description": "Progress Cleaning"
+  },
+  {
+    "code": "2-29015.000",
+    "description": "Safety"
+  },
+  {
+    "code": "2-29020.000",
+    "description": "Temp Protection"
+  },
+  {
+    "code": "2-29025.000",
+    "description": "Temporary Partitions"
+  },
+  {
+    "code": "2-29030.000",
+    "description": "Traffic Control and Jersey Barriers"
+  },
+  {
+    "code": "2-29035.000",
+    "description": "Temporary Fencing"
+  },
+  {
+    "code": "2-29040.000",
+    "description": "Scrim"
+  },
+  {
+    "code": "2-29045.000",
+    "description": "Temp Access Roads"
+  },
+  {
+    "code": "2-29050.000",
+    "description": "Site Security"
+  },
+  {
+    "code": "2-29055.000",
+    "description": "Site Security Cameras"
+  },
+  {
+    "code": "2-29060.000",
+    "description": "Jobsite Camera"
+  },
+  {
+    "code": "2-29065.000",
+    "description": "Construction Permits"
+  },
+  {
+    "code": "2-29070.000",
+    "description": "SWPPP Permit"
+  },
+  {
+    "code": "2-29200.000",
+    "description": "Survey & Layout"
+  },
+  {
+    "code": "2-29305.000",
+    "description": "City Requirements"
+  },
+  {
+    "code": "2-29307.000",
+    "description": "Knox Box"
+  },
+  {
+    "code": "2-29310.000",
+    "description": "Permanent Power Service"
+  },
+  {
+    "code": "2-29315.000",
+    "description": "Temporary Power Service"
+  },
+  {
+    "code": "2-29320.000",
+    "description": "Gas Service"
+  },
+  {
+    "code": "2-29325.000",
+    "description": "Cable Service"
+  },
+  {
+    "code": "2-29330.000",
+    "description": "Data Service"
+  },
+  {
+    "code": "2-29405.000",
+    "description": "Material Hoist / Trash Chute"
+  },
+  {
+    "code": "2-29406.000",
+    "description": "Trash Chute"
+  },
+  {
+    "code": "2-29410.000",
+    "description": "Scaffolding & Platforms"
+  },
+  {
+    "code": "2-29415.000",
+    "description": "Crane Rental"
+  },
+  {
+    "code": "2-29420.000",
+    "description": "Equipment Rental"
+  },
+  {
+    "code": "2-29425.000",
+    "description": "Forklift Rental"
+  },
+  {
+    "code": "2-29430.000",
+    "description": "Street Sweeping"
+  },
+  {
+    "code": "2-29505.000",
+    "description": "Const Materials Testing"
+  },
+  {
+    "code": "2-29510.000",
+    "description": "Vibration Monitoring"
+  },
+  {
+    "code": "2-29515.000",
+    "description": "Acoustic Testing"
+  },
+  {
+    "code": "2-29520.000",
+    "description": "Window Testing"
+  },
+  {
+    "code": "2-29525.000",
+    "description": "Weather Barrier Testing"
+  },
+  {
+    "code": "2-29530.000",
+    "description": "Gypcrete Testing"
+  },
+  {
+    "code": "3-30000.000",
+    "description": "Concrete"
+  },
+  {
+    "code": "3-33543.000",
+    "description": "Polished Concrete"
+  },
+  {
+    "code": "3-34100.000",
+    "description": "Precast Structural Concrete"
+  },
+  {
+    "code": "3-34500.000",
+    "description": "Precast Architectural Concrete"
+  },
+  {
+    "code": "3-35413.000",
+    "description": "Gypcrete"
+  },
+  {
+    "code": "4-40000.000",
+    "description": "Masonry"
+  },
+  {
+    "code": "5-51200.000",
+    "description": "Structural Steel"
+  },
+  {
+    "code": "5-55000.000",
+    "description": "Metal Fabrications"
+  },
+  {
+    "code": "5-57210.000",
+    "description": "Aluminum Deck and Railings"
+  },
+  {
+    "code": "6-61000.000",
+    "description": "Rough Carpentry Material"
+  },
+  {
+    "code": "6-61010.000",
+    "description": "Rough Carpentry Installation"
+  },
+  {
+    "code": "6-61710.000",
+    "description": "Manufactured Wall Panels"
+  },
+  {
+    "code": "6-61753.000",
+    "description": "Wood Trusses"
+  },
+  {
+    "code": "6-61800.000",
+    "description": "Glu-Laminated Construction"
+  },
+  {
+    "code": "6-62000.000",
+    "description": "Finish Carpentry Installation"
+  },
+  {
+    "code": "6-62200.000",
+    "description": "Millwork"
+  },
+  {
+    "code": "6-64100.000",
+    "description": "Architectural Casework & Millwork"
+  },
+  {
+    "code": "6-66113.000",
+    "description": "Cultured Marble Fabrication"
+  },
+  {
+    "code": "6-66116.000",
+    "description": "Solid Surfacing and Ctops"
+  },
+  {
+    "code": "6-66119.000",
+    "description": "Quartz Surface"
+  },
+  {
+    "code": "6-67300.000",
+    "description": "Composite Decking"
+  },
+  {
+    "code": "6-68316.000",
+    "description": "FRP Wall Paneling"
+  },
+  {
+    "code": "6-68700.000",
+    "description": "Pergolas"
+  },
+  {
+    "code": "7-71000.000",
+    "description": "Waterproofing"
+  },
+  {
+    "code": "7-71413.000",
+    "description": "Hot Fluid Applied Waterproofing"
+  },
+  {
+    "code": "7-71800.000",
+    "description": "Traffic Coatings"
+  },
+  {
+    "code": "7-72100.000",
+    "description": "Thermal Insulation"
+  },
+  {
+    "code": "7-72400.000",
+    "description": "Stucco, Plaster, EIFS"
+  },
+  {
+    "code": "7-72500.000",
+    "description": "Weather Barriers"
+  },
+  {
+    "code": "7-72700.000",
+    "description": "Spray-Applied Air Barriers"
+  },
+  {
+    "code": "7-73113.000",
+    "description": "Asphalt Shingles"
+  },
+  {
+    "code": "7-74213.000",
+    "description": "Metal Panel Siding"
+  },
+  {
+    "code": "7-74600.000",
+    "description": "Siding"
+  },
+  {
+    "code": "7-75000.000",
+    "description": "Membrane Roofing"
+  },
+  {
+    "code": "7-76100.000",
+    "description": "Metal Roofing"
+  },
+  {
+    "code": "7-76200.000",
+    "description": "Sheet Metal Flashing and Trim"
+  },
+  {
+    "code": "7-77600.000",
+    "description": "Roof Pavers"
+  },
+  {
+    "code": "7-78100.000",
+    "description": "Applied Fireproofing"
+  },
+  {
+    "code": "7-78400.000",
+    "description": "Firestopping"
+  },
+  {
+    "code": "7-79200.000",
+    "description": "Joint Sealants"
+  },
+  {
+    "code": "7-79500.000",
+    "description": "Expansion Joints"
+  },
+  {
+    "code": "8-81000.000",
+    "description": "Doors, Frames, Hardware"
+  },
+  {
+    "code": "8-83000.000",
+    "description": "Specialty Doors and Frames"
+  },
+  {
+    "code": "8-83113.000",
+    "description": "Access Doors and Panels"
+  },
+  {
+    "code": "8-83613.000",
+    "description": "Overhead and Coiling Doors"
+  },
+  {
+    "code": "8-84000.000",
+    "description": "Aluminum Entrances and Storefronts"
+  },
+  {
+    "code": "8-84400.000",
+    "description": "Curtain Wall"
+  },
+  {
+    "code": "8-85113.000",
+    "description": "Aluminum Windows and Patio Doors"
+  },
+  {
+    "code": "8-85413.000",
+    "description": "Windows and Patio Doors"
+  },
+  {
+    "code": "8-86000.000",
+    "description": "Roof Windows and Skylights"
+  },
+  {
+    "code": "8-87000.000",
+    "description": "Hardware"
+  },
+  {
+    "code": "8-88000.000",
+    "description": "Glazing"
+  },
+  {
+    "code": "8-88330.000",
+    "description": "Mirrors"
+  },
+  {
+    "code": "8-88700.000",
+    "description": "Window Film"
+  },
+  {
+    "code": "8-89000.000",
+    "description": "Louvers and Vents"
+  },
+  {
+    "code": "9-92116.000",
+    "description": "Gypsum Board Assemblies"
+  },
+  {
+    "code": "9-92216.000",
+    "description": "Steel Stud Metal Framing"
+  },
+  {
+    "code": "9-93000.000",
+    "description": "Tile"
+  },
+  {
+    "code": "9-95123.000",
+    "description": "Acoustical Tile Ceilings"
+  },
+  {
+    "code": "9-96400.000",
+    "description": "Wood Flooring"
+  },
+  {
+    "code": "9-96500.000",
+    "description": "Resilient Flooring"
+  },
+  {
+    "code": "9-96600.000",
+    "description": "Terrazzo Flooring"
+  },
+  {
+    "code": "9-96800.000",
+    "description": "Carpeting"
+  },
+  {
+    "code": "9-97200.000",
+    "description": "Wall Coverings"
+  },
+  {
+    "code": "9-99000.000",
+    "description": "Painting and Coating"
+  },
+  {
+    "code": "9-99646.000",
+    "description": "Intumescent Painting"
+  },
+  {
+    "code": "9-99656.000",
+    "description": "Epoxy Flooring"
+  },
+  {
+    "code": "10-100000.000",
+    "description": "Specialties"
+  },
+  {
+    "code": "10-101400.000",
+    "description": "Signage"
+  },
+  {
+    "code": "10-101453.000",
+    "description": "Traffic Signage"
+  },
+  {
+    "code": "10-102113.000",
+    "description": "Toilet Partitions"
+  },
+  {
+    "code": "10-102213.000",
+    "description": "Wire Mesh Storage Cages"
+  },
+  {
+    "code": "10-102226.000",
+    "description": "Operable Partitions"
+  },
+  {
+    "code": "10-102600.000",
+    "description": "Wall and Door Protection"
+  },
+  {
+    "code": "10-102800.000",
+    "description": "Toilet and Bath Accessories"
+  },
+  {
+    "code": "10-102819.000",
+    "description": "Tub and Shower Doors"
+  },
+  {
+    "code": "10-103100.000",
+    "description": "Manufactured Fireplaces"
+  },
+  {
+    "code": "10-103110.000",
+    "description": "Outdoor Fire Pits"
+  },
+  {
+    "code": "10-104413.000",
+    "description": "Fire Extinguishers and Cabinets"
+  },
+  {
+    "code": "10-105100.000",
+    "description": "Lockers"
+  },
+  {
+    "code": "10-105500.000",
+    "description": "Postal Specialties"
+  },
+  {
+    "code": "10-105623.000",
+    "description": "Closet Shelving"
+  },
+  {
+    "code": "10-107313.000",
+    "description": "Awnings and Canopies"
+  },
+  {
+    "code": "10-107500.000",
+    "description": "Flagpoles"
+  },
+  {
+    "code": "10-109000.000",
+    "description": "Golf Simulator"
+  },
+  {
+    "code": "11-110000.000",
+    "description": "Equipment"
+  },
+  {
+    "code": "11-111313.000",
+    "description": "Loading Dock Equipment"
+  },
+  {
+    "code": "11-112423.000",
+    "description": "Window Washing System"
+  },
+  {
+    "code": "11-113100.000",
+    "description": "Appliances"
+  },
+  {
+    "code": "11-113110.000",
+    "description": "Outdoor Gas Grill"
+  },
+  {
+    "code": "11-114000.000",
+    "description": "Food Service Equipment"
+  },
+  {
+    "code": "11-116700.000",
+    "description": "Recreational Equipment"
+  },
+  {
+    "code": "11-118216.000",
+    "description": "Trash Compactors"
+  },
+  {
+    "code": "12-122000.000",
+    "description": "Window Treatments"
+  },
+  {
+    "code": "12-123530.000",
+    "description": "Residential Casework"
+  },
+  {
+    "code": "12-123640.000",
+    "description": "Residential Countertops"
+  },
+  {
+    "code": "12-123663.000",
+    "description": "Window Sills"
+  },
+  {
+    "code": "12-124000.000",
+    "description": "Furnishings and Accessories"
+  },
+  {
+    "code": "12-124813.000",
+    "description": "Entrance Floor Mats and Frames"
+  },
+  {
+    "code": "12-129313.000",
+    "description": "Bike Equipment and Racks"
+  },
+  {
+    "code": "13-131100.000",
+    "description": "Swimming Pools and Spas"
+  },
+  {
+    "code": "13-131900.000",
+    "description": "Pet Equipment"
+  },
+  {
+    "code": "13-132416.000",
+    "description": "Saunas"
+  },
+  {
+    "code": "13-133418.000",
+    "description": "Post Frame Building Systems"
+  },
+  {
+    "code": "14-140000.000",
+    "description": "Conveying Equipment"
+  },
+  {
+    "code": "14-142000.000",
+    "description": "Elevators"
+  },
+  {
+    "code": "14-144200.000",
+    "description": "Wheelchair Lifts"
+  },
+  {
+    "code": "14-149182.000",
+    "description": "Trash Chutes"
+  },
+  {
+    "code": "21-210000.000",
+    "description": "Fire Suppression"
+  },
+  {
+    "code": "22-220000.000",
+    "description": "Plumbing"
+  },
+  {
+    "code": "23-230000.000",
+    "description": "HVAC"
+  },
+  {
+    "code": "26-260000.000",
+    "description": "Electrical"
+  },
+  {
+    "code": "27-272000.000",
+    "description": "Data Communications"
+  },
+  {
+    "code": "27-274000.000",
+    "description": "Audio Video Communications"
+  },
+  {
+    "code": "28-281300.000",
+    "description": "Access Control"
+  },
+  {
+    "code": "28-283000.000",
+    "description": "Video Surveillance"
+  },
+  {
+    "code": "28-284600.000",
+    "description": "Fire Detection and Alarm"
+  },
+  {
+    "code": "28-289010.000",
+    "description": "Radio Amplification System"
+  },
+  {
+    "code": "31-310000.000",
+    "description": "Earthwork"
+  },
+  {
+    "code": "31-312113.000",
+    "description": "Radon Mitigation"
+  },
+  {
+    "code": "31-312500.000",
+    "description": "Erosion Control"
+  },
+  {
+    "code": "31-314000.000",
+    "description": "Shoring"
+  },
+  {
+    "code": "31-316000.000",
+    "description": "Piles, Piers and Caissons"
+  },
+  {
+    "code": "32-321216.000",
+    "description": "Asphalt Paving"
+  },
+  {
+    "code": "32-321313.000",
+    "description": "Concrete Paving"
+  },
+  {
+    "code": "32-321316.000",
+    "description": "Decorative Concrete Paving"
+  },
+  {
+    "code": "32-321343.000",
+    "description": "Pervious Concrete Paving"
+  },
+  {
+    "code": "32-321400.000",
+    "description": "Unit Pavers"
+  },
+  {
+    "code": "32-321613.000",
+    "description": "Site Concrete"
+  },
+  {
+    "code": "32-321700.000",
+    "description": "Pavement Markings"
+  },
+  {
+    "code": "32-321813.000",
+    "description": "Artificial Turf"
+  },
+  {
+    "code": "32-323100.000",
+    "description": "Fences and Gates"
+  },
+  {
+    "code": "32-323200.000",
+    "description": "Retaining Walls"
+  },
+  {
+    "code": "32-329000.000",
+    "description": "Landscaping and Irrigation"
+  },
+  {
+    "code": "33-330000.000",
+    "description": "Utilities"
+  },
+  {
+    "code": "50-502000.000",
+    "description": "Winter Conditions"
+  },
+  {
+    "code": "60-601000.000",
+    "description": "Construction Contingency"
+  },
+  {
+    "code": "60-601005.000",
+    "description": "Design Contingency"
+  },
+  {
+    "code": "60-602010.000",
+    "description": "Builders Risk Insurance"
+  },
+  {
+    "code": "60-602015.000",
+    "description": "Special Insurance"
+  },
+  {
+    "code": "60-602020.000",
+    "description": "General Liability Insurance"
+  },
+  {
+    "code": "60-602025.000",
+    "description": "Bond"
+  },
+  {
+    "code": "60-604000.000",
+    "description": "Fee"
+  },
+  {
+    "code": "60-605000.000",
+    "description": "Miscellaneous"
+  },
+  {
+    "code": "80-800001.000",
+    "description": "Miscellaneous 1"
+  }
+]

@@ -1,5 +1,6 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
+import { resolveProcoreCode } from "./costCodeResolver";
 import { evaluateDataFidelity } from "./calculations";
 import { normalizeUom } from "./uom-aliases";
 
@@ -119,8 +120,11 @@ export function parseTogalCSV(
       id: `row-${index}`,
       classification,
       itemId,
+      // procoreParentCode is catalog-sourced but NON-AUTHORITATIVE (exporter
+      // fallback only when procoreCode is empty; removal deferred)
       procoreParentCode: masterItem?.procoreParentCode || "",
-      procoreCode: masterItem?.procoreCode || "",
+      // Single chokepoint: cost_code_map (primed at workspace mount), never the catalog
+      procoreCode: resolveProcoreCode(itemId),
       description: masterItem?.description || "UNMAPPED - RECONCILE CODE",
       matchedQty: qty,
       uom: targetUom,

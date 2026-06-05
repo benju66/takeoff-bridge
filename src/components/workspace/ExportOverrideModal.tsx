@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { X, AlertTriangle, FileDown } from "lucide-react";
 import { ExportBlocker } from "@/lib/exporter";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 
 // ---------------------------------------------------------------------------
 // ExportOverrideModal — Interactive user-override interface for unmapped
@@ -22,23 +22,12 @@ interface ExportOverrideModalProps {
   onCancel: () => void;
 }
 
-/** Distinct granular Procore codes from the catalog (Importer-validated at sync time). */
-function buildProcoreCodeOptions(): { code: string; description: string }[] {
-  const map = new Map<string, string>();
-  for (const item of Object.values(ESTIMATE_ITEMS_MASTER)) {
-    const code = (item.procoreCode || "").trim();
-    if (!code || map.has(code)) continue;
-    map.set(code, item.description);
-  }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([code, description]) => ({ code, description }));
-}
-
 export function ExportOverrideModal({ blockers, onApply, onCancel }: ExportOverrideModalProps) {
   const [assignments, setAssignments] = useState<Record<string, string>>({});
 
-  const codeOptions = useMemo(buildProcoreCodeOptions, []);
+  // Full Procore valid-code list — same validation source as the /cost-codes
+  // mapping editor; estimators may place dollars on ANY code Procore accepts.
+  const codeOptions = PROCORE_VALID_CODES;
 
   const unresolvedCount = blockers.filter((b) => !(assignments[b.rowId] || "").trim()).length;
   const blockedTotal = blockers.reduce((sum, b) => sum + b.amount, 0);

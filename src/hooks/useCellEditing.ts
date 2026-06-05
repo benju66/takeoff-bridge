@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ProcessedTakeoffRow, WorkbookCommand, EditCellCommand } from "@/types";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { resolveProcoreCode } from "@/lib/costCodeResolver";
 import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
@@ -102,9 +103,15 @@ export function useCellEditing(
       }
 
       if (targetItem) {
+        // Single chokepoint: cost_code_map (primed at workspace mount), never
+        // the catalog. procoreParentCode still comes from the catalog but is
+        // NON-AUTHORITATIVE — the exporter groups by procoreCode and only
+        // falls back to the parent when procoreCode is empty (removal of
+        // procoreParentCode is deferred, see plan doc).
+        const resolvedProcoreCode = resolveProcoreCode(newCode);
         row.description = targetItem.description;
         row.procoreParentCode = targetItem.procoreParentCode;
-        row.procoreCode = targetItem.procoreCode;
+        row.procoreCode = resolvedProcoreCode;
         row.unitPrice = targetItem.defaultUnitPrice;
         row.uom = targetItem.targetUom;
         row.costType = targetItem.costType;
@@ -126,7 +133,7 @@ export function useCellEditing(
               updated[i].itemId = newCode;
               updated[i].description = targetItem.description;
               updated[i].procoreParentCode = targetItem.procoreParentCode;
-              updated[i].procoreCode = targetItem.procoreCode;
+              updated[i].procoreCode = resolvedProcoreCode;
               updated[i].unitPrice = targetItem.defaultUnitPrice;
               updated[i].uom = targetItem.targetUom;
               updated[i].costType = targetItem.costType;

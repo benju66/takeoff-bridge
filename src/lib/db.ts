@@ -893,14 +893,26 @@ export async function downloadTemplateFile(templateName: string): Promise<ArrayB
 /**
  * Retrieves the app-owned internal → granular Procore code mapping for a
  * template (cost_code_map table, seeded from the catalog in Phase 3a).
- * Manual edits via the mapping-editor UI land in Phase 3c.
+ * Primes the resolveProcoreCode chokepoint at workspace mount and feeds the
+ * /cost-codes mapping editor (Phase 3c).
  */
+const COST_CODE_MAP_COLUMNS = "template_name, internal_code, procore_code, source";
+
+function mapCostCodeMapRow(row: Record<string, unknown>): CostCodeMapEntry {
+  return {
+    templateName: row.template_name as string,
+    internalCode: row.internal_code as string,
+    procoreCode: row.procore_code as string,
+    source: row.source as CostCodeMapEntry["source"],
+  };
+}
+
 export async function getCostCodeMap(
   templateName: string
 ): Promise<CostCodeMapEntry[]> {
   const { data, error } = await supabase
     .from("cost_code_map")
-    .select("template_name, internal_code, procore_code, source")
+    .select(COST_CODE_MAP_COLUMNS)
     .eq("template_name", templateName)
     .order("internal_code", { ascending: true });
 
@@ -909,12 +921,40 @@ export async function getCostCodeMap(
     throw new Error(`Failed to fetch cost code map: ${error.message}`);
   }
 
-  return (data || []).map((row) => ({
-    templateName: row.template_name as string,
-    internalCode: row.internal_code as string,
-    procoreCode: row.procore_code as string,
-    source: row.source as CostCodeMapEntry["source"],
-  }));
+  return (data || []).map(mapCostCodeMapRow);
+}
+
+/**
+ * Updates one cost_code_map mapping to a new granular Procore code
+ * (Phase 3c mapping editor — the SOLE update path for existing mappings;
+ * the seed script is insert-only). Always stamps source='manual'.
+ * Update-only by design: adding new internal codes stays with the
+ * harvest/seed pipeline. Caller validates the code against the Importer
+ * valid-code list BEFORE calling (AGENTS.md — no unvalidated mappings).
+ */
+export async function updateCostCodeMapping(
+  templateName: string,
+  internalCode: string,
+  procoreCode: string
+): Promise<CostCodeMapEntry> {
+  const { data, error } = await supabase
+    .from("cost_code_map")
+    .update({
+      procore_code: procoreCode,
+      source: "manual",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("template_name", templateName)
+    .eq("internal_code", internalCode)
+    .select(COST_CODE_MAP_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to update cost code mapping ${internalCode} -> ${procoreCode}`, error);
+    throw new Error(`Failed to update cost code mapping: ${error?.message ?? "no row updated"}`);
+  }
+
+  return mapCostCodeMapRow(data);
 }
 
 

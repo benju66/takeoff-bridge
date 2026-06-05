@@ -28,7 +28,13 @@ import {
   getProjectColumnDefs,
   getProjectLockedCells,
   getTemplateConfig,
+  getCostCodeMap,
 } from "@/lib/db";
+import {
+  primeCostCodeResolver,
+  primeCostCodeResolverFromCatalog,
+  resolveProcoreCode,
+} from "@/lib/costCodeResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import { useCommandHistory } from "./useCommandHistory";
@@ -301,7 +307,8 @@ export function useTakeoffWorkbook(
         classification: "",
         itemId: item.itemId,
         procoreParentCode: item.procoreParentCode,
-        procoreCode: item.procoreCode,
+        // Single chokepoint: cost_code_map (primed at mount), never the catalog
+        procoreCode: resolveProcoreCode(item.itemId),
         description: item.description,
         matchedQty: 0,
         uom: item.targetUom,
@@ -326,7 +333,7 @@ export function useTakeoffWorkbook(
     (async () => {
       try {
         // Load all data sources in parallel
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig] =
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
@@ -334,9 +341,22 @@ export function useTakeoffWorkbook(
             getProjectColumnDefs(projectId),
             getProjectLockedCells(projectId),
             getTemplateConfig(MASTER_TEMPLATE_NAME),
+            getCostCodeMap(MASTER_TEMPLATE_NAME),
           ]);
 
         if (cancelled) return;
+
+        // Prime the procoreCode chokepoint BEFORE any row initialization —
+        // every row-creation path (template init, parser, itemId cascade)
+        // resolves through cost_code_map, never the static catalog. An EMPTY
+        // result (unseeded DB / template-name mismatch) gets the same degraded
+        // catalog fallback as a failed fetch — otherwise every row would
+        // resolve to "" and the whole estimate would become an export blocker.
+        if (savedCostCodeMap.length > 0) {
+          primeCostCodeResolver(savedCostCodeMap);
+        } else {
+          primeCostCodeResolverFromCatalog();
+        }
 
         // Apply registries
         setUserRegistry(savedRegistry);
@@ -417,7 +437,10 @@ export function useTakeoffWorkbook(
       } catch (err) {
         console.error('Failed to load workbook data:', err);
         if (!cancelled) {
-          // Graceful degradation: initialize with defaults
+          // Graceful degradation: initialize with defaults. Prime the resolver
+          // from the catalog so default rows carry the same procoreCodes they
+          // did pre-3c (cost_code_map is unreachable on this path anyway).
+          primeCostCodeResolverFromCatalog();
           const defaultRows = initializeDefaultEstimateRows();
           setRows(defaultRows);
         }
@@ -426,6 +449,26 @@ export function useTakeoffWorkbook(
 
     return () => { cancelled = true; };
   }, [projectId, setColumnDefs, setLockedCells, setRows]);
+
+  // ---------------------------------------------------------------------------
+  // Re-prime the procoreCode resolver when the tab becomes visible again —
+  // covers mappings edited in /cost-codes in ANOTHER tab while this workspace
+  // stayed mounted. (Same-tab navigation remounts this hook and re-primes.)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      // No cancellation guard needed: priming only mutates the module-level
+      // resolver cache (no React state), and a post-unmount prime is harmless.
+      getCostCodeMap(MASTER_TEMPLATE_NAME)
+        .then((entries) => {
+          if (entries.length > 0) primeCostCodeResolver(entries);
+        })
+        .catch(() => {}); // keep the existing prime on transient failure
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Insert manual row

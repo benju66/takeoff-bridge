@@ -15,7 +15,8 @@ import {
   Activity,
   Sliders,
   LayoutGrid,
-  Info
+  Info,
+  Sigma
 } from "lucide-react";
 import { getProject, getSession, signOut } from "@/lib/db";
 import { Project } from "@/types/db";
@@ -212,6 +213,24 @@ export default function Sidebar({ sidebarState, setSidebarState }: SidebarProps)
               <Database size={16} className="shrink-0" />
               <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${isCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-xs"}`}>
                 Global Registry
+              </span>
+            </Link>
+
+            {/* Cost Code Mapping Link */}
+            <Link
+              href="/cost-codes"
+              className={`flex items-center rounded-lg font-bold text-xs uppercase tracking-wider transition-all duration-200 ${
+                isCollapsed ? "p-2.5 justify-center" : "gap-3 px-3.5 py-2.5"
+              } ${
+                pathname === "/cost-codes"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/10"
+                  : "hover:bg-slate-900 hover:text-slate-100 text-slate-400"
+              }`}
+              title={isCollapsed ? "Cost Code Mapping" : undefined}
+            >
+              <Sigma size={16} className="shrink-0" />
+              <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${isCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-xs"}`}>
+                Cost Code Mapping
               </span>
             </Link>
 

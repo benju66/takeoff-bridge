@@ -2,7 +2,7 @@
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
 - **Date:** 2026-06-04 (updated 2026-06-05)
-- **Status:** PHASE 1 + 1.5 + 2 + 3a + **3b** COMPLETE (3b implemented + user-verified end-to-end 2026-06-05; Storage cutover live, /public copy removed post-verification). Next: Phase 3c mapping-editor UI (fresh session) — see the 3c MUST-DO in the 3a/3b progress entries.
+- **Status:** PHASE 1 + 1.5 + 2 + 3a + 3b + **3c** COMPLETE (3c implemented + machine-verified end-to-end 2026-06-05, awaiting user review/commit). Remaining deferrals: per-type templates + project_type UI; procoreParentCode removal; deleted-project workspace guard; sheet names into config; cross-division itemId-edit e2e finding (pre-existing, see 3c entry).
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
 
 > **Progress log**
@@ -76,6 +76,43 @@
 >   refuses) — show "project not found" + redirect instead; (3) `procoreParentCode` removal
 >   (redundant since 3a); (4) STEP 1/2/3/4, COVER, PER DIEM sheet names remain hardcoded by scope
 >   decision — fold into `sheetNames` when the per-type templates phase defines variants.
+> - ✅ **Phase 3c** (2026-06-05, plan table + 4 decisions user-approved before code): **resolveProcoreCode
+>   chokepoint + /cost-codes mapping-editor UI.** Zero schema changes (3a's write RLS reused).
+>   (1) `src/lib/costCodeResolver.ts` — module-level cache primed from `cost_code_map` in the workspace
+>   mount `Promise.all` BEFORE any row init; ALL row-creation procoreCode assignment re-pointed through
+>   `resolveProcoreCode(itemId)` (parser, itemId cascade primary+siblings, template init incl. the
+>   new-master-codes tail-append); "" on miss (gate catches; never invented); catalog fallback ONLY on
+>   load failure or empty fetch (preserves pre-3c degraded behavior); `visibilitychange` re-prime covers
+>   cross-tab editor edits; the editor itself re-primes after each save. HAZARD documented in-file:
+>   single-slot cache must become template-keyed when per-type templates land.
+>   (2) Editor at **/cost-codes** (sidebar link beside Registry, modeled on the registry page): 221 rows,
+>   internal code/description, click-to-edit Procore code select (only the active row mounts the
+>   224-option list), Procore description, source badges, search, KPI cards, catalog↔map divergence
+>   warning banner. Writes via new `db.ts/updateCostCodeMapping` (UPDATE-only, stamps `source='manual'`);
+>   every edit validated against the Importer list. Adding new internal codes deferred (catalog pipeline).
+>   (3) Valid-code oracle: harvest script also emits committed `src/lib/procore-valid-codes.json`
+>   (224 {code, description} from Importer Data Fields cols A/B); shared via `src/lib/procoreValidCodes.ts`
+>   by the editor AND ExportOverrideModal (modal upgraded from ~150 catalog-derived codes to the full
+>   valid list); drift guard `procore-valid-codes-sync.test.ts` pins artifact === template sheet.
+>   (4) **Update policy decided + documented** (schema comment, seed-script header): seed stays
+>   insert-only; re-harvest only ADDs new codes; the editor is the SOLE update path for existing
+>   mappings — no script may silently move a financial mapping.
+>   Gate green: build clean, 179/179 unit (170 + 9 new), e2e smoke pass — plus the new
+>   `e2e/phase3c-mapping-verify.spec.ts` §8.0 machine proof (user decision 2026-06-05: kept OUT of
+>   the routine `test:e2e` suite because it temporarily edits a live financial mapping; run
+>   deliberately via **`npm run test:e2e:mapping`** after mapping/export changes or pre-release):
+>   edit 22-4129.001 → 6-64100.000 in the
+>   editor → a scratch project's template-init row ($1,000) AND a same-division itemId-cascade row
+>   ($500) pick up the EDITED mapping → exported BLI shows **$1,500 on 6-64100.000 and $0 on the old
+>   code** (gates passed; the download only fires when green) → mapping reverted + scratch project
+>   deleted in-test (no residue; test code 22-4129.001 was already source='manual', provenance unchanged).
+>   **Documented behavior:** mapping edits apply to rows created/re-derived after the change; saved
+>   line items keep their persisted code until touched (per-row `procore_code` is authoritative).
+>   **New finding (pre-existing, bisected via git-stash A/B with identical Playwright probes):** a
+>   CROSS-division itemId edit (e.g. 01-0000.001 → 22-4129.001, which triggers `moveEffect`) never
+>   commits under synthetic Playwright interaction on BOTH pre-3c and 3c code — the row keeps its old
+>   itemId; same-division edits commit fine. Needs a manual check whether real-user cross-division
+>   edits are affected (moveEffect path); recorded for a future session, NOT a 3c regression.
 
 ---
 

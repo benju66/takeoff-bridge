@@ -216,6 +216,34 @@ function buildImporterCodeSet(workbook) {
 }
 
 /**
+ * Collect the ordered valid-code list ({ code, description }) from the Importer
+ * Data Fields sheet, columns A ("Cost Code") / B ("Cost Code Description").
+ * Emitted as src/lib/procore-valid-codes.json — the single validation source for
+ * the mapping-editor UI and the export override modal (Phase 3c).
+ */
+function buildImporterCodeList(importerCodes, workbook) {
+  const importer = workbook.getWorksheet(IMPORTER_SHEET);
+  if (!importer) {
+    throw new Error(`Worksheet "${IMPORTER_SHEET}" not found in template!`);
+  }
+  const procoreCodeRe = /^\d{1,2}-\d{4,6}\.\d{3}$/;
+  const list = [];
+  importer.eachRow((row) => {
+    const code = cellText(row.getCell(1));
+    if (!procoreCodeRe.test(code)) return; // header / non-code rows
+    list.push({ code, description: cellText(row.getCell(2)) });
+  });
+  // Cross-check: every code-shaped value anywhere on the sheet must be in col A.
+  const colACodes = new Set(list.map((e) => e.code));
+  for (const code of importerCodes) {
+    if (!colACodes.has(code)) {
+      throw new Error(`Importer code ${code} found outside column A — valid-code list incomplete.`);
+    }
+  }
+  return list;
+}
+
+/**
  * Resolve the granular Procore code for one internal catalog code.
  * Resolution order: template SUMIF (authoritative) -> verified Steps 2/3 fallback
  * -> user-confirmed override -> sibling inference. Anything else is unresolved —
@@ -259,6 +287,7 @@ async function main() {
   // private Supabase Storage 'templates' bucket)
   const templatePath = path.join(rootDir, 'templates', 'Company_Estimate_Template.xlsx');
   const jsonOutputPath = path.join(rootDir, 'src', 'lib', 'estimate-catalog.json');
+  const validCodesOutputPath = path.join(rootDir, 'src', 'lib', 'procore-valid-codes.json');
   const gapsOutputDir = path.join(__dirname, 'output');
   const gapsOutputPath = path.join(gapsOutputDir, 'cost-code-gaps.json');
 
@@ -432,6 +461,15 @@ async function main() {
 
   // Write out JSON
   fs.writeFileSync(jsonOutputPath, JSON.stringify(catalog, null, 2), 'utf-8');
+
+  // Valid-code artifact (Phase 3c): the Importer Data Fields list is the ONLY
+  // validation oracle for Procore codes. Update policy: cost_code_map seed stays
+  // ON CONFLICT DO NOTHING — re-harvesting only ADDS new internal codes; the
+  // /cost-codes mapping editor (source='manual') is the sole update path for
+  // existing mappings. Drift guard: src/__tests__/procore-valid-codes-sync.test.ts
+  const validCodeList = buildImporterCodeList(importerCodes, workbook);
+  fs.writeFileSync(validCodesOutputPath, JSON.stringify(validCodeList, null, 2), 'utf-8');
+  console.log(`* Valid-code artifact: ${validCodesOutputPath} (${validCodeList.length} codes)`);
   console.log(`\n======================================================`);
   console.log(`SCHEMA HARVEST COMPLETED SUCCESSFULLY!`);
   console.log(`======================================================`);

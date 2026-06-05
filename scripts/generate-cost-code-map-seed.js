@@ -14,6 +14,13 @@ const path = require('path');
 //     Steps-2/3 division-base codes   → 'template'
 // The seed uses ON CONFLICT DO NOTHING so re-running it never clobbers
 // manual mapping-editor edits (Phase 3c).
+//
+// UPDATE POLICY (Phase 3c, user-approved 2026-06-05): this seed is
+// INSERT-ONLY by design. Re-harvesting the template only ADDS rows for
+// brand-new internal codes; existing cost_code_map rows are NEVER updated
+// by any script. The /cost-codes mapping-editor UI (source='manual') is
+// the sole update path — every change to where dollars land is a
+// deliberate, visible human action. Do not "fix" the ON CONFLICT clause.
 // ═══════════════════════════════════════════════════════════════════
 
 const TEMPLATE_NAME = 'Company_Estimate_Template.xlsx';
