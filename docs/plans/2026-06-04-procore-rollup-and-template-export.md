@@ -1,9 +1,21 @@
 # Implementation Plan — App-Owned Procore Rollup & Bulletproof Template Export
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
-- **Date:** 2026-06-04
-- **Status:** AWAITING APPROVAL — no code written, no migration run
+- **Date:** 2026-06-04 (updated 2026-06-05)
+- **Status:** PHASE 1 + 1.5 COMPLETE (commit `e475f6b` on `2026.06.04`) — Phase 2 NOT STARTED, awaiting plan-table approval. No migration run.
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
+
+> **Progress log**
+> - ✅ **Phase 1** (2026-06-04/05): granular mapping is app-owned data — see §6 outcomes below.
+> - ✅ **Phase 1.5** (2026-06-05, user-approved addition): hardening — exporter strips cached error
+>   values (`t="e"`) so the pre-existing `full-export-corruption` red test is green; itemId EDIT_CELL
+>   commands carry a primary-row self-cascade (`src/lib/commandCapture.ts`) so undo restores all 11
+>   derived fields atomically. Gate fully green: build clean, 159/159 unit, e2e pass.
+> - ⬜ **Phase 2** next: present implementation table for approval before code.
+> - ⬜ **Phase 3** (scope ADDED 2026-06-04): also build a **mapping-editor UI in global settings**
+>   (view/edit `cost_code_map`, validated against Importer codes, writes via `db.ts`, `source='manual'`).
+> - Deferred/accepted: `db.ts` imports the 55KB catalog for `procoreCode` hydration (~15KB gzip on
+>   auth pages) until Phase 3's persisted `procore_code` column removes it.
 
 ---
 
@@ -76,9 +88,23 @@ Template internal coordinates (STEP 4 - ESTIMATE): header row 9; division ranges
 
 ---
 
-## 6. Phase 1 — Granular mapping as app-owned data (foundation; no export behavior change)
+## 6. Phase 1 — Granular mapping as app-owned data (foundation; no export behavior change) ✅ COMPLETE
 
 **Goal:** the catalog carries the real granular Procore code per item; orphans are reported, not guessed.
+
+> **Outcomes (2026-06-04/05, all user-approved):**
+> - Catalog is **221** entries (not 219): the two template typos were normalized AND included as real
+>   items — `03-4500.001` Precast Architectural → `3-34500.000`, `07-6100.001` Metal Roofing → `7-76100.000`.
+> - Resolution: **137 authoritative** (BLI SUMIF) + **67 sibling-inferred** + **7 user-confirmed**
+>   (`12-3570.001`→`6-64100.000` cross-division; `22-4129.001`→`22-220000.000`; five `80-800x`→`80-800001.000`)
+>   + **10 GC/Site-Ops** steps-2-3 fallbacks. 0 unresolved, 0 invalid.
+> - **Verified in template:** the 10 GC/Site-Ops codes are NOT STEP 4 criteria — Div 1/2 BLI rows roll up
+>   exclusively from STEP 2 - GCs (35 rows) / STEP 3 - SITE OPS (38). Division base kept as fallback.
+> - `npm run sync-codes` now hard-fails on unresolved/invalid codes (validated against Importer Data
+>   Fields) and writes the provenance report `scripts/output/cost-code-gaps.json` (committed).
+> - `ProcessedTakeoffRow.procoreCode` is **required**; `db.ts` `mapLineItemFromRow` hydrates it from the
+>   catalog at load (persistence lands in Phase 3). `procoreParentCode` retained for back-compat.
+> - Seed CSV `docs/plans/procore-cost-code-mapping.csv` updated to 221 rows; catalog↔CSV: 0 mismatches.
 
 | File | Function / location | Change |
 |---|---|---|
@@ -108,6 +134,15 @@ Template internal coordinates (STEP 4 - ESTIMATE): header row 9; division ranges
 | `src/__tests__/export-integrity.test.ts` | suite | Add: (a) an unmapped code blocks export; (b) reconciliation tie-out passes for a known fixture; (c) a former-orphan code (e.g. `03-0000.002` Footings) now appears in Budget Line Items with the right value; (d) `generateProcoreBudget` and workbook agree on totals. |
 
 **Sub-decision (carry into build):** Budget Line Items as **computed values** (bulletproof; default, recommended) vs **values + retained live SUMIF** (estimator edits reflow in Excel, reintroduces fragility). Recommendation: computed values now + Phase 4 round-trip for the edit case.
+**→ DECIDED 2026-06-04: computed values** (user-confirmed via §13 item 4).
+
+> **Phase 2 implementation notes (from Phase 1/1.5 work):**
+> - Exporter already has step **3f** (added in Phase 1.5) clearing cached `t="e"` error values across
+>   all sheets — the `1-10000.000` `#REF!` value-write in this phase builds on that.
+> - The 10 steps-2-3 codes carry a division-base fallback `procoreCode`, so the completeness gate will
+>   NOT block them; their dollars land on `1-10000.000`/`2-20000.000` until Steps 2/3 are app-driven.
+> - `generateProcoreBudget` re-point: group by `row.procoreCode` (fallback to `procoreParentCode` only
+>   if procoreCode empty — which the gate should have blocked).
 
 **Verification (Phase 2):** full gate (Section 11). Manually open a generated workbook; confirm Budget Line Items column H equals the app's `rollupByProcoreCode`, the reconciliation row (STEP 4 row 349 `E=I`) is TRUE, and no division dollars are missing.
 
@@ -190,12 +225,17 @@ Plus per-phase manual checks noted above (open the generated .xlsx; confirm Budg
 
 ---
 
-## 13. Open items needed before Phase 1 starts
+## 13. Open items needed before Phase 1 starts — ✅ ALL ANSWERED 2026-06-04
 
-1. Confirm the **10 GC/Site-Ops codes** (`01-*`, `02-*`) roll up from Steps 2 & 3, not the line-item map.
-2. Decide the **~4 new destinations**: `12-3570.001` Healthcare Casework & FFE, `22-4129.001` Shower Pans, and the `80-800x` "TBD" allowances (or accept division-base).
-3. Review **`docs/plans/procore-cost-code-mapping.csv`** and flag any wrong sibling-inferred routes.
-4. Phase 2 sub-decision: **computed values** (recommended) vs **values + live formula** for Budget Line Items.
+1. ✅ GC/Site-Ops codes roll up from Steps 2 & 3 — **verified in the template** (none of the 10 is a
+   STEP 4 SUMIF criterion); division-base kept as line-item-map fallback.
+2. ✅ Destinations: `12-3570.001` → `6-64100.000` (Architectural Casework); `22-4129.001` →
+   `22-220000.000`; all five `80-800x` TBD → `80-800001.000` (`80-800000.000` does NOT exist in template).
+3. ✅ CSV approved as-is; follow-up: mapping-editor UI in global settings → added to Phase 3 scope.
+4. ✅ Budget Line Items output: **computed values**.
+
+Also decided 2026-06-04: the two template typo rows are normalized AND included in the catalog
+(221 entries, not 219).
 
 ---
 
