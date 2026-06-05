@@ -1,6 +1,5 @@
-import { Project, ProjectEstimate, TemplateConfig, DivisionLayout } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, DivisionLayout, CostCodeMapEntry } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
-import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
 
@@ -40,6 +39,7 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     bondRate: row.bond_rate != null ? Number(row.bond_rate) : 0,
     feeRate: row.fee_rate != null ? Number(row.fee_rate) : 0.05,
     roundingRule: (row.rounding_rule as string) || "dollar",
+    projectType: (row.project_type as string) || "multifamily",
   };
 }
 
@@ -69,6 +69,7 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     bond_rate: project.bondRate ?? 0,
     fee_rate: project.feeRate ?? 0.05,
     rounding_rule: project.roundingRule ?? "dollar",
+    project_type: project.projectType ?? "multifamily",
   };
 }
 
@@ -79,9 +80,9 @@ function mapLineItemFromRow(row: Record<string, unknown>): ProcessedTakeoffRow {
     classification: (row.classification as string) || "",
     itemId,
     procoreParentCode: (row.procore_parent_code as string) || "",
-    // Granular Procore code is app-owned catalog data (Phase 1); a persisted
-    // procore_code column with manual-override support lands in Phase 3.
-    procoreCode: ESTIMATE_ITEMS_MASTER[itemId]?.procoreCode || "",
+    // Phase 3a: granular Procore code is persisted per line item (column
+    // backfilled from cost_code_map; manual overrides survive reload).
+    procoreCode: (row.procore_code as string) || "",
     description: (row.description as string) || "",
     matchedQty: Number(row.matched_qty) || 0,
     uom: (row.uom as string) || "SF",
@@ -321,6 +322,7 @@ export async function saveEstimateLineItems(
     classification: row.classification,
     item_id: row.itemId,
     procore_parent_code: row.procoreParentCode,
+    procore_code: row.procoreCode || "",
     description: row.description,
     matched_qty: row.matchedQty,
     uom: row.uom,
@@ -823,7 +825,35 @@ export async function getTemplateConfig(
     configData: data.config_data as DivisionLayout[],
     createdAt: data.created_at as string,
     updatedAt: data.updated_at as string,
+    projectType: (data.project_type as string) ?? null,
   };
+}
+
+/**
+ * Retrieves the app-owned internal → granular Procore code mapping for a
+ * template (cost_code_map table, seeded from the catalog in Phase 3a).
+ * Manual edits via the mapping-editor UI land in Phase 3c.
+ */
+export async function getCostCodeMap(
+  templateName: string
+): Promise<CostCodeMapEntry[]> {
+  const { data, error } = await supabase
+    .from("cost_code_map")
+    .select("template_name, internal_code, procore_code, source")
+    .eq("template_name", templateName)
+    .order("internal_code", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch cost code map for "${templateName}"`, error);
+    throw new Error(`Failed to fetch cost code map: ${error.message}`);
+  }
+
+  return (data || []).map((row) => ({
+    templateName: row.template_name as string,
+    internalCode: row.internal_code as string,
+    procoreCode: row.procore_code as string,
+    source: row.source as CostCodeMapEntry["source"],
+  }));
 }
 
 

@@ -25,6 +25,8 @@ export interface Project {
   bondRate?: number;
   feeRate?: number;
   roundingRule?: string;
+  /** Phase 3a: template selection key (multifamily | ti | medical); UI wiring lands in Phase 3b */
+  projectType?: string;
 }
 
 export interface ProjectEstimate {
@@ -61,6 +63,8 @@ export interface DbEstimateLineItem {
   classification: string;
   item_id: string;
   procore_parent_code: string;
+  /** Phase 3a: persisted granular Procore code (manual-override support) */
+  procore_code: string;
   description: string;
   matched_qty: number;
   uom: string;
@@ -114,5 +118,15 @@ export interface TemplateConfig {
   configData: DivisionLayout[];
   createdAt?: string;
   updatedAt?: string;
+  /** Phase 3a: per-project-type template selection (wired in Phase 3b) */
+  projectType?: string | null;
+}
+
+/** App-owned internal → granular Procore code mapping (cost_code_map table) */
+export interface CostCodeMapEntry {
+  templateName: string;
+  internalCode: string;
+  procoreCode: string;
+  source: 'template' | 'sibling' | 'manual';
 }
 

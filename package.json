@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "sync-codes": "node scripts/harvest-cost-codes.js",
+    "generate-seed": "node scripts/generate-cost-code-map-seed.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
