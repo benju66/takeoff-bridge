@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
 import { generateExcelPayload, generateProcoreBudget, generateExcelWorkbook } from "@/lib/exporter";
+import { getTemplateConfig } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
 // useExportHandlers — Export CSV / Excel / Procore budget download logic
@@ -54,7 +55,21 @@ export function useExportHandlers(
     setIsExportingExcel(true);
     setExportError(null);
     try {
-      const blob = await generateExcelWorkbook(rows, project, columnDefs);
+      const templateName = "Company_Estimate_Template.xlsx";
+      
+      // 1. Fetch layout configuration from Supabase
+      const config = await getTemplateConfig(templateName);
+      const layoutConfig = config ? config.configData : null;
+
+      // 2. Fetch template file buffer
+      const response = await fetch(`/templates/${templateName}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load corporate template ${templateName} (Status: ${response.status})`);
+      }
+      const templateBuffer = await response.arrayBuffer();
+
+      // 3. Generate Excel workbook using the relative shifting engine
+      const blob = await generateExcelWorkbook(rows, project, columnDefs, layoutConfig, templateBuffer);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);

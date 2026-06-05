@@ -422,3 +422,62 @@ CREATE POLICY "global_registry_tenant_policy" ON global_registry
   TO authenticated
   USING (tenant_id = public.get_auth_tenant_id())
   WITH CHECK (tenant_id = public.get_auth_tenant_id());
+
+-- ─────────────────────────────────────────────────
+-- Table 10: template_config
+-- ─────────────────────────────────────────────────
+CREATE TABLE template_config (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  template_name TEXT NOT NULL UNIQUE,
+  sheet_name    TEXT NOT NULL DEFAULT 'STEP 4 - ESTIMATE',
+  config_type   TEXT NOT NULL DEFAULT 'layout',
+  config_data   JSONB NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE template_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "template_config_select_policy" ON template_config
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+INSERT INTO template_config (template_name, sheet_name, config_type, config_data)
+VALUES (
+  'Company_Estimate_Template.xlsx',
+  'STEP 4 - ESTIMATE',
+  'layout',
+  '[
+    {"division": "01", "headerRow": 10, "startRow": 11, "endRow": 14, "label": "DIVISION 01 — GENERAL CONDITIONS"},
+    {"division": "02", "headerRow": 15, "startRow": 16, "endRow": 25, "label": "DIVISION 02 — SITE OPERATIONS"},
+    {"division": "03", "headerRow": 26, "startRow": 27, "endRow": 52, "label": "DIVISION 03 — CONCRETE"},
+    {"division": "04", "headerRow": 53, "startRow": 54, "endRow": 62, "label": "DIVISION 04 — MASONRY"},
+    {"division": "05", "headerRow": 63, "startRow": 64, "endRow": 72, "label": "DIVISION 05 — METALS"},
+    {"division": "06", "headerRow": 73, "startRow": 74, "endRow": 92, "label": "DIVISION 06 — WOOD, PLASTICS, COMPOSITES"},
+    {"division": "07", "headerRow": 93, "startRow": 94, "endRow": 130, "label": "DIVISION 07 — THERMAL & MOISTURE PROTECTION"},
+    {"division": "08", "headerRow": 131, "startRow": 132, "endRow": 149, "label": "DIVISION 08 — OPENINGS"},
+    {"division": "09", "headerRow": 150, "startRow": 151, "endRow": 164, "label": "DIVISION 09 — FINISHES"},
+    {"division": "10", "headerRow": 165, "startRow": 166, "endRow": 189, "label": "DIVISION 10 — SPECIALTIES"},
+    {"division": "11", "headerRow": 190, "startRow": 191, "endRow": 199, "label": "DIVISION 11 — EQUIPMENT"},
+    {"division": "12", "headerRow": 200, "startRow": 201, "endRow": 211, "label": "DIVISION 12 — FURNISHINGS"},
+    {"division": "13", "headerRow": 212, "startRow": 213, "endRow": 219, "label": "DIVISION 13 — SPECIAL CONSTRUCTION"},
+    {"division": "14", "headerRow": 220, "startRow": 221, "endRow": 226, "label": "DIVISION 14 — CONVEYING EQUIPMENT"},
+    {"division": "21", "headerRow": 227, "startRow": 228, "endRow": 231, "label": "DIVISION 21 — FIRE SUPPRESSION"},
+    {"division": "22", "headerRow": 232, "startRow": 233, "endRow": 238, "label": "DIVISION 22 — PLUMBING"},
+    {"division": "23", "headerRow": 239, "startRow": 240, "endRow": 242, "label": "DIVISION 23 — HVAC"},
+    {"division": "26", "headerRow": 243, "startRow": 244, "endRow": 250, "label": "DIVISION 26 — ELECTRICAL"},
+    {"division": "27", "headerRow": 251, "startRow": 252, "endRow": 255, "label": "DIVISION 27 — COMMUNICATIONS"},
+    {"division": "28", "headerRow": 256, "startRow": 257, "endRow": 262, "label": "DIVISION 28 — ELECTRONIC SAFETY AND SECURITY"},
+    {"division": "31", "headerRow": 263, "startRow": 264, "endRow": 270, "label": "DIVISION 31 — EARTHWORK"},
+    {"division": "32", "headerRow": 271, "startRow": 272, "endRow": 291, "label": "DIVISION 32 — EXTERIOR IMPROVEMENTS"},
+    {"division": "33", "headerRow": 292, "startRow": 293, "endRow": 304, "label": "DIVISION 33 — UTILITIES"},
+    {"division": "50", "headerRow": 305, "startRow": 306, "endRow": 315, "label": "DIVISION 50 — WINTER CONDITIONS"},
+    {"division": "80", "headerRow": 316, "startRow": 317, "endRow": 330, "label": "DIVISION 80 — ALLOWANCES"}
+  ]'::jsonb
+)
+ON CONFLICT (template_name) DO UPDATE 
+SET sheet_name = EXCLUDED.sheet_name,
+    config_type = EXCLUDED.config_type,
+    config_data = EXCLUDED.config_data,
+    updated_at = now();
+

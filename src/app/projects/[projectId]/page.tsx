@@ -69,7 +69,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // Step 4: Takeoff Workbook
   const workbook = useTakeoffWorkbook(projectId, isLoaded, project);
   const {
-    rows, columnDefs, lockedCells, table,
+    rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,
     contextMenu, setContextMenu,
     unmappedTakeoffClassifications,
@@ -392,6 +392,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             rows={rows}
             columnDefs={columnDefs}
             lockedCells={lockedCells}
+            layoutConfig={layoutConfig}
             table={table}
             dragActive={dragActive}
             appendData={appendData}

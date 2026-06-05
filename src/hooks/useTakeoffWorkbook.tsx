@@ -19,13 +19,14 @@ import { StringCellInput } from "@/components/workspace/StringCellInput";
 import { SelectCellInput } from "@/components/workspace/SelectCellInput";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
-import { Project } from "@/types/db";
+import { Project, DivisionLayout } from "@/types/db";
 import {
   getEstimateLineItems,
   getProjectRegistry,
   getGlobalRegistry,
   getProjectColumnDefs,
   getProjectLockedCells,
+  getTemplateConfig,
 } from "@/lib/db";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { useCommandHistory } from "./useCommandHistory";
@@ -50,6 +51,7 @@ export interface UseTakeoffWorkbookReturn {
   rows: ProcessedTakeoffRow[];
   columnDefs: ColumnDefinition[];
   lockedCells: Record<string, boolean>;
+  layoutConfig: DivisionLayout[] | null;
 
   // TanStack table instance (AMENDMENT GAP-4)
   table: ReturnType<typeof useReactTable<ProcessedTakeoffRow>>;
@@ -121,6 +123,7 @@ export function useTakeoffWorkbook(
   const [rows, setRowsRaw] = useState<ProcessedTakeoffRow[]>([]);
   const [rowVersion, setRowVersion] = useState(0);
   const [appendData, setAppendData] = useState(false);
+  const [layoutConfig, setLayoutConfig] = useState<DivisionLayout[] | null>(null);
 
   // setRowsTracked — wraps setRows with a version counter bump
   // Sub-hooks use this instead of raw setRows so rowVersion increments
@@ -281,13 +284,14 @@ export function useTakeoffWorkbook(
     (async () => {
       try {
         // Load all data sources in parallel
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks] =
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
             getGlobalRegistry(),
             getProjectColumnDefs(projectId),
             getProjectLockedCells(projectId),
+            getTemplateConfig("Company_Estimate_Template.xlsx"),
           ]);
 
         if (cancelled) return;
@@ -295,6 +299,9 @@ export function useTakeoffWorkbook(
         // Apply registries
         setUserRegistry(savedRegistry);
         setGlobalRegistry(savedGlobalReg);
+        if (savedTemplateConfig) {
+          setLayoutConfig(savedTemplateConfig.configData);
+        }
 
         // Apply line items — honor sort_order from DB
         if (savedLineItems.length > 0) {
@@ -1134,6 +1141,7 @@ export function useTakeoffWorkbook(
     rows,
     columnDefs,
     lockedCells,
+    layoutConfig,
     table,
     dragActive,
     appendData,

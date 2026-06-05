@@ -10,7 +10,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
-import { Project } from "@/types/db";
+import { Project, DivisionLayout } from "@/types/db";
 import { DIVISION_LABELS, ESTIMATE_MODIFIERS } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
@@ -36,6 +36,7 @@ interface EstimateTableProps {
   rows: ProcessedTakeoffRow[];
   columnDefs: ColumnDefinition[];
   lockedCells: Record<string, boolean>;
+  layoutConfig?: DivisionLayout[] | null;
   table: ReturnType<typeof useReactTable<ProcessedTakeoffRow>>;
   dragActive: boolean;
   appendData: boolean;
@@ -87,6 +88,8 @@ export function EstimateTable({
   unitCount,
   rows,
   columnDefs,
+  lockedCells,
+  layoutConfig,
   table,
   dragActive,
   appendData,
@@ -184,6 +187,18 @@ export function EstimateTable({
     }
   }, [selection.rowId, rows, collapsedDivisions]);
 
+  const layoutConfigMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (layoutConfig) {
+      layoutConfig.forEach((cfg) => {
+        if (cfg.label) {
+          map[cfg.division] = cfg.label;
+        }
+      });
+    }
+    return map;
+  }, [layoutConfig]);
+
   const divisionTotals = useMemo(() => {
     const totals: Record<string, number> = {};
     tableRows.forEach((row) => {
@@ -208,7 +223,7 @@ export function EstimateTable({
         lastDivision = currentDivision;
         const total = divisionTotals[currentDivision] || 0;
         const isCollapsed = !!collapsedDivisions[currentDivision];
-        const divLabel = DIVISION_LABELS[currentDivision] || `DIVISION ${currentDivision}`;
+        const divLabel = layoutConfigMap[currentDivision] || DIVISION_LABELS[currentDivision] || `DIVISION ${currentDivision}`;
         items.push({ type: "divider", divisionCode: currentDivision, label: divLabel, total, isCollapsed });
       }
       if (!currentDivision || !collapsedDivisions[currentDivision]) {
@@ -216,7 +231,7 @@ export function EstimateTable({
       }
     });
     return items;
-  }, [tableRows, collapsedDivisions, divisionTotals]);
+  }, [tableRows, collapsedDivisions, divisionTotals, layoutConfigMap]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -418,7 +433,9 @@ export function EstimateTable({
                   <div key={div.code} className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-blue-600 dark:text-blue-400 font-bold w-6 text-right shrink-0">{div.code}</span>
-                      <span className="text-foreground font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">{div.name}</span>
+                      <span className="text-foreground font-semibold truncate shrink-0 max-w-[120px] sm:max-w-[180px]">
+                        {layoutConfigMap[div.code] || div.name}
+                      </span>
                     </div>
                     <div className="flex items-center gap-3 font-mono shrink-0 ml-auto">
                       <span className="text-slate-600 dark:text-slate-400 text-[10px] hidden sm:inline font-bold">

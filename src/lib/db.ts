@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, DivisionLayout } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -786,4 +786,39 @@ export async function getSession() {
   if (error) throw error;
   return session;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Template Configurations
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Retrieves the coordinate layout configuration for a specific spreadsheet template.
+ */
+export async function getTemplateConfig(
+  templateName: string
+): Promise<TemplateConfig | null> {
+  const { data, error } = await supabase
+    .from("template_config")
+    .select("*")
+    .eq("template_name", templateName)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Failed to fetch template config for "${templateName}"`, error);
+    throw new Error(`Failed to fetch template config: ${error.message}`);
+  }
+
+  if (!data) return null;
+
+  return {
+    id: data.id as string,
+    templateName: data.template_name as string,
+    sheetName: data.sheet_name as string,
+    configType: data.config_type as string,
+    configData: data.config_data as DivisionLayout[],
+    createdAt: data.created_at as string,
+    updatedAt: data.updated_at as string,
+  };
+}
+
 

@@ -14,7 +14,7 @@
 * **Checklist Enforcement**: The agent must execute the full 5-step verification process defined in **`SKILL.md`** for all proposed code modifications.
 * **Review Gate Compliance**: An implementation plan table must be presented to the user matching the targeted scope prior to code delivery.
 * **Execution Boundary**: Do not modify files or output source code blocks until the user explicitly provides approval for the presented plan.
-* **Automated Test Gate**: If `npm run test` is available, the agent must execute the full test suite and confirm all tests pass before presenting work for user review. Regressions must be resolved before delivery.
+* **Automated Test Gate**: The agent must run `npm run test` and confirm all tests pass before presenting work for user review. Regressions must be resolved before delivery.
 
 ## Structural Manipulation Grid Parameters
 * Manual Structural Grid Modifications: AI agents are permitted to implement features that mutate, insert, delete, or rearrange row items in estimate data sheets, provided those operations are driven explicitly by context menu overrides or clear user action events.

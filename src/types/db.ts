@@ -97,3 +97,22 @@ export interface DbProjectLockedCells {
   project_id: string;
   locked_cells: Record<string, boolean>;
 }
+
+export interface DivisionLayout {
+  division: string;
+  headerRow: number;
+  startRow: number;
+  endRow: number;
+  label?: string;
+}
+
+export interface TemplateConfig {
+  id: string;
+  templateName: string;
+  sheetName: string;
+  configType: string;
+  configData: DivisionLayout[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+

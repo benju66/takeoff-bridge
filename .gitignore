@@ -43,5 +43,8 @@ next-env.d.ts
 # scratchpad directories
 /scratch
 
+# scratch / forensic throwaway files (root-level only, not docs/)
+/scratch_*
+
 # python recovery scripts
 /*.py
