@@ -454,7 +454,7 @@ phase must know. Empty until Phase 1 runs.)
   comment block reflects the new state via `supabase_seed_cost_code_map.sql`); D2 orphan-line
   mappings (findings §9) remain Phase 3 inputs, not yet encoded anywhere.
 
-- **Phase 3 (2026-06-06):** GC + Site Ops export complete — all 217 BLI rows now carry computed
+- **Phase 3 (2026-06-06, commit `370e66b`):** GC + Site Ops export complete — all 217 BLI rows now carry computed
   values; no live SUMIF survives (verified by test + artifact inspection, 14/14 spot checks).
   Mapping home decision: the 20 GC/Site Ops line configs live in `constants.ts` (template-aligned
   `.001` criteria + user-confirmed BLI codes incl. D2; validated against `procore-valid-codes.json`
