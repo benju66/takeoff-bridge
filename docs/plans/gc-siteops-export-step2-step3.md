@@ -685,5 +685,95 @@ a computed value and no live SUMIF survives.
 Model: Claude Opus (latest).
 ```
 
+### → Phase 4 (full GC + Site Ops input coverage — resequenced 2026-06-06, ready to run)
+
+> *(Enriched 2026-06-06 with Phase 1–3 verified facts. P4 = inputs; P5 = estimate-page linkage;
+> P6 = polish. See the resequenced phase definitions in §13.)*
+
+```
+Implement PHASE 4 ONLY of the plan at:
+docs/plans/gc-siteops-export-step2-step3.md
+Read the whole plan first — especially §13 "Phases 4–6 — RESEQUENCED" (the
+authoritative P4 scope), §0.D (source-of-truth rule), and the §13 handoff log
+(P1–P3 outcomes). Then read the Phase 1 findings doc:
+docs/plans/2026-06-05-gc-siteops-phase1-findings.md — especially §4 (the
+34+38 criterion tables with BLI codes), §5.2 (the two %-of-estimate GC
+lines), §6 (which criteria have app inputs today), and §9 (D2 sign-offs).
+This is a phased plan: do Phase 4 and nothing else, then stop. Phase 5
+(estimate-page linkage) and Phase 6 (sheet detail, editable rates) are
+separate — do not start them.
+== CONTEXT ==
+Takeoff Bridge is a single-company estimating app. I'm the system architect
+(non-developer — explain things plainly, mark a (Recommended) option on every
+choice). Phase 1 (461b6dc) forensically verified the template; Phase 2
+(5597048) re-synced catalog/DB; Phase 3 (370e66b) made the export write
+computed values into ALL 217 Budget Line Items rows — no live SUMIF survives,
+and the export machinery is GENERIC: any GC/Site Ops line defined in
+constants.ts flows to the workbook BLI, the Procore CSV, and the
+reconciliation gate automatically. All discrepancies D1–D3 are SIGNED OFF.
+== GOAL ==
+Every template STEP 2/STEP 3 source line gets an input row in the app, so no
+GC/Site Ops BLI row is stuck at $0 for lack of a place to type. Today the app
+covers 14/34 GC + 6/38 Site Ops criteria. Missing: ~21 GC lines (the 20 in
+findings §6 + orphan 01-5110.002) and ~34 Site Ops lines (the 32 in findings
+§6 + orphans 02-4100.002, 02-9200.002). ⚠️ Derive the line list from findings
+§4 + a forensic read of the template STEP 2/3 sheets (codes, descriptions,
+units, default rates) — NEVER from hand-copied lists (the user's 2026-06-06
+list omitted 02-9005.001 Final Cleaning) and NEVER invent rates.
+== VERIFIED FACTS (P1–P3 — build on these) ==
+- Phase 3 mapping pattern (the home for these lines, user-decided): each line
+  config in src/lib/constants.ts carries { code: ".001" template criterion,
+  procoreCode: BLI code from findings §4, costType, label, unit, rate }.
+  STAFF_ROLE_DEFAULTS / OPERATIONAL_EXPENSE_DEFAULTS / EQUIPMENT_DEFAULTS /
+  SITE_OPS_DYNAMIC_DEFAULTS / SITE_OPS_MANUAL_DEFAULTS are the live examples.
+- cost types come from the template BLI col B (forensically verified in P3):
+  staff rows "L"; Demolition 2-24100.000, Abatement 2-28213.000, Final
+  Cleaning 2-29005.000, Temp Access Roads 2-29045.000, Survey & Layout
+  2-29200.000 are "S"; everything else "M". Re-verify col B for the rows you
+  add during your forensic read.
+- D2 orphans map to sibling BLI codes (signed off, findings §9):
+  01-5110.002 → 1-15110.000; 02-4100.002 → 2-24100.000;
+  02-9200.002 → 2-29200.000. (02-9010.002 already encoded in P3.)
+- The constants test (src/lib/__tests__/constants.test.ts) cross-checks every
+  procoreCode against src/lib/procore-valid-codes.json (224 codes) — your new
+  lines are validated automatically; extend its allLines list.
+- ZERO exporter changes expected: rollupGcSiteOps accumulates lines sharing a
+  BLI code; validateExportReadiness/generateExcelWorkbook/generateProcoreBudget
+  consume the calc results generically. Extend tests' coverage expectations.
+- Persistence: GC/Site Ops inputs save via useEstimatePersistence as JSONB
+  snapshots (gcUtilization, gcEquipmentOverrides, siteOpsQuantities,
+  siteOpsRates). Verify the new quantities fit those shapes WITHOUT a schema
+  change; if a schema change is genuinely needed, supabase_schema.sql first +
+  my approval + invoke the supabase skill before any DB code.
+== OPEN DECISIONS TO RESOLVE WITH ME AT START ==
+- Dynamic (duration/sqft-driven) vs manual (typed qty) for each new line —
+  propose a table from the template's structure, mark (Recommended) defaults.
+- The two %-of-estimate-total GC lines (01-0610.001 Safety Consultant,
+  01-1600.001 Procore — findings §5.2: the template has the estimator
+  hand-type the amount to break circularity). Propose options (manual entry
+  is likely simplest); I decide.
+- UI grouping: mirror the template's STEP 2/3 subtotal sections (Recommended)
+  or flat list.
+== GUARDRAILS ==
+- AGENTS.md: present an implementation plan table for my approval BEFORE
+  writing code; npm run test green before presenting work.
+- calculations.ts is the sole calculation authority; never invent rates or
+  financial values — harvest defaults from the template forensically.
+- resolveProcoreCode / cost_code_map stay UNTOUCHED — the GC/Site Ops mapping
+  home is constants.ts (P3 user decision); these are app-defined inputs, not
+  takeoff rows.
+- Windows + PowerShell: keep inline commands short; script files for anything
+  longer than ~one line.
+== EXIT CRITERIA ==
+- npm run build + npm run test green (fix regressions before delivery)
+- Manual export of a project using several NEW lines ties out: dollars land
+  on the right BLI codes in the workbook and Procore CSV; reconciliation gate
+  passes
+- Commit; append a 3–5 line handoff note to §13 "Handoff log"; push the
+  branch
+- Then STOP. Do not start Phase 5.
+Model: Claude Opus (latest).
+```
+
 **Resolved (B-1):** `03-0000.010/.011/.012` and `03-4500.001` verified in sync — no changes needed.
 **Resolved:** `32-1313` empty-parent question — `32-1313.001` is repurposed as the Concrete Paving line, so the group is not empty.
