@@ -421,8 +421,48 @@ confirmed mapping. P3 depends on P2's corrected catalog + P1's linkage map. P4 i
 - **Exit:** build + test green; manual export of a known project ties out (BLI shows computed GC +
   Site Ops values, reconciliation passes); committed.
 
-### Phase 4 — Optional Polish (independently shippable)
-- Write GC/Site Ops line detail into STEP 2/3 sheets for estimator reference (§8).
+### Phases 4–6 — RESEQUENCED 2026-06-06 (user-approved after Phase 3 close)
+
+> Original "Phase 4 — Optional Polish" is now **Phase 6**. Rationale: writing STEP 2/3 sheet
+> detail before full input coverage would emit only the 7 existing lines and be redone after
+> the missing ~54 input lines land. User approved: inputs → linkage → polish, with Site Ops
+> and GC input coverage combined in one phase.
+
+### Phase 4 — Full GC + Site Ops input coverage (Site Ops + GC together)
+- **Goal:** every template STEP 2/3 source line has an input row in the app, so no GC/Site Ops
+  BLI row is stuck at $0 for lack of a place to type. Closes findings §6's gap: app covers only
+  14/34 GC + 6/38 Site Ops criteria today (~20 GC + ~34 Site Ops lines missing).
+- **Do:** extend the Phase 3 constants pattern (`SITE_OPS_*_DEFAULTS` / GC arrays in
+  `src/lib/constants.ts`) with the missing lines — codes/descriptions/units/default rates
+  harvested forensically from the template STEP 2/3 sheets (never invented); BLI codes from
+  findings §4 tables; D2 orphans (`01-5110.002`, `02-4100.002`, `02-9200.002`) → sibling BLI
+  codes per the §9 sign-off. UI rows on the Step 2/Step 3 pages (group per the template's
+  subtotal sections); persist new quantities via the existing estimate-snapshot JSONB shapes
+  (verify no schema change needed; if one is, `supabase_schema.sql` first + approval).
+  **Zero exporter changes expected** — Phase 3's rollup/gate/tests are generic; extend test
+  coverage counts only.
+- ⚠️ Derive the line list from findings §4 / the template, NOT from hand-copied lists — the
+  user's 2026-06-06 list was missing `02-9005.001` Final Cleaning.
+- **Decisions at session start:** which new lines are dynamic (duration/sqft-driven) vs manual;
+  confirm template default rates; the two %-of-estimate-total GC lines (`01-0610.001` Safety
+  Consultant, `01-1600.001` Procore — see findings §5.2) need a computation decision.
+- **Exit:** build + tests green; export of a project using new lines ties out; commit + handoff.
+
+### Phase 5 — Estimate-page linkage (01-0000.001 / 02-0000.001)
+- **Goal:** the STEP 4 estimate page shows GC + Site Ops totals (read-only, linked from the
+  Step 2/3 modules) the way the template's STEP 4 rows 12–24 pull STEP 2/3 subtotals — so the
+  on-page subtotal, modifiers (fee/contingency/insurance %), and cost-per-SF include them.
+- **Financial decision (user must sign off — calculations.ts authority):** whether the modifier
+  basis includes GC + Site Ops. The template says yes (modifiers compute on I331, which includes
+  rows 12–24); the app today computes modifiers on STEP 4 grid rows only.
+- **Guard:** keep linked rows OUT of the Procore rollup (granular rows carry the dollars) and
+  close the double-count trap — manually-typed dollars on `01-0000.001`→`1-10000.000` /
+  `02-0000.001`→`2-20000.000` currently reach Procore alongside the granular GC/Site Ops rows.
+- **Exit:** build + tests green; reconciliation still passes; commit + handoff.
+
+### Phase 6 — Polish (was Phase 4; independently shippable)
+- Write GC/Site Ops line detail into STEP 2/3 sheets for estimator reference (§8) — now
+  complete in one pass since Phase 4 delivered full input coverage.
 - Make GC staff rates editable per project (hook already accepts `rateOverrides`).
 - Each is its own small phase/commit; do only if the user wants them.
 
@@ -468,6 +508,12 @@ phase must know. Empty until Phase 1 runs.)
   lines changed "ea"→"hr" (display-only); D3 note — the broken `1-10000.000` row gets the STEP 4
   rollup value (normally $0), so estimator-entered dollars on the STEP 4 GC grid rows are preserved,
   not forced to zero.
+
+- **Resequencing (2026-06-06, user-approved):** remaining work reordered to Phase 4 (full Site Ops
+  + GC input coverage, combined), Phase 5 (estimate-page linkage of GC/Site Ops totals incl. the
+  modifier-basis decision), Phase 6 (old Phase 4 polish: STEP 2/3 sheet detail + editable rates).
+  Rationale: sheet detail written once against the complete line set; inputs unblock estimators
+  soonest. See the resequenced phase definitions above.
 
 ---
 
