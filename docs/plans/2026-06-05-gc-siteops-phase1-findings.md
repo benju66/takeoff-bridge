@@ -305,3 +305,15 @@ D4–D6 are recorded for the record (no decision required).
 **Not discrepancies (verified clean):** B-1 codes in sync (§3.3); all 217 BLI codes valid + distinct;
 valid-code artifact current; no stale `32-1313.002–.005` references; no BLI double-count path;
 the plan's 144/34/38/1 row counts confirmed exactly.
+
+---
+
+## 9. USER SIGN-OFF (2026-06-05)
+
+All three decision items approved by the user (System Architect) at Phase 1 close:
+
+| # | Decision |
+|---|---|
+| **D1** | ✅ APPROVED — `32-1613.002–.006` all roll up to `32-321613.000` Site Concrete (sibling inference matches the stated mapping). |
+| **D2** | ✅ APPROVED (all 4) — orphan lines map to their sibling's BLI code: `01-5110.002`→`1-15110.000`, `02-9010.002`→`2-29010.000`, `02-4100.002`→`2-24100.000`, `02-9200.002`→`2-29200.000`. These are user-confirmed mappings — Phase 2/3 may encode them without re-asking. |
+| **D3** | ✅ APPROVED — Phase 3 writes **$0** to the broken `1-10000.000` BLI row (row 2); the 34 granular GC rows carry the dollars. |

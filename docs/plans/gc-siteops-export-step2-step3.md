@@ -437,7 +437,8 @@ phase must know. Empty until Phase 1 runs.)
   them → **no BLI write-order constraint** (drop §6 caveat). Discrepancies D1–D3 await user sign-off
   (D1: 32-1613 children resolve via sibling inference; D2: 4 source lines lack BLI rows, incl. the
   app's hired-cleaning line 02-9010.002; D3: write $0 to broken 1-10000.000). Phase 2 inputs in
-  findings §7.
+  findings §7. **D1–D3 ALL SIGNED OFF by user 2026-06-05** (recorded in findings §9) — Phase 2 may
+  start with no open questions.
 
 ---
 
