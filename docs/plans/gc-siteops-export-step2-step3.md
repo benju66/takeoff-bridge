@@ -430,7 +430,14 @@ confirmed mapping. P3 depends on P2's corrected catalog + P1's linkage map. P4 i
 (Each phase appends 3–5 lines here on completion: what landed, commit hash, anything the next
 phase must know. Empty until Phase 1 runs.)
 
-- _(none yet)_
+- **Phase 1 (2026-06-05):** Forensic verify complete — findings in
+  `docs/plans/2026-06-05-gc-siteops-phase1-findings.md`. Template AGREES with user mappings
+  (B-1 in sync; B-2 fully present; all 217 BLI codes valid; valid-codes artifact current at 224).
+  §0.C direction was backwards: STEP 4 rows 12–24 pull FROM STEP 2/3 subtotals; no BLI row references
+  them → **no BLI write-order constraint** (drop §6 caveat). Discrepancies D1–D3 await user sign-off
+  (D1: 32-1613 children resolve via sibling inference; D2: 4 source lines lack BLI rows, incl. the
+  app's hired-cleaning line 02-9010.002; D3: write $0 to broken 1-10000.000). Phase 2 inputs in
+  findings §7.
 
 ---
 
