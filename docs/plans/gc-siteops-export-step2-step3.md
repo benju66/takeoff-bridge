@@ -537,15 +537,92 @@ catalog/DB still hold the OLD state: 32-1313.001–.005 = curb items →
 Model: Claude Opus (latest).
 ```
 
-### → Phase 3 (GC + Site Ops export — after P2)
+### → Phase 3 (GC + Site Ops export — P2 complete 2026-06-06, ready to run)
 
-> Implement **Phase 3 only** of `docs/plans/gc-siteops-export-step2-step3.md` (workstreams A + C;
-> §4–§7, §13). Read the plan and the Phase 1 + Phase 2 handoffs first. Thread the GC and Site Ops
-> calc results into `generateExcelWorkbook`, write computed values into all 34 GC + 38 Site Ops BLI
-> rows (use the Phase 1 STEP 3→STEP 4 dependency map for write order), update `constants.ts` codes to
-> the Phase 1-confirmed criteria, extend `validateExportReadiness` to cover GC + Site Ops (§7 Option
-> A), and add the §5 tests. Present a plan table for my approval before editing. Get build + tests
-> green, verify a manual export ties out, commit, append a handoff note. Model: Claude Opus (latest).
+> *(Enriched 2026-06-06 with Phase 1 verified facts + Phase 2 outcomes — supersedes the original
+> generic block.)*
+
+```
+Implement PHASE 3 ONLY of the plan at:
+docs/plans/gc-siteops-export-step2-step3.md
+Read the whole plan first — especially §4–§7 (architecture + BLI write logic),
+§0.D (source-of-truth rule), §9 (Phase 3c baseline + resolveProcoreCode
+chokepoint), and §13 (Phase 3 scope + handoff log). Then read the Phase 1
+findings doc: docs/plans/2026-06-05-gc-siteops-phase1-findings.md — especially
+§4 (the 34+38 confirmed SUMIF criteria tables), §5 (corrected dependency map),
+§6 (constants.ts alignment list), and §9 (sign-offs). This is a phased plan:
+do Phase 3 and nothing else, then stop. Phase 4 (STEP 2/3 sheet detail,
+editable rates) is separate — do not start it.
+== CONTEXT ==
+Takeoff Bridge is a single-company estimating app. I'm the system architect
+(non-developer — explain things plainly, mark a (Recommended) option on every
+choice). Phase 1 (461b6dc) forensically verified the template; Phase 2
+(5597048) re-synced estimate-catalog.json + Supabase cost_code_map to it
+(full tie-out passed, 221 rows). All discrepancies are SIGNED OFF (findings
+§9) — do not re-ask D1–D3.
+== GOAL ==
+GC (Division 01) and Site Ops (Division 02) dollars are computed in the app
+but never reach the exported workbook: the 34 STEP-2 and 38 STEP-3 sourced
+Budget Line Items rows export as live SUMIFs over blank sheets → $0. Write
+app-computed values into all of them so every one of the 217 BLI rows carries
+a computed value and no live SUMIF survives.
+== VERIFIED FACTS (Phase 1 — build on these) ==
+- NO write-order constraint: nothing flows STEP 3 → STEP 4 → BLI (plan §0.C
+  was backwards; the §6 caveat is dropped). The simple "match criterion code
+  → write value" loop is sufficient. STEP 4 rows 12–24 pull FROM STEP 2/3
+  subtotals and no BLI row references them — no double-counting.
+- Findings §4 tables give every BLI row's criterion code. App constants are
+  suffix-less (01-0310) vs template criteria (01-0310.001) — align per
+  findings §6.
+- The app today covers only 14/34 GC + 6/38 Site Ops criteria; the rest
+  correctly export $0 (no app input lines exist yet — listed in findings §6).
+- D4 legacy template formula bugs (STEP 4 H19/H20/H24) are irrelevant — the
+  app computes and overwrites those values.
+== SIGNED-OFF DECISIONS TO ENCODE (findings §9 — don't re-ask) ==
+- D2: the 4 orphan source lines map to their sibling's BLI code:
+  01-5110.002 → 1-15110.000; 02-9010.002 → 2-29010.000 (the app HAS this
+  hired-cleaning input line — its dollars need this home); 02-4100.002 →
+  2-24100.000; 02-9200.002 → 2-29200.000.
+- D3: write $0 to the broken 1-10000.000 BLI row (row 2) — the 34 granular
+  GC rows carry the dollars; writing the GC total there would double-count.
+== SCOPE (plan §5 files table + §6 logic) ==
+1. constants.ts: update STAFF_ROLE_DEFAULTS / OPERATIONAL_EXPENSE_DEFAULTS
+   to the .001-suffixed criteria; add EQUIPMENT_DEFAULTS (dumpsters/toilets/
+   electric) and the Site Ops codes as a single source of truth.
+2. exporter.ts: generateExcelWorkbook gains gcCalcResult / gcEquipment /
+   siteOpsCalcResult; build gc + siteOps rollup maps; write values into the
+   34+38 BLI rows (same setCellValue pattern as STEP 4 rows); include GC +
+   Site Ops in the internal tie-out. NOTE the Phase 3b signature is
+   (rows, project, columnDefs, layoutConfig, templateBuffer) — thread the
+   new params alongside, don't disturb it.
+3. useExportHandlers.ts + projects/[projectId]/page.tsx: thread the calc
+   results down from their hooks.
+4. validateExportReadiness: extend per §7 — Option A (gate covers
+   Σ line items + GC + Site Ops = Σ all BLI) is (Recommended); confirm.
+5. Tests per §5: GC/Site Ops values land on expected codes; full 217-row
+   reconciliation; no live SUMIFs remain in GC/Site Ops BLI rows.
+== GUARDRAILS ==
+- AGENTS.md: present an implementation plan table for my approval BEFORE
+  writing code; npm run test green before presenting work.
+- Route all procoreCode assignment through resolveProcoreCode
+  (src/lib/costCodeResolver.ts) — never bypass the chokepoint.
+- Never invent financial values; calculations.ts is the sole calculation
+  authority. DB access only through src/lib/db.ts.
+- Windows + PowerShell: keep inline commands short; script files for
+  anything longer than ~one line.
+== OPEN DECISIONS TO RESOLVE WITH ME AT START (plan §12) ==
+- §7 Option A vs B (A Recommended); confirm STEP 2/3 sheets stay blank
+  (§8 — writing line detail there is Phase 4); defer per-project staff-rate
+  overrides to Phase 4.
+== EXIT CRITERIA ==
+- npm run build + npm run test green (fix regressions before delivery)
+- Manual export of a known project ties out: BLI shows computed GC +
+  Site Ops values, reconciliation gate passes
+- Commit; append a 3–5 line handoff note to §13 "Handoff log"; push the
+  branch (keeps remote in sync per project practice)
+- Then STOP. Do not start Phase 4.
+Model: Claude Opus (latest).
+```
 
 **Resolved (B-1):** `03-0000.010/.011/.012` and `03-4500.001` verified in sync — no changes needed.
 **Resolved:** `32-1313` empty-parent question — `32-1313.001` is repurposed as the Concrete Paving line, so the group is not empty.
