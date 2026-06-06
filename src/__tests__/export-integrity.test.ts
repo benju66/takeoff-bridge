@@ -4,7 +4,10 @@ import {
   generateProcoreBudget,
   validateExportReadiness,
   rollupByProcoreCode,
+  rollupGcSiteOps,
+  collectGcSiteOpsLines,
 } from "../lib/exporter";
+import { computePersonnelCosts, computeSiteOperations } from "../lib/calculations";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
 import fs from "fs";
@@ -19,6 +22,17 @@ import {
 // Layout config mirroring the template_config seed (real anchors; divisions
 // limited to the ones these focused tests populate)
 const mockLayoutConfig = layoutWithDivisions("01", "02", "03", "04");
+
+// gc-siteops Phase 3: every export path requires the GC + Site Ops calc
+// results. Zero-input results = a project with no GC/Site Ops entries.
+const zeroGcResult = () =>
+  computePersonnelCosts(0, {}, { dumpsters: 0, toilets: 0, electric: 0 });
+const zeroSiteOpsResult = () =>
+  computeSiteOperations(0, 0, { knox: 0, payrollCleaning: 0, hiredCleaning: 0, soilBorings: 0 }, { soilBorings: 0 });
+
+// The template's Budget Line Items sheet file (verified forensically — same
+// fixed-template precedent as the sheet7.xml STEP 4 assertion below).
+const BLI_SHEET_FILE = "xl/worksheets/sheet17.xml";
 
 describe("Excel Export Integrity & Relative Shifting Engine", () => {
   const mockColumns: ColumnDefinition[] = [
@@ -130,7 +144,9 @@ describe("Excel Export Integrity & Relative Shifting Engine", () => {
       mockProject,
       mockColumns,
       mockLayoutConfig,
-      templateBuffer as unknown as ArrayBuffer
+      templateBuffer as unknown as ArrayBuffer,
+      zeroGcResult(),
+      zeroSiteOpsResult()
     );
 
     // Load output blob into ExcelJS to run assertions
@@ -363,9 +379,11 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
   });
 
   it("blocks export when unmapped rows carry dollars; zero-dollar unmapped rows do not block", () => {
-    const readiness = validateExportReadiness([
-      concreteRow, unmappedWithDollars, unmappedZeroDollar,
-    ]);
+    const readiness = validateExportReadiness(
+      [concreteRow, unmappedWithDollars, unmappedZeroDollar],
+      zeroGcResult(),
+      zeroSiteOpsResult()
+    );
     expect(readiness.ok).toBe(false);
     expect(readiness.blockers).toHaveLength(1);
     expect(readiness.blockers[0]).toMatchObject({
@@ -379,7 +397,7 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
   });
 
   it("reconciliation ties out on a fully mapped fixture", () => {
-    const readiness = validateExportReadiness([concreteRow, footingsRow, div02Row]);
+    const readiness = validateExportReadiness([concreteRow, footingsRow, div02Row], zeroGcResult(), zeroSiteOpsResult());
     expect(readiness.ok).toBe(true);
     expect(readiness.blockers).toHaveLength(0);
     expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(37400, 2);
@@ -400,7 +418,9 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
       mockProjectShared,
       mockColumnsShared,
       mockLayoutConfig,
-      templateBuffer as unknown as ArrayBuffer
+      templateBuffer as unknown as ArrayBuffer,
+      zeroGcResult(),
+      zeroSiteOpsResult()
     );
     const arrayBuffer = await blob.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
@@ -433,26 +453,23 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
     expect(typeof div02Val).toBe("number");
     expect(div02Val as number).toBeCloseTo(5000, 2);
 
-    // Live STEP 2/3 SUMIFs are left intact; no formula still sources STEP 4
+    // gc-siteops Phase 3: NO live SUMIF survives in Budget Line Items — every
+    // row carries a computed value (zero-input GC/Site Ops → $0 rows).
     const outputZip = await JSZip.loadAsync(arrayBuffer);
-    let bliSheetXml = "";
-    for (const name of Object.keys(outputZip.files)) {
-      if (!name.startsWith("xl/worksheets/") || !name.endsWith(".xml")) continue;
-      const xml = await outputZip.file(name)!.async("string");
-      if (xml.includes("Budget") || xml.includes("SUMIF('STEP 2 - GCs'")) {
-        // Identify the BLI sheet by its surviving STEP 2 SUMIFs
-        if (/<f>SUMIF\('STEP 2 - GCs'/.test(xml) && /<f>SUMIF\('STEP 3 - SITE OPS'/.test(xml)) {
-          bliSheetXml = xml;
-          break;
-        }
-      }
-    }
+    const bliSheetXml = await outputZip.file(BLI_SHEET_FILE)!.async("string");
     expect(bliSheetXml).not.toBe("");
     expect(bliSheetXml).not.toContain("#REF!");
     expect(bliSheetXml).not.toContain("SUMIF('STEP 4 - ESTIMATE'");
+    expect(bliSheetXml).not.toContain("SUMIF('STEP 2 - GCs'");
+    expect(bliSheetXml).not.toContain("SUMIF('STEP 3 - SITE OPS'");
+
+    // A formerly SUMIF-driven STEP 2 row now holds a computed $0 value
+    const superintendentVal = byCode.get("1-10420.000");
+    expect(typeof superintendentVal).toBe("number");
+    expect(superintendentVal as number).toBeCloseTo(0, 2);
 
     // (d) generateProcoreBudget and the workbook BLI agree on totals
-    const csv = generateProcoreBudget(rows, mockProjectShared);
+    const csv = generateProcoreBudget(rows, mockProjectShared, zeroGcResult(), zeroSiteOpsResult());
     const lines = csv.split("\r\n").slice(1); // drop header
     let csvDetailTotal = 0;
     const csvCodes = new Set<string>();
@@ -474,4 +491,193 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
     const wbXmlOut = await outputZip.file("xl/workbook.xml")!.async("string");
     expect(wbXmlOut).toMatch(/<calcPr[^>]*fullCalcOnLoad="1"/);
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// gc-siteops Phase 3 — GC + Site Ops computed values reach Budget Line Items
+// ---------------------------------------------------------------------------
+
+describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
+  const mockColumns: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProject: Project = {
+    id: "project-3",
+    name: "Phase 3 GC Export Test Project",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-06",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x",
+    classification: "",
+    itemId: "",
+    procoreParentCode: "",
+    procoreCode: "",
+    description: "",
+    matchedQty: 0,
+    uom: "LS",
+    unitPrice: 0,
+    total: 0,
+    isMapped: true,
+    rawQuantities: [],
+    costType: "S",
+    customFields: {},
+    source: "template",
+    ...overrides,
+  });
+
+  // STEP 4 fixture: $32,400 on 3-30000.000 (a code pre-existing on the sheet)
+  const step4Rows = [
+    baseRow({
+      id: "row-03-0000.001", itemId: "03-0000.001",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Cast In-Place Concrete", matchedQty: 150, unitPrice: 120, total: 18000, uom: "CY",
+    }),
+    baseRow({
+      id: "row-03-0000.002", itemId: "03-0000.002",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Footings", matchedQty: 80, unitPrice: 180, total: 14400, uom: "CY",
+    }),
+  ];
+
+  // GC fixture: 10 months, Superintendent 100% + PM 50%, all 3 equipment lines
+  // Staff: su = 10×173.2×1.0×110 = 190,520 ; pm = 10×173.2×0.5×120 = 103,920
+  // Ops:   small tools 10×500 = 5,000 ; fuel 10×1,200 = 12,000 ; cell 10×135 = 1,350
+  // Equip: 5,000 + 2,000 + 3,000
+  // grandTotal = 322,790
+  const gcResult = () =>
+    computePersonnelCosts(10, { su: 100, pm: 50 }, { dumpsters: 5000, toilets: 2000, electric: 3000 });
+
+  // Site Ops fixture: 10 months, 10,000 sf, knox 2, payroll 100 hr, hired 50 hr,
+  // soil borings 1 × $2,500
+  // safety 5,000 ; temp prot 2,500 ; hoist 65,000 ; knox 1,300 ;
+  // payroll 7,400 ; hired 2,700 ; soil 2,500 → grandTotal = 86,400
+  const siteOpsResult = () =>
+    computeSiteOperations(10, 10000, { knox: 2, payrollCleaning: 100, hiredCleaning: 50, soilBorings: 1 }, { soilBorings: 2500 });
+
+  it("sums shared-BLI-code lines in the GC/Site Ops rollup (D2: payroll + hired cleaning)", () => {
+    const rollup = rollupGcSiteOps(collectGcSiteOpsLines(gcResult(), siteOpsResult()));
+    expect(rollup["2-29010.000"]).toBeCloseTo(7400 + 2700, 2);
+    expect(rollup["1-10420.000"]).toBeCloseTo(190520, 2);
+    expect(rollup["1-15130.000"]).toBeCloseTo(5000, 2);
+  });
+
+  it("gate Option A: reconciliation covers line items + GC + Site Ops", () => {
+    const readiness = validateExportReadiness(step4Rows, gcResult(), siteOpsResult());
+    expect(readiness.ok).toBe(true);
+    expect(readiness.blockers).toHaveLength(0);
+    expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
+    expect(readiness.reconciliation.rollupTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
+  });
+
+  it("writes GC + Site Ops values into their Budget Line Items rows; full 217-row tie-out; no live SUMIF survives", async () => {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+
+    const blob = await generateExcelWorkbook(
+      step4Rows,
+      mockProject,
+      mockColumns,
+      mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer,
+      gcResult(),
+      siteOpsResult()
+    );
+    const arrayBuffer = await blob.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(arrayBuffer) as never);
+
+    const bli = workbook.getWorksheet("Budget Line Items");
+    expect(bli).toBeDefined();
+    if (!bli) throw new Error("Budget Line Items sheet not found");
+
+    // Index Budget Amount (col H) cells by Cost Code (col A)
+    const byCode = new Map<string, ExcelJS.CellValue>();
+    bli.eachRow((row, rowNum) => {
+      if (rowNum < 2) return;
+      const code = String(row.getCell(1).value ?? "").trim();
+      if (code && code.includes("-")) byCode.set(code, row.getCell(8).value);
+    });
+
+    // All 217 BLI rows present (144 STEP 4 + 34 GC + 38 Site Ops + 1 broken row)
+    expect(byCode.size).toBe(217);
+
+    // GC staff lines land on their confirmed BLI codes (findings §4.1)
+    expect(byCode.get("1-10420.000")).toBeCloseTo(190520, 2); // Superintendent
+    expect(byCode.get("1-10330.000")).toBeCloseTo(103920, 2); // Project Manager
+    // GC operational + equipment lines
+    expect(byCode.get("1-11000.000")).toBeCloseTo(5000, 2);   // Small Tools
+    expect(byCode.get("1-11200.000")).toBeCloseTo(12000, 2);  // Fuel and Vehicle
+    expect(byCode.get("1-15111.000")).toBeCloseTo(1350, 2);   // Cell Phone
+    expect(byCode.get("1-15130.000")).toBeCloseTo(5000, 2);   // Dumpsters
+    expect(byCode.get("1-15140.000")).toBeCloseTo(2000, 2);   // Temp Toilets
+    expect(byCode.get("1-15170.000")).toBeCloseTo(3000, 2);   // Temp Electric
+
+    // Site Ops lines (findings §4.2)
+    expect(byCode.get("2-29015.000")).toBeCloseTo(5000, 2);   // Safety
+    expect(byCode.get("2-29020.000")).toBeCloseTo(2500, 2);   // Temp Protection
+    expect(byCode.get("2-29405.000")).toBeCloseTo(65000, 2);  // Material Hoist
+    expect(byCode.get("2-29307.000")).toBeCloseTo(1300, 2);   // Knox Box
+    expect(byCode.get("2-23200.000")).toBeCloseTo(2500, 2);   // Soil Borings
+    // D2: payroll + hired progress cleaning SUM into one BLI row
+    expect(byCode.get("2-29010.000")).toBeCloseTo(10100, 2);
+
+    // D3: the broken 1-10000.000 row gets $0 — granular GC rows carry the dollars
+    expect(byCode.get("1-10000.000")).toBeCloseTo(0, 2);
+
+    // GC criteria without an app input line export $0 (findings §6)
+    expect(byCode.get("1-10130.000")).toBeCloseTo(0, 2); // Design - Architecture
+    expect(byCode.get("2-29415.000")).toBeCloseTo(0, 2); // Crane Rental
+
+    // Full reconciliation: Σ all 217 BLI values = Σ line items + GC + Site Ops
+    let bliTotal = 0;
+    for (const val of byCode.values()) {
+      expect(typeof val).toBe("number"); // every row computed — no formulas left
+      bliTotal += val as number;
+    }
+    expect(bliTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
+
+    // No live SUMIF survives anywhere in the BLI sheet XML
+    const outputZip = await JSZip.loadAsync(arrayBuffer);
+    const bliSheetXml = await outputZip.file(BLI_SHEET_FILE)!.async("string");
+    expect(bliSheetXml).not.toContain("SUMIF(");
+    expect(bliSheetXml).not.toContain("#REF!");
+  }, 30000);
+
+  it("Procore budget CSV carries GC + Site Ops dollars under their BLI codes and cost types", () => {
+    const csv = generateProcoreBudget(step4Rows, mockProject, gcResult(), siteOpsResult());
+    const lines = csv.split("\r\n").slice(1); // drop header
+    const byCodeType = new Map<string, number>();
+    for (const line of lines) {
+      const cols = line.split(",");
+      const code = cols[0].replace(/^"|"$/g, "");
+      const costType = cols[1]?.replace(/^"|"$/g, "");
+      const total = parseFloat(cols[cols.length - 1].replace(/^"|"$/g, ""));
+      byCodeType.set(`${code}::${costType}`, total);
+    }
+    // Staff lines export as Labor ("L"), template BLI col B
+    expect(byCodeType.get("1-10420.000::L")).toBeCloseTo(190520, 2);
+    // D2: payroll + hired cleaning grouped on one code as Material
+    expect(byCodeType.get("2-29010.000::M")).toBeCloseTo(10100, 2);
+    // Zero-dollar GC lines emit no CSV row (no budget noise)
+    expect([...byCodeType.keys()].some((k) => k.startsWith("1-10310.000"))).toBe(false);
+  });
 });

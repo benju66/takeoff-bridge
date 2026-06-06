@@ -1,7 +1,7 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS } from "./constants";
-import { computeTakeoffSummary } from "./calculations";
+import { computeTakeoffSummary, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import JSZip from "jszip";
@@ -169,7 +169,9 @@ export function generateExcelPayload(
  */
 export function generateProcoreBudget(
   rows: ProcessedTakeoffRow[],
-  project?: Project | null
+  project: Project | null | undefined,
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
 ): string {
   const csvLines: string[] = [];
 
@@ -206,6 +208,26 @@ export function generateProcoreBudget(
 
     groupings[groupKey].descriptions.add(row.description);
     groupings[groupKey].totalCost += calculatedTotal;
+  }
+
+  // GC + Site Ops computed lines join the budget under their user-confirmed
+  // BLI codes (gc-siteops Phase 3 — values from calculations.ts, mapping from
+  // constants.ts). Zero-dollar lines are skipped: no budget noise for inputs
+  // the estimator left empty.
+  for (const line of collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult)) {
+    const costCode = line.procoreCode.trim();
+    if (!costCode || Math.abs(line.total) <= RECONCILIATION_TOLERANCE) continue;
+    const groupKey = `${costCode}::${line.costType}`;
+    if (!groupings[groupKey]) {
+      groupings[groupKey] = {
+        costCode,
+        costType: line.costType,
+        descriptions: new Set<string>(),
+        totalCost: 0,
+      };
+    }
+    groupings[groupKey].descriptions.add(line.desc);
+    groupings[groupKey].totalCost += line.total;
   }
 
   // Serialize grouped lines
@@ -299,6 +321,52 @@ export function rollupByProcoreCode(rows: ProcessedTakeoffRow[]): Record<string,
   return rollup;
 }
 
+/**
+ * One flattened GC / Site Ops computed line (gc-siteops Phase 3).
+ * `code` is the internal STEP 2/3 criterion code; `procoreCode` is the
+ * user-confirmed granular Budget Line Items code carried on the line by the
+ * calculation layer (single source: constants.ts — Phase 1 findings §4 + the
+ * D2 orphan-line sign-off). GC/Site Ops lines are app-defined inputs, not
+ * takeoff rows, so they do not pass through resolveProcoreCode/cost_code_map
+ * (which only covers STEP 4 itemIds).
+ */
+export interface GcSiteOpsLine {
+  code: string;
+  procoreCode: string;
+  costType: string;
+  desc: string;
+  total: number;
+}
+
+/** Flattens both calc results into one line list for rollup/gating/CSV. */
+export function collectGcSiteOpsLines(
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
+): GcSiteOpsLine[] {
+  return [
+    ...gcCalcResult.staffLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.role, total: l.total })),
+    ...gcCalcResult.operationalLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
+    ...gcCalcResult.equipmentLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
+    ...siteOpsCalcResult.dynamicLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
+    ...siteOpsCalcResult.manualLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
+  ];
+}
+
+/**
+ * Sums GC/Site Ops lines by granular BLI code. Accumulates (never overwrites):
+ * multiple internal lines may share one BLI row — e.g. payroll + hired
+ * progress cleaning both land on 2-29010.000 per the D2 sign-off.
+ */
+export function rollupGcSiteOps(lines: GcSiteOpsLine[]): Record<string, number> {
+  const rollup: Record<string, number> = {};
+  for (const line of lines) {
+    const code = line.procoreCode.trim();
+    if (!code) continue;
+    rollup[code] = (rollup[code] || 0) + line.total;
+  }
+  return rollup;
+}
+
 /** A row whose dollars cannot be placed on any Procore Budget Line Items code. */
 export interface ExportBlocker {
   rowId: string;
@@ -319,11 +387,17 @@ export interface ExportReadiness {
  * Export gates — run BEFORE any download:
  * 1. Completeness: every row carrying dollars must have a granular procoreCode.
  *    Zero-dollar unmapped rows do not block (no dollars to lose).
- * 2. Reconciliation: Σ line items must equal Σ Procore rollup within $0.01.
+ * 2. Reconciliation: Σ line items + Σ GC lines + Σ Site Ops lines must equal
+ *    Σ Procore rollup within $0.01 (gc-siteops Phase 3, §7 Option A — the gate
+ *    represents the full estimate, not just STEP 4).
  * Never auto-assigns a mapping — blockers route to the interactive override UI
  * (AGENTS.md: No AI Autonomy Over Financials).
  */
-export function validateExportReadiness(rows: ProcessedTakeoffRow[]): ExportReadiness {
+export function validateExportReadiness(
+  rows: ProcessedTakeoffRow[],
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
+): ExportReadiness {
   const blockers: ExportBlocker[] = [];
   let lineItemTotal = 0;
   for (const row of rows) {
@@ -338,7 +412,20 @@ export function validateExportReadiness(rows: ProcessedTakeoffRow[]): ExportRead
       });
     }
   }
-  const rollupTotal = Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0);
+  // GC + Site Ops computed lines join the gate. Their mapping is static
+  // (constants.ts), so an unmapped line with dollars is a programming error,
+  // not something the override modal can fix (it assigns codes to takeoff
+  // rows only) — so it is NOT pushed as a blocker. Its dollars land in
+  // lineItemTotal but not rollupTotal, which fails reconciliation below and
+  // blocks the export with a delta; generateExcelWorkbook additionally throws
+  // naming the offending line.
+  const gcSiteOpsLines = collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult);
+  for (const line of gcSiteOpsLines) {
+    lineItemTotal += line.total;
+  }
+  const rollupTotal =
+    Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0) +
+    Object.values(rollupGcSiteOps(gcSiteOpsLines)).reduce((s, v) => s + v, 0);
   const delta = lineItemTotal - rollupTotal;
   const reconciliationOk = Math.abs(delta) <= RECONCILIATION_TOLERANCE;
   return {
@@ -787,7 +874,11 @@ export async function generateExcelWorkbook(
   projectMetadata: Project | null | undefined,
   columnDefs: ColumnDefinition[],
   layoutConfig: TemplateLayoutConfig,
-  templateBuffer: ArrayBuffer
+  templateBuffer: ArrayBuffer,
+  // Required (gc-siteops Phase 3): an export path that omitted these would
+  // silently re-create the $0 GC/Site Ops bug this phase closes.
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
 ): Promise<Blob> {
   // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
 
@@ -1388,15 +1479,31 @@ export async function generateExcelWorkbook(
     }
   }
 
-  // 3d-2: Budget Line Items — deterministic computed rollup (§7, decided: computed values).
-  // Column H gets a computed VALUE on every row whose formula sources STEP 4
-  // (the app owns STEP 4 data) and on the template's broken #REF! row
-  // (1-10000.000). Live SUMIFs sourcing STEP 2/3 stay intact — estimators fill
-  // those sheets in Excel after export. Mapped codes absent from the sheet
-  // (e.g. 2-20000.000) are appended after validation against the
-  // "Importer Data Fields" sheet. Values come exclusively from
+  // 3d-2: Budget Line Items — deterministic computed rollup for ALL 217 rows
+  // (gc-siteops Phase 3; supersedes the Phase 2 "preserve STEP 2/3 SUMIFs"
+  // decision). Column H gets a computed VALUE on every data row:
+  //  - STEP 4-sourced rows (and the broken #REF! row 1-10000.000): from
+  //    rollupByProcoreCode — unchanged. The broken row gets $0 in the normal
+  //    flow per the D3 sign-off (the 34 granular GC rows carry the dollars).
+  //  - STEP 2/3-sourced rows (34 GC + 38 Site Ops live SUMIFs): from the
+  //    GC/Site Ops rollup — $0 where the app has no input line yet. No live
+  //    SUMIF survives in the exported file, so a wrong legacy formula can
+  //    never produce a wrong rollup (§0.D rule 1).
+  // Rows are identified by their own Procore code (col A), never by the SUMIF
+  // criterion (§0.D rule 2). Mapped codes absent from the sheet (e.g.
+  // 2-20000.000) are appended after validation against the "Importer Data
+  // Fields" sheet. Values come exclusively from calculations.ts results and
   // rollupByProcoreCode (matchedQty * unitPrice) — no invented financials.
   const procoreRollup = rollupByProcoreCode(rows);
+  const gcSiteOpsLines = collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult);
+  for (const line of gcSiteOpsLines) {
+    if (!line.procoreCode.trim() && Math.abs(line.total) > RECONCILIATION_TOLERANCE) {
+      throw new Error(
+        `GC/Site Ops line "${line.code}" (${line.desc}) carries $${line.total.toFixed(2)} but has no Budget Line Items mapping — fix its constants.ts entry.`
+      );
+    }
+  }
+  const gcSiteOpsRollup = rollupGcSiteOps(gcSiteOpsLines);
   let bliSheetFile: string | null = null;
   try {
     bliSheetFile = resolveSheetFile(wbXml, relsXml, sheetNames.budgetLineItems);
@@ -1434,6 +1541,7 @@ export async function generateExcelWorkbook(
       const bliChildren: ParsedElement[] = parsedBli[0].sheetData || [];
 
       const seenCodes = new Set<string>();
+      const gcSiteOpsWritten = new Set<string>();
       let writtenTotal = 0;
       let lastDataRowEl: ParsedElement | null = null;
       let lastDataRowNum = 1;
@@ -1454,19 +1562,48 @@ export async function generateExcelWorkbook(
         const hCell = findCellInRow(rowEl, "H");
         if (!hCell) continue;
         const formula = getCellFormula(hCell);
-        const amount = procoreRollup[code] ?? 0;
+        const step4Amount = procoreRollup[code] ?? 0;
         if (formula !== null && (formula.includes("STEP 4 - ESTIMATE") || formula.includes("#REF!"))) {
           // App-owned rollup row (or the broken #REF! row): computed value
+          setCellValue(hCell, step4Amount);
+          writtenTotal += step4Amount;
+        } else if (formula !== null) {
+          // STEP 2/3-sourced row: write the app-computed GC/Site Ops value
+          // ($0 where no app input line exists yet — see Phase 1 findings §6).
+          if (Math.abs(step4Amount) > RECONCILIATION_TOLERANCE) {
+            // A STEP 4 line item is mapped onto a GC/Site Ops BLI code —
+            // writing either value would drop the other's dollars. Surface
+            // the conflict instead of guessing.
+            throw new Error(
+              `${sheetNames.budgetLineItems} row for "${code}" is GC/Site Ops-sourced, but STEP 4 line items total $${step4Amount.toFixed(2)} for it. Resolve the mapping before export.`
+            );
+          }
+          const amount = gcSiteOpsRollup[code] ?? 0;
           setCellValue(hCell, amount);
           writtenTotal += amount;
-        } else if (Math.abs(amount) > RECONCILIATION_TOLERANCE) {
-          // Live STEP 2/3 SUMIF row, but the app carries dollars for this code.
-          // Writing would clobber the estimator's live formula; skipping would
-          // silently drop dollars. Surface instead of guessing.
+          gcSiteOpsWritten.add(code);
+        } else if (
+          Math.abs(step4Amount) > RECONCILIATION_TOLERANCE ||
+          Math.abs(gcSiteOpsRollup[code] ?? 0) > RECONCILIATION_TOLERANCE
+        ) {
+          // Static (formula-less) row carrying app dollars — never expected;
+          // surface instead of silently dropping.
           throw new Error(
-            `${sheetNames.budgetLineItems} row for "${code}" is driven by a live STEP 2/3 formula, but app line items total $${amount.toFixed(2)} for it. Resolve the mapping before export.`
+            `${sheetNames.budgetLineItems} row for "${code}" is a static cell, but the app carries dollars for it. Resolve the mapping before export.`
           );
         }
+      }
+
+      // Every GC/Site Ops code with dollars must have landed on a STEP 2/3
+      // BLI row (all 34+38 exist in the template — Phase 1 verified). A miss
+      // means constants.ts drifted from the template; fail loudly.
+      const unplacedGcCodes = Object.keys(gcSiteOpsRollup)
+        .filter((code) => !gcSiteOpsWritten.has(code) && Math.abs(gcSiteOpsRollup[code]) > RECONCILIATION_TOLERANCE)
+        .sort();
+      if (unplacedGcCodes.length > 0) {
+        throw new Error(
+          `GC/Site Ops dollars have no ${sheetNames.budgetLineItems} row to land on: ${unplacedGcCodes.join(", ")}. constants.ts mapping no longer matches the template.`
+        );
       }
 
       // Append rows for mapped codes absent from the sheet (e.g. 2-20000.000)
@@ -1496,9 +1633,11 @@ export async function generateExcelWorkbook(
         writtenTotal += procoreRollup[code];
       }
 
-      // Internal tie-out: dollars written/appended must equal the rollup.
-      // (Live STEP 2/3 rows cannot hold rollup dollars — enforced above.)
-      const rollupTotal = Object.values(procoreRollup).reduce((s, v) => s + v, 0);
+      // Internal tie-out: dollars written/appended must equal the full
+      // rollup — STEP 4 line items + GC + Site Ops (gc-siteops Phase 3).
+      const rollupTotal =
+        Object.values(procoreRollup).reduce((s, v) => s + v, 0) +
+        Object.values(gcSiteOpsRollup).reduce((s, v) => s + v, 0);
       if (Math.abs(writtenTotal - rollupTotal) > RECONCILIATION_TOLERANCE) {
         throw new Error(
           `Budget Line Items reconciliation failed: wrote $${writtenTotal.toFixed(2)} but rollup totals $${rollupTotal.toFixed(2)}.`

@@ -67,8 +67,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     projectEstimate?.siteOpsRates,
   );
 
-  // Step 4: Takeoff Workbook
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project);
+  // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
+  // export handlers — gc-siteops Phase 3)
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,

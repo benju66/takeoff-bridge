@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
+import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import {
   generateExcelPayload,
   generateProcoreBudget,
@@ -41,6 +42,9 @@ export function useExportHandlers(
   columnDefs: ColumnDefinition[],
   project: Project | null,
   projectId: string,
+  // gc-siteops Phase 3: GC + Site Ops computed results join every export path
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult,
 ): UseExportHandlersReturn {
   // Export state
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -59,7 +63,7 @@ export function useExportHandlers(
    * exportError. Remembers which export to retry after overrides are applied.
    */
   const runExportGate = (effectiveRows: ProcessedTakeoffRow[], kind: PendingExportKind): boolean => {
-    const readiness = validateExportReadiness(effectiveRows);
+    const readiness = validateExportReadiness(effectiveRows, gcCalcResult, siteOpsCalcResult);
     if (readiness.ok) {
       clearExportBlockers();
       return true;
@@ -96,7 +100,7 @@ export function useExportHandlers(
   const handleExportProcore = (overrideRows?: ProcessedTakeoffRow[]) => {
     const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
     if (!runExportGate(effectiveRows, "procore")) return;
-    const payload = generateProcoreBudget(effectiveRows, project);
+    const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
   };
 
@@ -120,7 +124,7 @@ export function useExportHandlers(
       }
 
       // 2. Generate Excel workbook using the relative shifting engine
-      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer);
+      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer, gcCalcResult, siteOpsCalcResult);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);

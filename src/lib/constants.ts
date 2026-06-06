@@ -70,11 +70,16 @@ export const DIVISION_LABELS: Record<string, string> = {
 // Division 01 — General Conditions Configurable Rate Table
 // ---------------------------------------------------------------------------
 
+/** Cost-type letters matching the Procore budget importer ("M"/"L"/"S"). */
+export type GcCostType = "M" | "L" | "S";
+
 export interface StaffRoleConfig {
-  key: string;          // Internal lookup key (e.g., "ex", "srPm")
-  code: string;         // Cost code (e.g., "01-0310")
-  label: string;        // Display name (e.g., "Project Executive")
-  defaultRate: number;  // Corporate default hourly rate
+  key: string;            // Internal lookup key (e.g., "ex", "srPm")
+  code: string;           // STEP 2 criterion code (e.g., "01-0310.001") — template-aligned (Phase 3)
+  procoreCode: string;    // Granular Procore BLI code — user-confirmed mapping (Phase 1 findings §4.1)
+  costType: GcCostType;   // Template Budget Line Items col B cost type
+  label: string;          // Display name (e.g., "Project Executive")
+  defaultRate: number;    // Corporate default hourly rate
 }
 
 /**
@@ -82,16 +87,20 @@ export interface StaffRoleConfig {
  * rates via project-level rate overrides in a future iteration.
  * The calculation layer accepts an optional rateOverrides map
  * keyed by StaffRoleConfig.key to support this.
+ *
+ * Codes carry the template's `.001` criterion suffix and each line's
+ * user-confirmed Budget Line Items code (gc-siteops Phase 1 findings §4.1) —
+ * the single source of truth for the GC → BLI export mapping.
  */
 export const STAFF_ROLE_DEFAULTS: StaffRoleConfig[] = [
-  { key: "ex",     code: "01-0310", label: "Project Executive",     defaultRate: 175 },
-  { key: "srPm",   code: "01-0320", label: "Sr Project Manager",    defaultRate: 135 },
-  { key: "pm",     code: "01-0330", label: "Project Manager",        defaultRate: 120 },
-  { key: "pe",     code: "01-0340", label: "Project Engineer",       defaultRate: 85 },
-  { key: "srSu",   code: "01-0410", label: "Sr Superintendent",      defaultRate: 125 },
-  { key: "su",     code: "01-0420", label: "Superintendent",          defaultRate: 110 },
-  { key: "asstSu", code: "01-0430", label: "Asst. Superintendent",   defaultRate: 85 },
-  { key: "pa",     code: "01-0510", label: "Project Assistant",       defaultRate: 55 },
+  { key: "ex",     code: "01-0310.001", procoreCode: "1-10310.000", costType: "L", label: "Project Executive",     defaultRate: 175 },
+  { key: "srPm",   code: "01-0320.001", procoreCode: "1-10320.000", costType: "L", label: "Sr Project Manager",    defaultRate: 135 },
+  { key: "pm",     code: "01-0330.001", procoreCode: "1-10330.000", costType: "L", label: "Project Manager",        defaultRate: 120 },
+  { key: "pe",     code: "01-0340.001", procoreCode: "1-10340.000", costType: "L", label: "Project Engineer",       defaultRate: 85 },
+  { key: "srSu",   code: "01-0410.001", procoreCode: "1-10410.000", costType: "L", label: "Sr Superintendent",      defaultRate: 125 },
+  { key: "su",     code: "01-0420.001", procoreCode: "1-10420.000", costType: "L", label: "Superintendent",          defaultRate: 110 },
+  { key: "asstSu", code: "01-0430.001", procoreCode: "1-10430.000", costType: "L", label: "Asst. Superintendent",   defaultRate: 85 },
+  { key: "pa",     code: "01-0510.001", procoreCode: "1-10510.000", costType: "L", label: "Project Assistant",       defaultRate: 55 },
 ];
 
 /** Standard working hours per calendar month */
@@ -99,7 +108,9 @@ export const HOURS_PER_MONTH = 173.2;
 
 /** Operational expense line items bound to superintendent utilization or fixed baselines */
 export interface OperationalExpenseConfig {
-  code: string;
+  code: string;           // STEP 2 criterion code (template-aligned, Phase 3)
+  procoreCode: string;    // Granular Procore BLI code (Phase 1 findings §4.1)
+  costType: GcCostType;
   description: string;
   unit: string;
   rate: number;
@@ -107,9 +118,29 @@ export interface OperationalExpenseConfig {
 }
 
 export const OPERATIONAL_EXPENSE_DEFAULTS: OperationalExpenseConfig[] = [
-  { code: "01-1000", description: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500, quantityDriver: "superintendent" },
-  { code: "01-1200", description: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, quantityDriver: "superintendent" },
-  { code: "01-5111", description: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, quantityDriver: "fixed" },
+  { code: "01-1000.001", procoreCode: "1-11000.000", costType: "M", description: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500, quantityDriver: "superintendent" },
+  { code: "01-1200.001", procoreCode: "1-11200.000", costType: "M", description: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, quantityDriver: "superintendent" },
+  { code: "01-5111.001", procoreCode: "1-15111.000", costType: "M", description: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, quantityDriver: "fixed" },
+];
+
+/** Fixed lump-sum equipment lines entered by the estimator on STEP 2 */
+export interface EquipmentExpenseConfig {
+  key: "dumpsters" | "toilets" | "electric"; // matches the equipmentOverrides field
+  code: string;           // STEP 2 criterion code (template-aligned, Phase 3)
+  procoreCode: string;    // Granular Procore BLI code (Phase 1 findings §4.1)
+  costType: GcCostType;
+  label: string;
+}
+
+/**
+ * Single source of truth for the 3 GC equipment lines (previously inlined in
+ * PersonnelPricingStep.tsx as EQ_DISPLAY) — added in gc-siteops Phase 3 so the
+ * export mapping and the UI cannot drift.
+ */
+export const EQUIPMENT_DEFAULTS: EquipmentExpenseConfig[] = [
+  { key: "dumpsters", code: "01-5130.001", procoreCode: "1-15130.000", costType: "M", label: "Dumpsters (Lump Sum)" },
+  { key: "toilets",   code: "01-5140.001", procoreCode: "1-15140.000", costType: "M", label: "Temp Toilets (Lump Sum)" },
+  { key: "electric",  code: "01-5170.001", procoreCode: "1-15170.000", costType: "M", label: "Temp Electric (Lump Sum)" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -191,6 +222,49 @@ export const MATERIAL_HOIST_RATE_PER_MONTH = 6500;
 export const KNOX_BOX_UNIT_COST = 650;
 export const PAYROLL_CLEANING_RATE_PER_EA = 74;
 export const HIRED_CLEANING_RATE_PER_EA = 54;
+
+/** Site Ops line driven by a project parameter (duration / square footage) */
+export interface SiteOpsDynamicConfig {
+  code: string;           // STEP 3 criterion code (template-aligned, Phase 3)
+  procoreCode: string;    // Granular Procore BLI code (Phase 1 findings §4.2)
+  costType: GcCostType;
+  label: string;
+  unit: string;
+  rate: number;
+  quantityDriver: "duration" | "squareFootage";
+}
+
+/** Site Ops line with an estimator-entered quantity */
+export interface SiteOpsManualConfig {
+  key: "knox" | "payrollCleaning" | "hiredCleaning" | "soilBorings"; // matches the quantities field
+  code: string;
+  procoreCode: string;
+  costType: GcCostType;
+  label: string;
+  unit: string;
+  rate: number | null;    // null = rate entered by the estimator (soil borings)
+}
+
+/**
+ * Single source of truth for the Site Ops lines (previously inlined in
+ * InfrastructureStep.tsx and duplicated with stale codes in calculations.ts).
+ * Codes carry the template's STEP 3 criterion suffix; each line's BLI code is
+ * the user-confirmed mapping (gc-siteops Phase 1 findings §4.2 + D2 sign-off:
+ * "Progress Cleaning - Hired" 02-9010.002 has no BLI row of its own and maps
+ * to its sibling's code 2-29010.000).
+ */
+export const SITE_OPS_DYNAMIC_DEFAULTS: SiteOpsDynamicConfig[] = [
+  { code: "02-9015.001", procoreCode: "2-29015.000", costType: "M", label: "Safety", unit: "mo", rate: SAFETY_RATE_PER_MONTH, quantityDriver: "duration" },
+  { code: "02-9020.001", procoreCode: "2-29020.000", costType: "M", label: "Temp Protection", unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, quantityDriver: "squareFootage" },
+  { code: "02-9405.001", procoreCode: "2-29405.000", costType: "M", label: "Material Hoist / Trash Chute", unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, quantityDriver: "duration" },
+];
+
+export const SITE_OPS_MANUAL_DEFAULTS: SiteOpsManualConfig[] = [
+  { key: "knox",            code: "02-9307.001", procoreCode: "2-29307.000", costType: "M", label: "Knox Box", unit: "ea", rate: KNOX_BOX_UNIT_COST },
+  { key: "payrollCleaning", code: "02-9010.001", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Payroll", unit: "hr", rate: PAYROLL_CLEANING_RATE_PER_EA },
+  { key: "hiredCleaning",   code: "02-9010.002", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Hired", unit: "hr", rate: HIRED_CLEANING_RATE_PER_EA },
+  { key: "soilBorings",     code: "02-3200.001", procoreCode: "2-23200.000", costType: "M", label: "Soil Borings", unit: "ls", rate: null },
+];
 
 // ---------------------------------------------------------------------------
 // Search & Filter Defaults

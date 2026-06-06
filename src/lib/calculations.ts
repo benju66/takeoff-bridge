@@ -8,15 +8,13 @@ import { getDivisionCode } from "./division";
 import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
+  EQUIPMENT_DEFAULTS,
+  SITE_OPS_DYNAMIC_DEFAULTS,
+  SITE_OPS_MANUAL_DEFAULTS,
   HOURS_PER_MONTH,
   DIVISION_NAMES,
   COMMODITY_THRESHOLD,
-  SAFETY_RATE_PER_MONTH,
-  TEMP_PROTECTION_RATE_PER_SF,
-  MATERIAL_HOIST_RATE_PER_MONTH,
-  KNOX_BOX_UNIT_COST,
-  PAYROLL_CLEANING_RATE_PER_EA,
-  HIRED_CLEANING_RATE_PER_EA,
+  GcCostType,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -57,8 +55,10 @@ export function getTerminalProgressBar(percentage: number): string {
 // ---------------------------------------------------------------------------
 
 export interface PersonnelCalcResult {
-  staffLines: { code: string; role: string; rate: number; qty: number; total: number }[];
-  operationalLines: { code: string; desc: string; unit: string; rate: number; qty: number; total: number }[];
+  staffLines: { code: string; procoreCode: string; costType: GcCostType; role: string; rate: number; qty: number; total: number }[];
+  operationalLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
+  /** The 3 estimator-entered lump-sum equipment lines (gc-siteops Phase 3) */
+  equipmentLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; total: number }[];
   equipmentTotal: number;
   grandTotal: number;
 }
@@ -82,7 +82,7 @@ export function computePersonnelCosts(
     const effectiveRate = rateOverrides?.[role.key] ?? role.defaultRate;
     const qty = durationMonths * HOURS_PER_MONTH * ((utilizations[role.key] || 0) / 100);
     const total = qty * effectiveRate;
-    return { code: role.code, role: role.label, rate: effectiveRate, qty, total };
+    return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total };
   });
 
   // Operational expense lines
@@ -95,18 +95,23 @@ export function computePersonnelCosts(
       qty = durationMonths;
     }
     const total = qty * expense.rate;
-    return { code: expense.code, desc: expense.description, unit: expense.unit, rate: expense.rate, qty, total };
+    return { code: expense.code, procoreCode: expense.procoreCode, costType: expense.costType, desc: expense.description, unit: expense.unit, rate: expense.rate, qty, total };
   });
 
-  // Equipment total (user-entered fixed values)
-  const equipmentTotal = equipmentOverrides.dumpsters + equipmentOverrides.toilets + equipmentOverrides.electric;
+  // Equipment lines (user-entered fixed values) — carried as mapped lines so
+  // the export can place each on its own Budget Line Items row (Phase 3)
+  const equipmentLines = EQUIPMENT_DEFAULTS.map((eq) => ({
+    code: eq.code, procoreCode: eq.procoreCode, costType: eq.costType, desc: eq.label,
+    total: equipmentOverrides[eq.key],
+  }));
+  const equipmentTotal = equipmentLines.reduce((sum, l) => sum + l.total, 0);
 
   // Grand total
   const staffTotal = staffLines.reduce((sum, l) => sum + l.total, 0);
   const opsTotal = operationalLines.reduce((sum, l) => sum + l.total, 0);
   const grandTotal = staffTotal + opsTotal + equipmentTotal;
 
-  return { staffLines, operationalLines, equipmentTotal, grandTotal };
+  return { staffLines, operationalLines, equipmentLines, equipmentTotal, grandTotal };
 }
 
 // ---------------------------------------------------------------------------
@@ -114,13 +119,15 @@ export function computePersonnelCosts(
 // ---------------------------------------------------------------------------
 
 export interface SiteOpsCalcResult {
-  dynamicLines: { code: string; desc: string; unit: string; rate: number; qty: number; total: number }[];
-  manualLines: { code: string; desc: string; unit: string; rate: number; qty: number; total: number }[];
+  dynamicLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
+  manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   grandTotal: number;
 }
 
 /**
  * Computes Division 02 Site Operations costs.
+ * Lines derive from SITE_OPS_*_DEFAULTS (constants.ts) — the template-aligned
+ * single source of truth (gc-siteops Phase 3 replaced the stale inline codes).
  */
 export function computeSiteOperations(
   durationMonths: number,
@@ -128,18 +135,16 @@ export function computeSiteOperations(
   quantities: { knox: number; payrollCleaning: number; hiredCleaning: number; soilBorings: number },
   rates: { soilBorings: number }
 ): SiteOpsCalcResult {
-  const dynamicLines = [
-    { code: "01-3000", desc: "Safety", unit: "mo", rate: SAFETY_RATE_PER_MONTH, qty: durationMonths, total: durationMonths * SAFETY_RATE_PER_MONTH },
-    { code: "01-5000", desc: "Temporary Protection", unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, qty: squareFootage, total: squareFootage * TEMP_PROTECTION_RATE_PER_SF },
-    { code: "01-5400", desc: "Material Hoist", unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, qty: durationMonths, total: durationMonths * MATERIAL_HOIST_RATE_PER_MONTH },
-  ];
+  const dynamicLines = SITE_OPS_DYNAMIC_DEFAULTS.map((cfg) => {
+    const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate: cfg.rate, qty, total: qty * cfg.rate };
+  });
 
-  const manualLines = [
-    { code: "01-5200", desc: "Knox Boxes", unit: "ea", rate: KNOX_BOX_UNIT_COST, qty: quantities.knox, total: quantities.knox * KNOX_BOX_UNIT_COST },
-    { code: "01-5300", desc: "Payroll Cleaning", unit: "ea", rate: PAYROLL_CLEANING_RATE_PER_EA, qty: quantities.payrollCleaning, total: quantities.payrollCleaning * PAYROLL_CLEANING_RATE_PER_EA },
-    { code: "01-5310", desc: "Hired Cleaning", unit: "ea", rate: HIRED_CLEANING_RATE_PER_EA, qty: quantities.hiredCleaning, total: quantities.hiredCleaning * HIRED_CLEANING_RATE_PER_EA },
-    { code: "01-5600", desc: "Soil Borings", unit: "ea", rate: rates.soilBorings, qty: quantities.soilBorings, total: quantities.soilBorings * rates.soilBorings },
-  ];
+  const manualLines = SITE_OPS_MANUAL_DEFAULTS.map((cfg) => {
+    const rate = cfg.rate ?? rates.soilBorings; // null rate = estimator-entered (soil borings)
+    const qty = quantities[cfg.key];
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
+  });
 
   const dynamicTotal = dynamicLines.reduce((sum, l) => sum + l.total, 0);
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);

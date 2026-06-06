@@ -37,6 +37,7 @@ import {
 } from "@/lib/costCodeResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
+import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -126,7 +127,10 @@ const multiSelect = "multiSelect" as "includesString";
 export function useTakeoffWorkbook(
   projectId: string,
   isLoaded: boolean,
-  project: Project | null
+  project: Project | null,
+  // gc-siteops Phase 3: GC + Site Ops calc results, threaded to the export handlers
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -237,7 +241,7 @@ export function useTakeoffWorkbook(
     isExportingExcel, exportError, setExportError,
     exportBlockers, pendingExportKind, clearExportBlockers,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
-  } = useExportHandlers(rows, columnDefs, project, projectId);
+  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult);
 
   // ---------------------------------------------------------------------------
   // Export override — assign granular Procore codes to blocker rows.

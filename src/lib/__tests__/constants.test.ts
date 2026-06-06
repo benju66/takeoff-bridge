@@ -4,6 +4,9 @@ import {
   HOURS_PER_MONTH,
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
+  EQUIPMENT_DEFAULTS,
+  SITE_OPS_DYNAMIC_DEFAULTS,
+  SITE_OPS_MANUAL_DEFAULTS,
   DIVISION_NAMES,
   DIVISION_LABELS,
   SAFETY_RATE_PER_MONTH,
@@ -13,6 +16,7 @@ import {
   PAYROLL_CLEANING_RATE_PER_EA,
   HIRED_CLEANING_RATE_PER_EA,
 } from "../constants";
+import PROCORE_VALID_CODES from "../procore-valid-codes.json";
 
 describe("Estimate Modifiers", () => {
   it("has exactly 7 entries", () => {
@@ -70,10 +74,39 @@ describe("Staff Role Defaults", () => {
     }
   });
 
-  it("all cost codes follow 01-XXXX format", () => {
+  it("all cost codes follow the template's 01-XXXX.XXX criterion format (gc-siteops Phase 3)", () => {
     for (const role of STAFF_ROLE_DEFAULTS) {
-      expect(role.code).toMatch(/^01-\d{4}$/);
+      expect(role.code).toMatch(/^01-\d{4}\.\d{3}$/);
     }
+  });
+});
+
+describe("GC / Site Ops → Budget Line Items mapping (gc-siteops Phase 3)", () => {
+  const allLines = [
+    ...STAFF_ROLE_DEFAULTS,
+    ...OPERATIONAL_EXPENSE_DEFAULTS,
+    ...EQUIPMENT_DEFAULTS,
+    ...SITE_OPS_DYNAMIC_DEFAULTS,
+    ...SITE_OPS_MANUAL_DEFAULTS,
+  ];
+
+  it("every line carries a BLI code that exists in Procore's valid-code list (§0.D rule 4)", () => {
+    const valid = new Set((PROCORE_VALID_CODES as { code: string }[]).map((c) => c.code));
+    for (const line of allLines) {
+      expect(line.procoreCode, `procoreCode for ${line.code}`).toMatch(/^\d+-\d+\.\d{3}$/);
+      expect(valid.has(line.procoreCode), `${line.code} → ${line.procoreCode} not in procore-valid-codes.json`).toBe(true);
+    }
+  });
+
+  it("internal criterion codes are unique across all GC/Site Ops lines", () => {
+    const codes = allLines.map((l) => l.code);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("D2 sign-off encoded: hired cleaning maps to its sibling's BLI code", () => {
+    const hired = SITE_OPS_MANUAL_DEFAULTS.find((l) => l.code === "02-9010.002");
+    expect(hired).toBeDefined();
+    expect(hired!.procoreCode).toBe("2-29010.000");
   });
 });
 

@@ -454,6 +454,21 @@ phase must know. Empty until Phase 1 runs.)
   comment block reflects the new state via `supabase_seed_cost_code_map.sql`); D2 orphan-line
   mappings (findings §9) remain Phase 3 inputs, not yet encoded anywhere.
 
+- **Phase 3 (2026-06-06):** GC + Site Ops export complete — all 217 BLI rows now carry computed
+  values; no live SUMIF survives (verified by test + artifact inspection, 14/14 spot checks).
+  Mapping home decision: the 20 GC/Site Ops line configs live in `constants.ts` (template-aligned
+  `.001` criteria + user-confirmed BLI codes incl. D2; validated against `procore-valid-codes.json`
+  by a new constants test) — NOT in `cost_code_map`, which stays STEP 4-only; `resolveProcoreCode`
+  untouched. §7 Option A implemented (gate = Σ line items + GC + Site Ops); Procore CSV also carries
+  GC/Site Ops rows (staff as "L", rest "M", per template BLI col B). Deviation from plan §5/§6:
+  no separate `gcEquipment` param — equipment lines fold into `PersonnelCalcResult.equipmentLines`.
+  Threading runs page.tsx → `useTakeoffWorkbook` → `useExportHandlers` (plan table missed the
+  middle hop). **Phase 4 must know:** STEP 2/3 sheets still export blank (§8 deferred); per-project
+  staff rates deferred (hook accepts `rateOverrides`); `computeSiteOperations` units for cleaning
+  lines changed "ea"→"hr" (display-only); D3 note — the broken `1-10000.000` row gets the STEP 4
+  rollup value (normally $0), so estimator-entered dollars on the STEP 4 GC grid rows are preserved,
+  not forced to zero.
+
 ---
 
 ## 14. Per-Phase Kickoff Prompts

@@ -1,7 +1,7 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { PersonnelCalcResult } from "@/lib/calculations";
-import { STAFF_ROLE_DEFAULTS, OPERATIONAL_EXPENSE_DEFAULTS } from "@/lib/constants";
+import { STAFF_ROLE_DEFAULTS, OPERATIONAL_EXPENSE_DEFAULTS, EQUIPMENT_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // PersonnelPricingStep — Step 2 Panel
@@ -43,11 +43,11 @@ const OPS_DISPLAY = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => ({
   rate: expense.rate,
 }));
 
-const EQ_DISPLAY: Array<{ code: string; desc: string; field: "dumpsters" | "toilets" | "electric" }> = [
-  { code: "01-5130", desc: "Dumpsters (Lump Sum)", field: "dumpsters" },
-  { code: "01-5140", desc: "Temp Toilets (Lump Sum)", field: "toilets" },
-  { code: "01-5170", desc: "Temp Electric (Lump Sum)", field: "electric" },
-];
+const EQ_DISPLAY = EQUIPMENT_DEFAULTS.map((eq) => ({
+  code: eq.code,
+  desc: eq.label,
+  field: eq.key,
+}));
 
 const fmt = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });

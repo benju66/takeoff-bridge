@@ -387,10 +387,13 @@ describe('computePersonnelCosts', () => {
       { ex: 100 },
       { dumpsters: 0, toilets: 0, electric: 0 }
     );
-    const exLine = result.staffLines.find((l) => l.code === '01-0310');
+    const exLine = result.staffLines.find((l) => l.code === '01-0310.001');
     expect(exLine).toBeDefined();
     expect(exLine!.qty).toBeCloseTo(12 * 173.2);
     expect(exLine!.total).toBeCloseTo(12 * 173.2 * 175);
+    // Template-aligned BLI mapping carried on the line (gc-siteops Phase 3)
+    expect(exLine!.procoreCode).toBe('1-10310.000');
+    expect(exLine!.costType).toBe('L');
   });
 
   it('includes equipment overrides in grand total', () => {
@@ -419,18 +422,32 @@ describe('computeSiteOperations', () => {
     );
 
     // Dynamic: Safety = 12 * 500, Temp Protection = 10000 * 0.25, Material Hoist = 12 * 6500
-    const safety = result.dynamicLines.find((l) => l.desc === 'Safety');
+    // (descs/codes are template-aligned via SITE_OPS_*_DEFAULTS — gc-siteops Phase 3)
+    const safety = result.dynamicLines.find((l) => l.code === '02-9015.001');
+    expect(safety!.desc).toBe('Safety');
     expect(safety!.total).toBe(12 * 500);
+    expect(safety!.procoreCode).toBe('2-29015.000');
 
-    const tempProt = result.dynamicLines.find((l) => l.desc === 'Temporary Protection');
+    const tempProt = result.dynamicLines.find((l) => l.code === '02-9020.001');
+    expect(tempProt!.desc).toBe('Temp Protection');
     expect(tempProt!.total).toBe(10000 * 0.25);
 
-    const hoist = result.dynamicLines.find((l) => l.desc === 'Material Hoist');
+    const hoist = result.dynamicLines.find((l) => l.code === '02-9405.001');
+    expect(hoist!.desc).toBe('Material Hoist / Trash Chute');
     expect(hoist!.total).toBe(12 * 6500);
 
     // Manual: Soil Borings = 3 * 1500
-    const borings = result.manualLines.find((l) => l.desc === 'Soil Borings');
+    const borings = result.manualLines.find((l) => l.code === '02-3200.001');
+    expect(borings!.desc).toBe('Soil Borings');
     expect(borings!.total).toBe(3 * 1500);
+
+    // D2 sign-off: payroll + hired progress cleaning share one BLI code
+    const payroll = result.manualLines.find((l) => l.code === '02-9010.001');
+    const hired = result.manualLines.find((l) => l.code === '02-9010.002');
+    expect(payroll!.procoreCode).toBe('2-29010.000');
+    expect(hired!.procoreCode).toBe('2-29010.000');
+    expect(payroll!.total).toBe(10 * 74);
+    expect(hired!.total).toBe(5 * 54);
   });
 
   it('returns zero totals for zero quantities', () => {
