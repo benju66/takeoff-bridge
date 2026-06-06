@@ -440,7 +440,7 @@ phase must know. Empty until Phase 1 runs.)
   findings §7. **D1–D3 ALL SIGNED OFF by user 2026-06-05** (recorded in findings §9) — Phase 2 may
   start with no open questions.
 
-- **Phase 2 (2026-06-06):** B-2 re-sync complete. `sync-codes` + `generate-seed` rerun against the
+- **Phase 2 (2026-06-06, commit `5597048`):** B-2 re-sync complete. `sync-codes` + `generate-seed` rerun against the
   finalized template (0 unresolved, 0 invalid, valid-codes steady at 224); catalog verified against
   all Phase 1 expected facts (`scripts/verify-phase2-resync.js`). Migration run on Supabase branch
   first, then production main with user approval; full tie-out passed — all 221 `cost_code_map` rows
