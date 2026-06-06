@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T18:59:00.023Z",
+  "generatedAt": "2026-06-06T03:38:50.730Z",
   "templatePath": "templates/Company_Estimate_Template.xlsx",
   "summary": {
     "catalogCodes": 221,
@@ -7,7 +7,7 @@
     "siblingInferred": 67,
     "userConfirmed": 7,
     "handledBySteps2And3": 10,
-    "normalizedTypos": 2,
+    "normalizedTypos": 1,
     "unresolved": 0,
     "invalidProcoreCodes": 0
   },
@@ -289,34 +289,34 @@
       "viaSibling": "32-1216.001"
     },
     {
-      "internalCode": "32-1313.001",
+      "internalCode": "32-1613.002",
       "description": "Surmountable Curb",
-      "procoreCode": "32-321313.000",
-      "viaSibling": "32-1313.000"
+      "procoreCode": "32-321613.000",
+      "viaSibling": "32-1613.001"
     },
     {
-      "internalCode": "32-1313.002",
+      "internalCode": "32-1613.003",
       "description": "B612 Curb",
-      "procoreCode": "32-321313.000",
-      "viaSibling": "32-1313.000"
+      "procoreCode": "32-321613.000",
+      "viaSibling": "32-1613.001"
     },
     {
-      "internalCode": "32-1313.003",
+      "internalCode": "32-1613.004",
       "description": "Cross Gutter",
-      "procoreCode": "32-321313.000",
-      "viaSibling": "32-1313.000"
+      "procoreCode": "32-321613.000",
+      "viaSibling": "32-1613.001"
     },
     {
-      "internalCode": "32-1313.004",
+      "internalCode": "32-1613.005",
       "description": "Light Duty Concrete",
-      "procoreCode": "32-321313.000",
-      "viaSibling": "32-1313.000"
+      "procoreCode": "32-321613.000",
+      "viaSibling": "32-1613.001"
     },
     {
-      "internalCode": "32-1313.005",
+      "internalCode": "32-1613.006",
       "description": "Heavy Duty Concrete",
-      "procoreCode": "32-321313.000",
-      "viaSibling": "32-1313.000"
+      "procoreCode": "32-321613.000",
+      "viaSibling": "32-1613.001"
     },
     {
       "internalCode": "33-0000.002",
@@ -515,11 +515,6 @@
     }
   ],
   "normalizedTypos": [
-    {
-      "row": 47,
-      "from": "03-4500.0002",
-      "to": "03-4500.001"
-    },
     {
       "row": 121,
       "from": "07-6100.01",

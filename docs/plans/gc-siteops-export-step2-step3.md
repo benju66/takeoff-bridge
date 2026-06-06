@@ -440,6 +440,20 @@ phase must know. Empty until Phase 1 runs.)
   findings §7. **D1–D3 ALL SIGNED OFF by user 2026-06-05** (recorded in findings §9) — Phase 2 may
   start with no open questions.
 
+- **Phase 2 (2026-06-06):** B-2 re-sync complete. `sync-codes` + `generate-seed` rerun against the
+  finalized template (0 unresolved, 0 invalid, valid-codes steady at 224); catalog verified against
+  all Phase 1 expected facts (`scripts/verify-phase2-resync.js`). Migration run on Supabase branch
+  first, then production main with user approval; full tie-out passed — all 221 `cost_code_map` rows
+  match the regenerated seed (`scripts/phase2-db-tieout.js`). **Corrections vs plan:** (a) net count
+  is 221→221, not 221→222 — the old catalog had a `32-1313.000` "Concrete Paving" entry the plan
+  missed; it was DELETEd too; (b) `cost_code_map` has no description column, so the "update .001
+  description" step became `source: 'sibling'→'template'`. Affected `estimate_line_items`: 5 rows,
+  all "Test Project 001", all $0/qty-0 template shells — surfaced to user, left untouched (the
+  `32-1313.001` row there still reads "Surmountable Curb"). **Phase 3 must know:** DB + catalog now
+  match the template; no schema change (so `supabase_schema.sql` untouched, but its embedded seed
+  comment block reflects the new state via `supabase_seed_cost_code_map.sql`); D2 orphan-line
+  mappings (findings §9) remain Phase 3 inputs, not yet encoded anywhere.
+
 ---
 
 ## 14. Per-Phase Kickoff Prompts
