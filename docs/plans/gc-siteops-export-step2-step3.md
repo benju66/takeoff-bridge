@@ -457,15 +457,71 @@ Copy the block for the phase you are starting into a fresh window.
 > with a discrepancy list for my sign-off. My mapping is authoritative; the SUMIFs are advisory (§0.D).
 > Commit the findings doc only, then append a handoff note to §13. Model: Claude Opus (latest).
 
-### → Phase 2 (catalog/DB re-sync — after P1 sign-off)
+### → Phase 2 (catalog/DB re-sync — P1 signed off 2026-06-05, ready to run)
 
-> Implement **Phase 2 only** of `docs/plans/gc-siteops-export-step2-step3.md` (§0.B B-2, §13).
-> Read the plan and the Phase 1 findings/handoff first. Re-sync the catalog + `cost_code_map` to the
-> corrected template via `npm run sync-codes` → `npm run generate-seed` → a migration (present the
-> DDL for my approval BEFORE running it; run on a Supabase branch first per AGENTS.md). Surface any
-> existing `estimate_line_items` on `32-1313.001–.005` for my review — no silent rewrite. Route all
-> procoreCode assignment through `resolveProcoreCode`. Get build + tests green, commit, append a
-> handoff note to §13. Invoke the supabase skill before touching DB code. Model: Claude Opus (latest).
+> *(Enriched 2026-06-05 with Phase 1 verified facts — supersedes the original generic block.)*
+
+```
+Implement PHASE 2 ONLY of the plan at:
+docs/plans/gc-siteops-export-step2-step3.md
+Read the whole plan first — especially §0.B (B-2 re-sync steps), §9 (Phase 3c
+baseline + resolveProcoreCode chokepoint), and §13 (Phase 2 scope). Then read
+the Phase 1 findings doc: docs/plans/2026-06-05-gc-siteops-phase1-findings.md
+— especially §7 (Phase 2 inputs) and §9 (my sign-off). This is a phased plan:
+do Phase 2 and nothing else, then stop.
+== CONTEXT ==
+Takeoff Bridge is a single-company estimating app. I'm the system architect
+(non-developer — explain things plainly, mark a (Recommended) option on every
+choice). Phase 1 (commits 461b6dc, e02350f, 4e3407b) forensically verified the
+finalized template (committed at 4eab1f1) AGREES with my confirmed mappings.
+All discrepancies (D1–D3) are ALREADY SIGNED OFF — findings doc §9. Do not
+re-ask them.
+== GOAL ==
+Re-sync estimate-catalog.json + the Supabase cost_code_map to the corrected
+template (the 32-1313 → 32-1613 curb/site-concrete reclassification). The
+catalog/DB still hold the OLD state: 32-1313.001–.005 = curb items →
+32-321313.000, and no 32-1613.002–.006.
+== EXPECTED OUTCOME (verified facts from Phase 1 — use as your check) ==
+- 32-1313.001 description becomes "Concrete Paving" (rollup unchanged:
+  32-321313.000, authoritative via BLI row 199)
+- 32-1313.002–.005 disappear from the catalog
+- 32-1613.002–.006 appear, all → procoreCode 32-321613.000 (resolves via
+  sibling inference from parent .001 — signed off as D1)
+- Preserve template uom/prices: .002 lf/$29, .003 lf/$29, .004 lf/$48,
+  .005 sf/$11.5, .006 sf/$14 (harvest reads these — verify, don't invent)
+- Net: catalog 221 → 222 entries; sync-codes must exit clean (0 unresolved,
+  0 invalid); procore-valid-codes.json should NOT churn (already current, 224)
+== STEPS (per plan §0.B) ==
+1. npm run sync-codes  → regenerate estimate-catalog.json; verify against the
+   expected outcome above
+2. npm run generate-seed → regenerate supabase_seed_cost_code_map.sql
+3. Migration: the seed is ON CONFLICT DO NOTHING, so present DDL/DML for my
+   approval BEFORE running anything: INSERT 32-1613.002–.006 into
+   cost_code_map, UPDATE 32-1313.001 description, DELETE 32-1313.002–.005.
+   Run on a Supabase branch first per AGENTS.md, then main after I approve.
+4. Query estimate_line_items for rows on 32-1313.001–.005 — surface count +
+   projects to me. NO silent rewrite (32-1313.001's meaning shifted from
+   Surmountable Curb to Concrete Paving). Note: prod likely has only fresh
+   test-shell projects with $0 rows, but query and show me anyway.
+== GUARDRAILS ==
+- Invoke the supabase skill BEFORE touching any DB code.
+- Route all procoreCode assignment through resolveProcoreCode
+  (src/lib/costCodeResolver.ts) — never bypass the chokepoint.
+- Line-item writes only via the save_estimate_line_items RPC; DB access only
+  through src/lib/db.ts.
+- D2 sign-off (4 orphan source lines → sibling BLI codes) is a PHASE 3 input
+  — do not act on it here; it does not affect the STEP 4 catalog harvest.
+- Windows + PowerShell: keep inline commands short; script files for anything
+  longer than ~one line.
+== EXIT CRITERIA ==
+- npm run build + npm run test green (fix regressions before delivery)
+- Migration verified on branch, applied to main with my approval
+- Catalog + cost_code_map match the template; commit everything
+- Append a 3–5 line handoff note to §13 "Handoff log" of the plan (what
+  landed, commit hash, what Phase 3 must know)
+- Then STOP. Do not start Phase 3.
+Model: Claude Opus (latest).
+```
 
 ### → Phase 3 (GC + Site Ops export — after P2)
 
