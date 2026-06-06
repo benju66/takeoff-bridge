@@ -9,6 +9,7 @@ import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
   EQUIPMENT_DEFAULTS,
+  GC_MANUAL_DEFAULTS,
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
   HOURS_PER_MONTH,
@@ -59,6 +60,8 @@ export interface PersonnelCalcResult {
   operationalLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   /** The 3 estimator-entered lump-sum equipment lines (gc-siteops Phase 3) */
   equipmentLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; total: number }[];
+  /** Phase 4: estimator-typed GC entries (qty × rate and lump-sum lines, GC_MANUAL_DEFAULTS) */
+  manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   equipmentTotal: number;
   grandTotal: number;
 }
@@ -66,15 +69,20 @@ export interface PersonnelCalcResult {
 /**
  * Computes Division 01 General Conditions costs.
  * @param durationMonths - Project duration in calendar months.
+ * @param squareFootage - Building square footage (drives the sqftPer3000 lines — Phase 4).
  * @param utilizations - Map of StaffRoleConfig.key → utilization percentage (0-100).
  * @param equipmentOverrides - Fixed monthly equipment costs entered by user.
+ * @param manualEntries - Estimator-typed GC values keyed by GcManualConfig.key (Phase 4).
+ *                        "qty" lines hold a quantity; "lumpSum" lines hold a dollar amount.
  * @param rateOverrides - Optional project-level hourly rate overrides keyed by StaffRoleConfig.key.
  *                        Falls back to STAFF_ROLE_DEFAULTS.defaultRate when a key is absent.
  */
 export function computePersonnelCosts(
   durationMonths: number,
+  squareFootage: number,
   utilizations: Record<string, number>,
   equipmentOverrides: { dumpsters: number; toilets: number; electric: number },
+  manualEntries: Record<string, number> = {},
   rateOverrides?: Record<string, number>
 ): PersonnelCalcResult {
   // Staff labour lines
@@ -85,12 +93,14 @@ export function computePersonnelCosts(
     return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total };
   });
 
-  // Operational expense lines
+  // Operational expense lines (auto quantity drivers mirroring template STEP 2 col F)
   const suUtilization = utilizations["su"] || 0;
   const operationalLines = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => {
     let qty: number;
     if (expense.quantityDriver === "superintendent") {
       qty = durationMonths * (suUtilization / 100);
+    } else if (expense.quantityDriver === "sqftPer3000") {
+      qty = squareFootage / 3000; // template: =J8/3000 (Temporary Fire Extinguishers)
     } else {
       qty = durationMonths;
     }
@@ -106,12 +116,25 @@ export function computePersonnelCosts(
   }));
   const equipmentTotal = equipmentLines.reduce((sum, l) => sum + l.total, 0);
 
+  // Manual GC entry lines (Phase 4): "qty" = typed qty × template rate;
+  // "lumpSum" = typed dollar amount (incl. the two %-of-estimate lines, which
+  // the template has the estimator hand-type to break circularity — §5.2)
+  const manualLines = GC_MANUAL_DEFAULTS.map((cfg) => {
+    const value = manualEntries[cfg.key] ?? 0;
+    const isQty = cfg.entry === "qty";
+    const qty = isQty ? value : value > 0 ? 1 : 0;
+    const rate = isQty ? (cfg.rate ?? 0) : value;
+    const total = isQty ? value * (cfg.rate ?? 0) : value;
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
+  });
+  const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
+
   // Grand total
   const staffTotal = staffLines.reduce((sum, l) => sum + l.total, 0);
   const opsTotal = operationalLines.reduce((sum, l) => sum + l.total, 0);
-  const grandTotal = staffTotal + opsTotal + equipmentTotal;
+  const grandTotal = staffTotal + opsTotal + equipmentTotal + manualTotal;
 
-  return { staffLines, operationalLines, equipmentLines, equipmentTotal, grandTotal };
+  return { staffLines, operationalLines, equipmentLines, manualLines, equipmentTotal, grandTotal };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,12 +151,14 @@ export interface SiteOpsCalcResult {
  * Computes Division 02 Site Operations costs.
  * Lines derive from SITE_OPS_*_DEFAULTS (constants.ts) — the template-aligned
  * single source of truth (gc-siteops Phase 3 replaced the stale inline codes).
+ * Phase 4 entry kinds: "qty" = typed qty × template rate; "qtyRate" = typed
+ * qty × typed rate; "lumpSum" = typed dollar amount.
  */
 export function computeSiteOperations(
   durationMonths: number,
   squareFootage: number,
-  quantities: { knox: number; payrollCleaning: number; hiredCleaning: number; soilBorings: number },
-  rates: { soilBorings: number }
+  quantities: Record<string, number>,
+  rates: Record<string, number>
 ): SiteOpsCalcResult {
   const dynamicLines = SITE_OPS_DYNAMIC_DEFAULTS.map((cfg) => {
     const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
@@ -141,9 +166,21 @@ export function computeSiteOperations(
   });
 
   const manualLines = SITE_OPS_MANUAL_DEFAULTS.map((cfg) => {
-    const rate = cfg.rate ?? rates.soilBorings; // null rate = estimator-entered (soil borings)
-    const qty = quantities[cfg.key];
-    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
+    const value = quantities[cfg.key] ?? 0;
+    let qty: number;
+    let rate: number;
+    if (cfg.entry === "lumpSum") {
+      qty = value > 0 ? 1 : 0;
+      rate = value; // the typed dollar amount IS the line total
+    } else if (cfg.entry === "qtyRate") {
+      qty = value;
+      rate = rates[cfg.key] ?? 0; // estimator-typed rate (soil borings)
+    } else {
+      qty = value;
+      rate = cfg.rate ?? 0;
+    }
+    const total = cfg.entry === "lumpSum" ? value : qty * rate;
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
 
   const dynamicTotal = dynamicLines.reduce((sum, l) => sum + l.total, 0);

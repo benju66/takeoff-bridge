@@ -94,7 +94,7 @@ describe("Full Export Corruption Test", () => {
       templateBuffer as unknown as ArrayBuffer,
       // gc-siteops Phase 3: GC + Site Ops results are required; nonzero inputs
       // exercise the STEP 2/3 BLI value writes alongside the overflow shifting
-      computePersonnelCosts(12, { su: 100 }, { dumpsters: 1000, toilets: 500, electric: 750 }),
+      computePersonnelCosts(12, 10000, { su: 100 }, { dumpsters: 1000, toilets: 500, electric: 750 }),
       computeSiteOperations(12, 10000, { knox: 1, payrollCleaning: 10, hiredCleaning: 5, soilBorings: 2 }, { soilBorings: 1500 })
     );
 

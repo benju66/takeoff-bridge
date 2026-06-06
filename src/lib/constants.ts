@@ -106,7 +106,13 @@ export const STAFF_ROLE_DEFAULTS: StaffRoleConfig[] = [
 /** Standard working hours per calendar month */
 export const HOURS_PER_MONTH = 173.2;
 
-/** Operational expense line items bound to superintendent utilization or fixed baselines */
+/**
+ * Operational expense line items with an automatic quantity driver.
+ * Drivers (all mirror the template STEP 2 column-F formulas — Phase 4 forensic read):
+ *  - "superintendent": duration × Su utilization (template `=$J$5*E<n>`)
+ *  - "fixed":          project duration in months (template `=$J$5`)
+ *  - "sqftPer3000":    building sqft ÷ 3000 (template `=J8/3000`, Fire Extinguishers)
+ */
 export interface OperationalExpenseConfig {
   code: string;           // STEP 2 criterion code (template-aligned, Phase 3)
   procoreCode: string;    // Granular Procore BLI code (Phase 1 findings §4.1)
@@ -114,13 +120,75 @@ export interface OperationalExpenseConfig {
   description: string;
   unit: string;
   rate: number;
-  quantityDriver: "superintendent" | "fixed"; // "superintendent" = bound to Su utilization, "fixed" = bound to duration
+  quantityDriver: "superintendent" | "fixed" | "sqftPer3000";
+  /** UI grouping: "operational" = original 01.B rows; "gcMonthly" = Phase 4 auto rows */
+  section: "operational" | "gcMonthly";
 }
 
 export const OPERATIONAL_EXPENSE_DEFAULTS: OperationalExpenseConfig[] = [
-  { code: "01-1000.001", procoreCode: "1-11000.000", costType: "M", description: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500, quantityDriver: "superintendent" },
-  { code: "01-1200.001", procoreCode: "1-11200.000", costType: "M", description: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, quantityDriver: "superintendent" },
-  { code: "01-5111.001", procoreCode: "1-15111.000", costType: "M", description: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, quantityDriver: "fixed" },
+  { code: "01-1000.001", procoreCode: "1-11000.000", costType: "M", description: "Small Tools (Bound to Superintendent)", unit: "mo", rate: 500, quantityDriver: "superintendent", section: "operational" },
+  { code: "01-1200.001", procoreCode: "1-11200.000", costType: "M", description: "Fuel and Vehicle Charges (Bound to Superintendent)", unit: "mo", rate: 1200, quantityDriver: "superintendent", section: "operational" },
+  { code: "01-5111.001", procoreCode: "1-15111.000", costType: "M", description: "Cell Phone (Fixed Baseline)", unit: "mo", rate: 135, quantityDriver: "fixed", section: "operational" },
+  // --- Phase 4: duration/sqft-driven GC lines, harvested forensically from template STEP 2 ---
+  { code: "01-4010.001", procoreCode: "1-14010.000", costType: "M", description: "Quality", unit: "mo", rate: 500, quantityDriver: "fixed", section: "gcMonthly" },
+  // D2a sign-off (findings §9): 01-5110.002 has no BLI row of its own → sibling 1-15110.000
+  { code: "01-5110.002", procoreCode: "1-15110.000", costType: "M", description: "Temp Office (Monthly)", unit: "mo", rate: 850, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-5112.001", procoreCode: "1-15112.000", costType: "M", description: "Jobsite Office Equipment", unit: "mo", rate: 250, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-5114.001", procoreCode: "1-15114.000", costType: "M", description: "Project Computers / Internet", unit: "mo", rate: 300, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-5120.001", procoreCode: "1-15120.000", costType: "M", description: "Storage Trailer", unit: "mo", rate: 800, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-5150.001", procoreCode: "1-15150.000", costType: "M", description: "Temporary Fire Extinguishers (sqft ÷ 3000)", unit: "ea", rate: 100, quantityDriver: "sqftPer3000", section: "gcMonthly" },
+  { code: "01-5180.001", procoreCode: "1-15180.000", costType: "M", description: "Temporary Gas (not winter heat)", unit: "mo", rate: 900, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-5190.001", procoreCode: "1-15190.000", costType: "M", description: "Temporary Water", unit: "mo", rate: 650, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-6010.001", procoreCode: "1-16010.000", costType: "M", description: "Courier services", unit: "mo", rate: 350, quantityDriver: "fixed", section: "gcMonthly" },
+  { code: "01-6020.001", procoreCode: "1-16020.000", costType: "M", description: "Plan Reproduction", unit: "mo", rate: 250, quantityDriver: "fixed", section: "gcMonthly" },
+];
+
+// ---------------------------------------------------------------------------
+// Division 01 — Phase 4 Manual GC Entry Lines
+// ---------------------------------------------------------------------------
+
+/**
+ * GC line with an estimator-typed value (Phase 4).
+ *  - entry "qty":     estimator types a quantity; total = qty × template rate
+ *  - entry "lumpSum": estimator types a dollar amount; total = the amount
+ *    (used for template rows with no default rate, and for the two
+ *    %-of-estimate lines where the template has the estimator hand-type the
+ *    dollar amount to break circularity — findings §5.2)
+ * Values persist under `key` in the `gc_equipment_overrides` JSONB snapshot
+ * (free-form Record<string, number> — no schema change).
+ */
+export interface GcManualConfig {
+  key: string;            // persistence key in the gc_equipment_overrides JSONB
+  code: string;           // STEP 2 criterion code (template-aligned)
+  procoreCode: string;    // Granular Procore BLI code (Phase 1 findings §4.1)
+  costType: GcCostType;
+  label: string;
+  unit: string;
+  entry: "qty" | "lumpSum";
+  rate: number | null;    // template rate for "qty" lines; null for lumpSum
+  /** Template % guidance for the two %-of-estimate lines (e.g. 0.0019 = 0.19%) */
+  pctHint?: number;
+  /** UI grouping: "design" = Design & Preconstruction; "gcManual" = GC manual entries */
+  section: "design" | "gcManual";
+}
+
+/**
+ * Phase 4 manual GC lines — codes/descriptions/units/rates harvested
+ * forensically from template STEP 2 (rows 19–23, 35, 38–39, 41, 50, 56).
+ * All BLI cost types verified "Material" in template BLI col B.
+ */
+export const GC_MANUAL_DEFAULTS: GcManualConfig[] = [
+  { key: "preconFees",       code: "01-0001.001", procoreCode: "1-10001.000", costType: "M", label: "Preconstruction Fees",   unit: "ls", entry: "lumpSum", rate: null, section: "design" },
+  { key: "designArch",       code: "01-0130.001", procoreCode: "1-10130.000", costType: "M", label: "Design - Architecture",  unit: "ls", entry: "lumpSum", rate: null, section: "design" },
+  { key: "designCivil",      code: "01-0160.001", procoreCode: "1-10160.000", costType: "M", label: "Design - Civil",         unit: "ls", entry: "lumpSum", rate: null, section: "design" },
+  { key: "designMep",        code: "01-0180.001", procoreCode: "1-10180.000", costType: "M", label: "Design - MEP",           unit: "ls", entry: "lumpSum", rate: null, section: "design" },
+  { key: "designStructural", code: "01-0210.001", procoreCode: "1-10210.000", costType: "M", label: "Design - Structural",    unit: "ls", entry: "lumpSum", rate: null, section: "design" },
+  { key: "safetyConsultant", code: "01-0610.001", procoreCode: "1-10610.000", costType: "M", label: "Safety Consultant",      unit: "ls", entry: "lumpSum", rate: null, pctHint: 0.0002, section: "gcManual" },
+  { key: "travelMeals",      code: "01-1400.001", procoreCode: "1-11400.000", costType: "M", label: "Travel and Meals",       unit: "ls", entry: "lumpSum", rate: null, section: "gcManual" },
+  { key: "procoreFee",       code: "01-1600.001", procoreCode: "1-11600.000", costType: "M", label: "Procore",                unit: "ls", entry: "lumpSum", rate: null, pctHint: 0.0019, section: "gcManual" },
+  { key: "tempOfficeSetup",  code: "01-5110.001", procoreCode: "1-15110.000", costType: "M", label: "Temp Office Set up and Takedown", unit: "ea", entry: "qty", rate: 9000, section: "gcManual" },
+  { key: "projectSigns",     code: "01-5160.001", procoreCode: "1-15160.000", costType: "M", label: "Temporary Project Signs", unit: "ea", entry: "qty", rate: 1500, section: "gcManual" },
+  { key: "legalFees",        code: "01-7010.001", procoreCode: "1-17010.000", costType: "M", label: "Legal Fees",             unit: "ls", entry: "qty", rate: 5000, section: "gcManual" },
 ];
 
 /** Fixed lump-sum equipment lines entered by the estimator on STEP 2 */
@@ -223,6 +291,32 @@ export const KNOX_BOX_UNIT_COST = 650;
 export const PAYROLL_CLEANING_RATE_PER_EA = 74;
 export const HIRED_CLEANING_RATE_PER_EA = 54;
 
+/**
+ * STEP 3 subtotal sections, in template row order (Phase 4 forensic read).
+ * The Step 3 UI mirrors these groups; each section id is carried on every
+ * Site Ops line config below.
+ */
+export type SiteOpsSection =
+  | "siteOperations"
+  | "demolition"
+  | "finalCleaning"
+  | "swppp"
+  | "survey"
+  | "buildingServices"
+  | "siteEquipment"
+  | "specialInspections";
+
+export const SITE_OPS_SECTIONS: { id: SiteOpsSection; label: string }[] = [
+  { id: "siteOperations",     label: "02.A — Site Operations" },
+  { id: "demolition",         label: "02.B — Demolition" },
+  { id: "finalCleaning",      label: "02.C — Final Cleaning" },
+  { id: "swppp",              label: "02.D — SWPPP Permit" },
+  { id: "survey",             label: "02.E — Survey & Layout" },
+  { id: "buildingServices",   label: "02.F — Building and Site Services" },
+  { id: "siteEquipment",      label: "02.G — Site Equipment" },
+  { id: "specialInspections", label: "02.H — Special Inspections" },
+];
+
 /** Site Ops line driven by a project parameter (duration / square footage) */
 export interface SiteOpsDynamicConfig {
   code: string;           // STEP 3 criterion code (template-aligned, Phase 3)
@@ -232,17 +326,27 @@ export interface SiteOpsDynamicConfig {
   unit: string;
   rate: number;
   quantityDriver: "duration" | "squareFootage";
+  section: SiteOpsSection;
 }
 
-/** Site Ops line with an estimator-entered quantity */
+/**
+ * Site Ops line with an estimator-typed value (entry kinds — Phase 4):
+ *  - "qty":     typed quantity × template rate
+ *  - "qtyRate": typed quantity × typed rate (soil borings)
+ *  - "lumpSum": typed dollar amount (template rows with no default rate)
+ * Values persist under `key` in the `site_ops_quantities` JSONB snapshot
+ * (legacy lines keep their original `qty…` keys via the hook).
+ */
 export interface SiteOpsManualConfig {
-  key: "knox" | "payrollCleaning" | "hiredCleaning" | "soilBorings"; // matches the quantities field
+  key: string;            // persistence/lookup key in the quantities record
   code: string;
   procoreCode: string;
   costType: GcCostType;
   label: string;
   unit: string;
-  rate: number | null;    // null = rate entered by the estimator (soil borings)
+  entry: "qty" | "qtyRate" | "lumpSum";
+  rate: number | null;    // template rate for "qty"; null for "qtyRate"/"lumpSum"
+  section: SiteOpsSection;
 }
 
 /**
@@ -250,20 +354,68 @@ export interface SiteOpsManualConfig {
  * InfrastructureStep.tsx and duplicated with stale codes in calculations.ts).
  * Codes carry the template's STEP 3 criterion suffix; each line's BLI code is
  * the user-confirmed mapping (gc-siteops Phase 1 findings §4.2 + D2 sign-off:
- * "Progress Cleaning - Hired" 02-9010.002 has no BLI row of its own and maps
- * to its sibling's code 2-29010.000).
+ * orphan lines 02-9010.002 / 02-4100.002 / 02-9200.002 have no BLI row of
+ * their own and map to their sibling's code).
  */
 export const SITE_OPS_DYNAMIC_DEFAULTS: SiteOpsDynamicConfig[] = [
-  { code: "02-9015.001", procoreCode: "2-29015.000", costType: "M", label: "Safety", unit: "mo", rate: SAFETY_RATE_PER_MONTH, quantityDriver: "duration" },
-  { code: "02-9020.001", procoreCode: "2-29020.000", costType: "M", label: "Temp Protection", unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, quantityDriver: "squareFootage" },
-  { code: "02-9405.001", procoreCode: "2-29405.000", costType: "M", label: "Material Hoist / Trash Chute", unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, quantityDriver: "duration" },
+  { code: "02-9015.001", procoreCode: "2-29015.000", costType: "M", label: "Safety", unit: "mo", rate: SAFETY_RATE_PER_MONTH, quantityDriver: "duration", section: "siteOperations" },
+  { code: "02-9020.001", procoreCode: "2-29020.000", costType: "M", label: "Temp Protection", unit: "sf", rate: TEMP_PROTECTION_RATE_PER_SF, quantityDriver: "squareFootage", section: "siteOperations" },
+  { code: "02-9405.001", procoreCode: "2-29405.000", costType: "M", label: "Material Hoist / Trash Chute", unit: "mo", rate: MATERIAL_HOIST_RATE_PER_MONTH, quantityDriver: "duration", section: "siteEquipment" },
 ];
 
+/**
+ * Phase 4: full STEP 3 input coverage — codes/descriptions/units/rates
+ * harvested forensically from the template; BLI codes from findings §4.2;
+ * cost types re-verified against template BLI col B (note FFE Relocation
+ * 2-25100.000 is "S" — caught in the Phase 4 re-verification).
+ */
 export const SITE_OPS_MANUAL_DEFAULTS: SiteOpsManualConfig[] = [
-  { key: "knox",            code: "02-9307.001", procoreCode: "2-29307.000", costType: "M", label: "Knox Box", unit: "ea", rate: KNOX_BOX_UNIT_COST },
-  { key: "payrollCleaning", code: "02-9010.001", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Payroll", unit: "hr", rate: PAYROLL_CLEANING_RATE_PER_EA },
-  { key: "hiredCleaning",   code: "02-9010.002", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Hired", unit: "hr", rate: HIRED_CLEANING_RATE_PER_EA },
-  { key: "soilBorings",     code: "02-3200.001", procoreCode: "2-23200.000", costType: "M", label: "Soil Borings", unit: "ls", rate: null },
+  // --- 02.A Site Operations (template rows 12–27) ---
+  { key: "soilBorings",     code: "02-3200.001", procoreCode: "2-23200.000", costType: "M", label: "Soil Borings", unit: "ls", entry: "qtyRate", rate: null, section: "siteOperations" },
+  { key: "ffeRelocation",   code: "02-5100.001", procoreCode: "2-25100.000", costType: "S", label: "FFE Relocation", unit: "ls", entry: "lumpSum", rate: null, section: "siteOperations" },
+  { key: "abatement",       code: "02-8213.001", procoreCode: "2-28213.000", costType: "S", label: "Abatement", unit: "ls", entry: "lumpSum", rate: null, section: "siteOperations" },
+  { key: "payrollCleaning", code: "02-9010.001", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Payroll", unit: "hr", entry: "qty", rate: PAYROLL_CLEANING_RATE_PER_EA, section: "siteOperations" },
+  { key: "hiredCleaning",   code: "02-9010.002", procoreCode: "2-29010.000", costType: "M", label: "Progress Cleaning - Hired", unit: "hr", entry: "qty", rate: HIRED_CLEANING_RATE_PER_EA, section: "siteOperations" },
+  { key: "tempPartitions",  code: "02-9025.001", procoreCode: "2-29025.000", costType: "M", label: "Temporary Partitions", unit: "ea", entry: "qty", rate: 5000, section: "siteOperations" },
+  { key: "trafficControl",  code: "02-9030.001", procoreCode: "2-29030.000", costType: "M", label: "Traffic Control and Jersey Barriers", unit: "lf", entry: "qty", rate: 25, section: "siteOperations" },
+  { key: "tempFencing",     code: "02-9035.001", procoreCode: "2-29035.000", costType: "M", label: "Temporary Fencing", unit: "lf", entry: "qty", rate: 15, section: "siteOperations" },
+  { key: "scrim",           code: "02-9040.001", procoreCode: "2-29040.000", costType: "M", label: "Scrim", unit: "lf", entry: "qty", rate: 20, section: "siteOperations" },
+  { key: "tempAccessRoads", code: "02-9045.001", procoreCode: "2-29045.000", costType: "S", label: "Temp Access Roads", unit: "ls", entry: "qty", rate: 5000, section: "siteOperations" },
+  { key: "siteSecurity",    code: "02-9050.001", procoreCode: "2-29050.000", costType: "M", label: "Site Security", unit: "mo", entry: "qty", rate: 2000, section: "siteOperations" },
+  { key: "securityCameras", code: "02-9055.001", procoreCode: "2-29055.000", costType: "M", label: "Site Security Cameras", unit: "mo", entry: "qty", rate: 1000, section: "siteOperations" },
+  { key: "jobsiteCamera",   code: "02-9060.001", procoreCode: "2-29060.000", costType: "M", label: "Jobsite Camera", unit: "mo", entry: "qty", rate: 1000, section: "siteOperations" },
+  { key: "constructionPermits", code: "02-9065.001", procoreCode: "2-29065.000", costType: "M", label: "Construction Permits (not building permit)", unit: "ea", entry: "lumpSum", rate: null, section: "siteOperations" },
+  { key: "knox",            code: "02-9307.001", procoreCode: "2-29307.000", costType: "M", label: "Knox Box", unit: "ea", entry: "qty", rate: KNOX_BOX_UNIT_COST, section: "buildingServices" },
+  // --- 02.B Demolition (rows 32–33; D2c: sawcutting → sibling BLI) ---
+  { key: "demolition",      code: "02-4100.001", procoreCode: "2-24100.000", costType: "S", label: "Demolition", unit: "sf", entry: "qty", rate: 6, section: "demolition" },
+  { key: "sawcutting",      code: "02-4100.002", procoreCode: "2-24100.000", costType: "S", label: "Demolition - Sawcutting", unit: "ls", entry: "lumpSum", rate: null, section: "demolition" },
+  // --- 02.C Final Cleaning (row 38) ---
+  { key: "finalCleaning",   code: "02-9005.001", procoreCode: "2-29005.000", costType: "S", label: "Final Cleaning", unit: "ea", entry: "qty", rate: 2500, section: "finalCleaning" },
+  // --- 02.D SWPPP Permit (row 43) ---
+  { key: "swpppPermit",     code: "02-9070.001", procoreCode: "2-29070.000", costType: "M", label: "SWPPP Permit", unit: "ea", entry: "qty", rate: 400, section: "swppp" },
+  // --- 02.E Survey & Layout (rows 48–49; D2d: floor scanning → sibling BLI) ---
+  { key: "surveyLayout",    code: "02-9200.001", procoreCode: "2-29200.000", costType: "S", label: "Survey & Layout", unit: "ls", entry: "lumpSum", rate: null, section: "survey" },
+  { key: "floorScanning",   code: "02-9200.002", procoreCode: "2-29200.000", costType: "S", label: "Survey & Layout - Floor Scanning", unit: "ls", entry: "lumpSum", rate: null, section: "survey" },
+  // --- 02.F Building and Site Services (rows 54–60) ---
+  { key: "cityRequirements", code: "02-9305.001", procoreCode: "2-29305.000", costType: "M", label: "City Requirements", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  { key: "permPowerService", code: "02-9310.001", procoreCode: "2-29310.000", costType: "M", label: "Permanent Power Service", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  { key: "tempPowerService", code: "02-9315.001", procoreCode: "2-29315.000", costType: "M", label: "Temporary Power Service", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  { key: "gasService",      code: "02-9320.001", procoreCode: "2-29320.000", costType: "M", label: "Gas Service", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  { key: "cableService",    code: "02-9325.001", procoreCode: "2-29325.000", costType: "M", label: "Cable Service", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  { key: "dataService",     code: "02-9330.001", procoreCode: "2-29330.000", costType: "M", label: "Data Service", unit: "ls", entry: "lumpSum", rate: null, section: "buildingServices" },
+  // --- 02.G Site Equipment (rows 66–70) ---
+  { key: "scaffolding",     code: "02-9410.001", procoreCode: "2-29410.000", costType: "M", label: "Scaffolding & Platforms", unit: "mo", entry: "lumpSum", rate: null, section: "siteEquipment" },
+  { key: "craneRental",     code: "02-9415.001", procoreCode: "2-29415.000", costType: "M", label: "Crane Rental", unit: "mo", entry: "lumpSum", rate: null, section: "siteEquipment" },
+  { key: "equipmentRental", code: "02-9420.001", procoreCode: "2-29420.000", costType: "M", label: "Equipment Rental", unit: "mo", entry: "qty", rate: 2000, section: "siteEquipment" },
+  { key: "forkliftRental",  code: "02-9425.001", procoreCode: "2-29425.000", costType: "M", label: "Forklift Rental", unit: "mo", entry: "qty", rate: 4000, section: "siteEquipment" },
+  { key: "streetSweeping",  code: "02-9430.001", procoreCode: "2-29430.000", costType: "M", label: "Street Sweeping", unit: "mo", entry: "qty", rate: 300, section: "siteEquipment" },
+  // --- 02.H Special Inspections (rows 75–80) ---
+  { key: "materialsTesting",      code: "02-9505.001", procoreCode: "2-29505.000", costType: "M", label: "Construction Materials Testing", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
+  { key: "vibrationMonitoring",   code: "02-9510.001", procoreCode: "2-29510.000", costType: "M", label: "Vibration Monitoring", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
+  { key: "acousticTesting",       code: "02-9515.001", procoreCode: "2-29515.000", costType: "M", label: "Acoustic Testing", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
+  { key: "windowTesting",         code: "02-9520.001", procoreCode: "2-29520.000", costType: "M", label: "Window Testing", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
+  { key: "weatherBarrierTesting", code: "02-9525.001", procoreCode: "2-29525.000", costType: "M", label: "Weather Barrier Testing", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
+  { key: "gypcreteTesting",       code: "02-9530.001", procoreCode: "2-29530.000", costType: "M", label: "Gypcrete Testing", unit: "ls", entry: "lumpSum", rate: null, section: "specialInspections" },
 ];
 
 // ---------------------------------------------------------------------------

@@ -49,16 +49,18 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     handleProjectParamChange,
   } = useProjectWorkspace(projectId);
 
+  const squareFootage: number = project ? project.squareFootage : 0;
+
   // Step 2: Division 01 General Conditions
   const personnel = usePersonnelCalculations(
     projectDurationMonths,
+    squareFootage,
     isLoaded,
     projectEstimate?.gcUtilization,
     projectEstimate?.gcEquipmentOverrides,
   );
 
   // Step 3: Division 02 Site Operations
-  const squareFootage: number = project ? project.squareFootage : 0;
   const infrastructure = useInfrastructureCalculations(
     projectDurationMonths,
     squareFootage,
@@ -361,10 +363,14 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         <ErrorBoundary>
           <PersonnelPricingStep
             durationMonths={projectDurationMonths}
+            squareFootage={squareFootage}
             utilizations={personnel.utilizations}
             onUtilizationChange={personnel.setUtilization}
             equipment={personnel.equipment}
             onEquipmentChange={personnel.handleEquipmentChange}
+            manualEntries={personnel.manualEntries}
+            onManualEntryChange={personnel.handleManualEntryChange}
+            estimateTotal={takeoffSummary.totalEstimatedCost}
             calcResult={personnel.calcResult}
             totalGCs={personnel.totalGCs}
           />
@@ -378,7 +384,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             squareFootage={squareFootage}
             quantities={infrastructure.quantities}
             rates={infrastructure.rates}
-            onSiteOpsChange={infrastructure.handleSiteOpsChange}
+            onLineQuantityChange={infrastructure.handleLineQuantityChange}
+            onLineRateChange={infrastructure.handleLineRateChange}
             calcResult={infrastructure.calcResult}
             siteOperationsTotal={infrastructure.siteOperationsTotal}
           />

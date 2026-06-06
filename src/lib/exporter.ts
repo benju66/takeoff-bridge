@@ -347,6 +347,7 @@ export function collectGcSiteOpsLines(
     ...gcCalcResult.staffLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.role, total: l.total })),
     ...gcCalcResult.operationalLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
     ...gcCalcResult.equipmentLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
+    ...gcCalcResult.manualLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
     ...siteOpsCalcResult.dynamicLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
     ...siteOpsCalcResult.manualLines.map((l) => ({ code: l.code, procoreCode: l.procoreCode, costType: l.costType, desc: l.desc, total: l.total })),
   ];

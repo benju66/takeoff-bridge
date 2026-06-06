@@ -367,6 +367,7 @@ describe('computePersonnelCosts', () => {
   it('returns zero staff costs when all utilizations are 0', () => {
     const result = computePersonnelCosts(
       12,
+      0,
       {},
       { dumpsters: 0, toilets: 0, electric: 0 }
     );
@@ -384,6 +385,7 @@ describe('computePersonnelCosts', () => {
     // 173.2 hours per month × 12 months × (100/100) = 2078.4
     const result = computePersonnelCosts(
       12,
+      0,
       { ex: 100 },
       { dumpsters: 0, toilets: 0, electric: 0 }
     );
@@ -399,12 +401,53 @@ describe('computePersonnelCosts', () => {
   it('includes equipment overrides in grand total', () => {
     const result = computePersonnelCosts(
       12,
+      0,
       {},
       { dumpsters: 1000, toilets: 2000, electric: 3000 }
     );
     expect(result.equipmentTotal).toBe(6000);
     // grandTotal should include the equipment
     expect(result.grandTotal).toBeGreaterThanOrEqual(6000);
+  });
+
+  // ─── Phase 4: full GC input coverage ───────────────────────────────
+
+  it('computes duration-driven auto lines (template =$J$5 formulas)', () => {
+    const result = computePersonnelCosts(10, 0, {}, { dumpsters: 0, toilets: 0, electric: 0 });
+    const quality = result.operationalLines.find((l) => l.code === '01-4010.001');
+    expect(quality!.total).toBe(10 * 500);
+    const trailer = result.operationalLines.find((l) => l.code === '01-5120.001');
+    expect(trailer!.total).toBe(10 * 800);
+    // D2a: Temp Office monthly maps to sibling BLI 1-15110.000
+    const tempOffice = result.operationalLines.find((l) => l.code === '01-5110.002');
+    expect(tempOffice!.procoreCode).toBe('1-15110.000');
+    expect(tempOffice!.total).toBe(10 * 850);
+  });
+
+  it('computes Temporary Fire Extinguishers as sqft ÷ 3000 × $100 (template =J8/3000)', () => {
+    const result = computePersonnelCosts(10, 30000, {}, { dumpsters: 0, toilets: 0, electric: 0 });
+    const fireExt = result.operationalLines.find((l) => l.code === '01-5150.001');
+    expect(fireExt!.qty).toBeCloseTo(10);
+    expect(fireExt!.total).toBeCloseTo(1000);
+  });
+
+  it('computes manual GC entries: qty × rate and lump-sum dollars', () => {
+    const result = computePersonnelCosts(0, 0, {}, { dumpsters: 0, toilets: 0, electric: 0 }, {
+      tempOfficeSetup: 2,      // qty line: 2 × $9,000
+      designCivil: 18500,      // lump-sum line
+      procoreFee: 4400,        // %-guidance line — typed dollar amount
+    });
+    const setup = result.manualLines.find((l) => l.code === '01-5110.001');
+    expect(setup!.total).toBe(18000);
+    const civil = result.manualLines.find((l) => l.code === '01-0160.001');
+    expect(civil!.total).toBe(18500);
+    const procore = result.manualLines.find((l) => l.code === '01-1600.001');
+    expect(procore!.total).toBe(4400);
+    expect(procore!.procoreCode).toBe('1-11600.000');
+    // Untouched manual lines stay $0
+    const legal = result.manualLines.find((l) => l.code === '01-7010.001');
+    expect(legal!.total).toBe(0);
+    expect(result.grandTotal).toBe(18000 + 18500 + 4400);
   });
 });
 
@@ -458,6 +501,41 @@ describe('computeSiteOperations', () => {
       { soilBorings: 0 }
     );
     expect(result.grandTotal).toBe(0);
+  });
+
+  // ─── Phase 4: full Site Ops input coverage ─────────────────────────
+
+  it('computes Phase 4 qty lines against template rates', () => {
+    const result = computeSiteOperations(0, 0, { demolition: 500, tempFencing: 200, finalCleaning: 3 }, {});
+    expect(result.manualLines.find((l) => l.code === '02-4100.001')!.total).toBe(500 * 6);
+    expect(result.manualLines.find((l) => l.code === '02-9035.001')!.total).toBe(200 * 15);
+    expect(result.manualLines.find((l) => l.code === '02-9005.001')!.total).toBe(3 * 2500);
+  });
+
+  it('computes lump-sum lines as the typed dollar amount', () => {
+    const result = computeSiteOperations(0, 0, { ffeRelocation: 7500, gypcreteTesting: 1200, sawcutting: 950 }, {});
+    expect(result.manualLines.find((l) => l.code === '02-5100.001')!.total).toBe(7500);
+    expect(result.manualLines.find((l) => l.code === '02-9530.001')!.total).toBe(1200);
+    // D2c: sawcutting maps to the sibling Demolition BLI code
+    const saw = result.manualLines.find((l) => l.code === '02-4100.002');
+    expect(saw!.total).toBe(950);
+    expect(saw!.procoreCode).toBe('2-24100.000');
+  });
+
+  it('carries the verified Subcontract cost types (template BLI col B)', () => {
+    const result = computeSiteOperations(0, 0, {}, {});
+    const subcontractCodes = ['02-5100.001', '02-8213.001', '02-4100.001', '02-4100.002', '02-9005.001', '02-9045.001', '02-9200.001', '02-9200.002'];
+    for (const code of subcontractCodes) {
+      const line = result.manualLines.find((l) => l.code === code);
+      expect(line, code).toBeDefined();
+      expect(line!.costType, code).toBe('S');
+    }
+  });
+
+  it('covers every template STEP 3 criterion (38 BLI rows reachable)', () => {
+    const result = computeSiteOperations(1, 1, {}, {});
+    const distinctBliCodes = new Set([...result.dynamicLines, ...result.manualLines].map((l) => l.procoreCode));
+    expect(distinctBliCodes.size).toBe(38);
   });
 });
 

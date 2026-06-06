@@ -509,6 +509,22 @@ phase must know. Empty until Phase 1 runs.)
   rollup value (normally $0), so estimator-entered dollars on the STEP 4 GC grid rows are preserved,
   not forced to zero.
 
+- **Phase 4 (2026-06-06, commit recorded in follow-up docs commit):** Full GC + Site Ops input coverage —
+  21 new GC lines (10 auto duration/sqft÷3000 lines extending `OPERATIONAL_EXPENSE_DEFAULTS`; 11 manual
+  in new `GC_MANUAL_DEFAULTS`) + 34 new Site Ops lines (`SITE_OPS_MANUAL_DEFAULTS` with entry kinds
+  qty/qtyRate/lumpSum, grouped by `SITE_OPS_SECTIONS` mirroring the template's 8 subtotal sections).
+  All 34 GC + 38 Site Ops BLI codes now reachable (constants test asserts the counts). The two %-lines
+  (`01-0610.001`/`01-1600.001`) are typed-$ with a live % hint off totalEstimatedCost — NOT auto-computed
+  (avoids the Phase 5 circularity trap). **Cost-type catch:** FFE Relocation `2-25100.000` is "S" per
+  template BLI col B (absent from the Phase 3 list — re-verified forensically, encoded + tested).
+  Persistence: new GC entries ride `gc_equipment_overrides` JSONB, new Site Ops keys ride
+  `site_ops_quantities` (legacy `qty…`/`rate…` keys preserved for saved projects) — NO schema change.
+  Exporter: one generic spread (`gcCalcResult.manualLines`) added to `collectGcSiteOpsLines`;
+  rollup/gate/CSV machinery untouched. Manual export verified: gate delta $0, 10 new-line spot checks
+  tie out across workbook BLI + Procore CSV. **Phase 5 must know:** STEP 4 page still excludes GC/Site Ops
+  totals (that linkage IS Phase 5, incl. the modifier-basis decision); per-project editable rates remain
+  Phase 6; `computePersonnelCosts` signature now `(duration, sqft, utilizations, equipment, manualEntries, rateOverrides?)`.
+
 - **Resequencing (2026-06-06, user-approved):** remaining work reordered to Phase 4 (full Site Ops
   + GC input coverage, combined), Phase 5 (estimate-page linkage of GC/Site Ops totals incl. the
   modifier-basis decision), Phase 6 (old Phase 4 polish: STEP 2/3 sheet detail + editable rates).

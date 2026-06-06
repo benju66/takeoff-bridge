@@ -1,19 +1,32 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { PersonnelCalcResult } from "@/lib/calculations";
-import { STAFF_ROLE_DEFAULTS, OPERATIONAL_EXPENSE_DEFAULTS, EQUIPMENT_DEFAULTS } from "@/lib/constants";
+import {
+  STAFF_ROLE_DEFAULTS,
+  OPERATIONAL_EXPENSE_DEFAULTS,
+  EQUIPMENT_DEFAULTS,
+  GC_MANUAL_DEFAULTS,
+} from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // PersonnelPricingStep — Step 2 Panel
 // Division 01 General Conditions Pricing Matrix
+// Phase 4: full template STEP 2 line coverage — adds Design & Preconstruction
+// (01.D), monthly auto lines (01.E), and manual GC entries incl. the two
+// %-of-estimate lines with a live suggested amount (01.F).
 // ---------------------------------------------------------------------------
 
 interface PersonnelPricingStepProps {
   durationMonths: number;
+  squareFootage: number;
   utilizations: Record<string, number>;
   onUtilizationChange: (key: string, value: number) => void;
   equipment: { dumpsters: number; toilets: number; electric: number };
   onEquipmentChange: (field: "dumpsters" | "toilets" | "electric", valStr: string) => void;
+  manualEntries: Record<string, number>;
+  onManualEntryChange: (key: string, valStr: string) => void;
+  /** Current STEP 4 total estimated cost — drives the % suggestion hints (display only) */
+  estimateTotal: number;
   calcResult: PersonnelCalcResult;
   totalGCs: number;
 }
@@ -26,6 +39,7 @@ const rateCellClass = "p-3 text-center border-r border-b border-grid-border text
 const qtyCellClass = "p-3 text-center border-r border-b border-grid-border font-semibold text-slate-600 dark:text-slate-400 font-mono";
 const totalCellClass = "p-3 text-center border-b border-grid-border text-emerald-600 dark:text-emerald-400 font-bold font-mono";
 const inputCellClass = "p-0 border-r border-b border-grid-border";
+const autoCellClass = "p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono";
 const inputClass = "w-full h-full min-h-[36px] bg-transparent border-none rounded-none text-center px-3 py-2 outline-none text-foreground focus:bg-white dark:focus:bg-slate-900/40 focus:ring-2 focus:ring-blue-500 focus:z-10 transition-all font-mono";
 
 // Derived from canonical constants — single source of truth
@@ -36,31 +50,92 @@ const STAFF_DISPLAY = STAFF_ROLE_DEFAULTS.map((role) => ({
   rate: role.defaultRate,
 }));
 
-const OPS_DISPLAY = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => ({
-  code: expense.code,
-  desc: expense.description,
-  unit: expense.unit,
-  rate: expense.rate,
-}));
-
-const EQ_DISPLAY = EQUIPMENT_DEFAULTS.map((eq) => ({
-  code: eq.code,
-  desc: eq.label,
-  field: eq.key,
-}));
-
 const fmt = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
+      <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">{label}</td>
+    </tr>
+  );
+}
+
 export function PersonnelPricingStep({
   durationMonths,
+  squareFootage,
   utilizations,
   onUtilizationChange,
   equipment,
   onEquipmentChange,
+  manualEntries,
+  onManualEntryChange,
+  estimateTotal,
   calcResult,
   totalGCs,
 }: PersonnelPricingStepProps) {
+  // Calc-layer line lookup by criterion code (avoids index coupling)
+  const opLineByCode = new Map(calcResult.operationalLines.map((l) => [l.code, l]));
+  const manualLineByCode = new Map(calcResult.manualLines.map((l) => [l.code, l]));
+
+  const renderManualRows = (section: "design" | "gcManual") =>
+    GC_MANUAL_DEFAULTS.filter((cfg) => cfg.section === section).map((cfg) => {
+      const line = manualLineByCode.get(cfg.code);
+      const val = manualEntries[cfg.key] ?? 0;
+      const isQty = cfg.entry === "qty";
+      const suggested = cfg.pctHint !== undefined ? cfg.pctHint * estimateTotal : null;
+      return (
+        <tr key={cfg.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
+          <td className={codeCellClass}>{cfg.code}</td>
+          <td className={descCellClass}>
+            {cfg.label}
+            {isQty && ` (Rate $${(cfg.rate ?? 0).toLocaleString()}/${cfg.unit})`}
+            {!isQty && cfg.pctHint === undefined && " (Lump Sum — enter total $)"}
+            {suggested !== null && (
+              <span className="block text-[10px] font-normal text-slate-500 dark:text-slate-400 mt-0.5">
+                Template guidance: {(cfg.pctHint! * 100).toFixed(2)}% of estimate ≈ {fmt(suggested)} — enter the final amount
+              </span>
+            )}
+          </td>
+          <td className={unitCellClass}>{cfg.unit}</td>
+          <td className={rateCellClass}>{isQty ? `$${(cfg.rate ?? 0).toFixed(2)}` : "—"}</td>
+          <td className={inputCellClass}>
+            <div className="flex items-center justify-center w-full h-full relative">
+              {!isQty && (
+                <span className="absolute left-2.5 text-slate-600 dark:text-slate-400 text-[10px] font-bold pointer-events-none select-none font-mono">$</span>
+              )}
+              <input
+                type="number"
+                min={0}
+                className={inputClass}
+                value={val === 0 ? "" : val}
+                placeholder={isQty ? "0" : "0.00"}
+                onChange={(e) => onManualEntryChange(cfg.key, e.target.value)}
+              />
+            </div>
+          </td>
+          <td className={qtyCellClass}>—</td>
+          <td className={totalCellClass}>{fmt(line?.total ?? 0)}</td>
+        </tr>
+      );
+    });
+
+  const renderOpRows = (section: "operational" | "gcMonthly") =>
+    OPERATIONAL_EXPENSE_DEFAULTS.filter((cfg) => cfg.section === section).map((cfg) => {
+      const line = opLineByCode.get(cfg.code);
+      return (
+        <tr key={cfg.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
+          <td className={codeCellClass}>{cfg.code}</td>
+          <td className={descCellClass}>{cfg.description}</td>
+          <td className={unitCellClass}>{cfg.unit}</td>
+          <td className={rateCellClass}>${cfg.rate.toFixed(2)}</td>
+          <td className={autoCellClass}>auto</td>
+          <td className={qtyCellClass}>{(line?.qty ?? 0).toFixed(2)} {cfg.unit}</td>
+          <td className={totalCellClass}>{fmt(line?.total ?? 0)}</td>
+        </tr>
+      );
+    });
+
   return (
     <div className="bg-card border border-grid-border text-card-foreground rounded-xl overflow-hidden shadow-sm animate-fade-in">
       <div className="p-4 bg-background/80 dark:bg-background/50 border-b border-grid-border flex items-center justify-between">
@@ -68,7 +143,7 @@ export function PersonnelPricingStep({
           <Activity size={16} className="text-blue-600 dark:text-blue-400" /> Division 01 General Conditions Pricing Matrix
         </h3>
         <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
-          Active Schedule Duration: {durationMonths} Months
+          Active Schedule Duration: {durationMonths} Months | {squareFootage.toLocaleString()} SF
         </span>
       </div>
 
@@ -80,16 +155,14 @@ export function PersonnelPricingStep({
               <th className="p-4 text-center border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Staff Role / Operational Scope</th>
               <th className="p-4 text-center w-20 border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Unit</th>
               <th className="p-4 text-center w-32 border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Rate</th>
-              <th className="p-4 text-center w-44 border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Utilization</th>
+              <th className="p-4 text-center w-44 border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Utilization / Entry</th>
               <th className="p-4 text-center w-40 border-r border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Calculated Qty</th>
               <th className="p-4 text-center w-36 border-b border-grid-border font-bold sticky top-0 z-10 bg-[#3057A6]">Total Cost</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-grid-border">
             {/* Staff Labor Directs */}
-            <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
-              <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.A - Staff Labour Directs</td>
-            </tr>
+            <SectionHeader label="01.A - Staff Labour Directs" />
             {STAFF_DISPLAY.map((row, i) => {
               const line = calcResult.staffLines[i];
               return (
@@ -120,37 +193,20 @@ export function PersonnelPricingStep({
               );
             })}
 
-            {/* Operational Expenses */}
-            <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
-              <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.B - Operational Expenses</td>
-            </tr>
-            {OPS_DISPLAY.map((row, i) => {
-              const line = calcResult.operationalLines[i];
-              return (
-                <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
-                  <td className={codeCellClass}>{row.code}</td>
-                  <td className={descCellClass}>{row.desc}</td>
-                  <td className={unitCellClass}>{row.unit}</td>
-                  <td className={rateCellClass}>${row.rate.toFixed(2)}</td>
-                  <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">auto</td>
-                  <td className={qtyCellClass}>{line.qty.toFixed(2)} mos</td>
-                  <td className={totalCellClass}>{fmt(line.total)}</td>
-                </tr>
-              );
-            })}
+            {/* Operational Expenses (original auto lines) */}
+            <SectionHeader label="01.B - Operational Expenses" />
+            {renderOpRows("operational")}
 
             {/* Site Equipment & Overrides */}
-            <tr className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold select-none">
-              <td colSpan={7} className="p-3 uppercase tracking-wider text-[10px] bg-blue-50/30 dark:bg-blue-950/10 border-r border-b border-grid-border font-semibold">01.C - Site Equipment & Mobilization Overrides</td>
-            </tr>
-            {EQ_DISPLAY.map((row) => {
-              const val = equipment[row.field];
+            <SectionHeader label="01.C - Site Equipment & Mobilization Overrides" />
+            {EQUIPMENT_DEFAULTS.map((eq) => {
+              const val = equipment[eq.key];
               return (
-                <tr key={row.code + "-" + row.field} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
-                  <td className={codeCellClass}>{row.code}</td>
-                  <td className={descCellClass}>{row.desc}</td>
+                <tr key={eq.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
+                  <td className={codeCellClass}>{eq.code}</td>
+                  <td className={descCellClass}>{eq.label}</td>
                   <td className={unitCellClass}>ls</td>
-                  <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 font-semibold font-mono">—</td>
+                  <td className={qtyCellClass}>—</td>
                   <td className={inputCellClass}>
                     <div className="flex items-center justify-center w-full h-full relative">
                       <span className="absolute left-2.5 text-slate-600 dark:text-slate-400 text-[10px] font-bold pointer-events-none select-none font-mono">$</span>
@@ -159,15 +215,27 @@ export function PersonnelPricingStep({
                         className={inputClass}
                         value={val === 0 ? "" : val}
                         placeholder="0.00"
-                        onChange={(e) => onEquipmentChange(row.field, e.target.value)}
+                        onChange={(e) => onEquipmentChange(eq.key, e.target.value)}
                       />
                     </div>
                   </td>
-                  <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 font-semibold font-mono">—</td>
+                  <td className={qtyCellClass}>—</td>
                   <td className={totalCellClass}>{fmt(val)}</td>
                 </tr>
               );
             })}
+
+            {/* Phase 4: Design & Preconstruction (template STEP 2 Design section) */}
+            <SectionHeader label="01.D - Design & Preconstruction" />
+            {renderManualRows("design")}
+
+            {/* Phase 4: monthly auto lines (template duration/sqft formulas) */}
+            <SectionHeader label="01.E - General Conditions — Monthly (Auto)" />
+            {renderOpRows("gcMonthly")}
+
+            {/* Phase 4: manual GC entries incl. the two %-of-estimate lines */}
+            <SectionHeader label="01.F - General Conditions — Manual Entries" />
+            {renderManualRows("gcManual")}
 
             {/* Subtotal Row */}
             <tr className="bg-background/80 dark:bg-slate-900/80 border-t border-grid-border text-xs font-bold text-foreground">

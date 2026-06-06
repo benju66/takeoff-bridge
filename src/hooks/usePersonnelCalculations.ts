@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { computePersonnelCosts, PersonnelCalcResult } from "@/lib/calculations";
+import { GC_MANUAL_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // usePersonnelCalculations — Step 2 GC Personnel state & calculations
@@ -12,6 +13,9 @@ export interface UsePersonnelCalculationsReturn {
   setUtilization: (key: string, value: number) => void;
   equipment: { dumpsters: number; toilets: number; electric: number };
   handleEquipmentChange: (field: "dumpsters" | "toilets" | "electric", valStr: string) => void;
+  /** Phase 4: estimator-typed GC values keyed by GcManualConfig.key */
+  manualEntries: Record<string, number>;
+  handleManualEntryChange: (key: string, valStr: string) => void;
   calcResult: PersonnelCalcResult;
   totalGCs: number;
   // Serializable snapshots for persistence
@@ -19,8 +23,12 @@ export interface UsePersonnelCalculationsReturn {
   gcEquipmentOverrides: Record<string, number>;
 }
 
+/** Valid persistence keys for Phase 4 manual GC entries (stale JSONB keys are dropped on load). */
+const MANUAL_GC_KEYS = new Set(GC_MANUAL_DEFAULTS.map((c) => c.key));
+
 export function usePersonnelCalculations(
   durationMonths: number,
+  squareFootage: number,
   isLoaded: boolean,
   initialUtilizations?: Record<string, number>,
   initialEquipment?: Record<string, number>,
@@ -40,6 +48,10 @@ export function usePersonnelCalculations(
   const [eqDumpsters, setEqDumpsters] = useState<number>(initialEquipment?.eqDumpsters ?? 0);
   const [eqToilets, setEqToilets] = useState<number>(initialEquipment?.eqToilets ?? 0);
   const [eqElectric, setEqElectric] = useState<number>(initialEquipment?.eqElectric ?? 0);
+
+  // Phase 4: typed GC entries (lump sums / quantities), persisted alongside
+  // the eq* keys in the same gc_equipment_overrides JSONB snapshot.
+  const [manualEntries, setManualEntries] = useState<Record<string, number>>({});
 
   // ---------------------------------------------------------------------------
   // One-time DB sync: update state once estimate data arrives from the database.
@@ -65,6 +77,12 @@ export function usePersonnelCalculations(
           setEqDumpsters(initialEquipment.eqDumpsters ?? 0);
           setEqToilets(initialEquipment.eqToilets ?? 0);
           setEqElectric(initialEquipment.eqElectric ?? 0);
+          // Phase 4 manual entries share the JSONB snapshot with the eq* keys
+          const extras: Record<string, number> = {};
+          for (const [k, v] of Object.entries(initialEquipment)) {
+            if (MANUAL_GC_KEYS.has(k) && typeof v === "number") extras[k] = v;
+          }
+          setManualEntries(extras);
         }
         hasInitializedRef.current = true;
       });
@@ -102,11 +120,20 @@ export function usePersonnelCalculations(
     else if (field === "electric") setEqElectric(clamped);
   };
 
+  const handleManualEntryChange = (key: string, valStr: string) => {
+    if (!MANUAL_GC_KEYS.has(key)) return;
+    const parsed = valStr === "" ? 0 : parseFloat(valStr) || 0;
+    const clamped = Math.max(0, parsed);
+    setManualEntries((prev) => ({ ...prev, [key]: clamped }));
+  };
+
+  const manualEntriesString = JSON.stringify(manualEntries);
+
   // Compute via pure calculation layer
   const calcResult = useMemo(
-    () => computePersonnelCosts(durationMonths, utilizations, equipment, rateOverrides),
+    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, rateOverrides]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverrides]
   );
 
   // Serializable persistence snapshots (matching existing ProjectEstimate shape)
@@ -114,7 +141,7 @@ export function usePersonnelCalculations(
     utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa,
   };
   const gcEquipmentOverrides: Record<string, number> = {
-    eqDumpsters, eqToilets, eqElectric,
+    eqDumpsters, eqToilets, eqElectric, ...manualEntries,
   };
 
   return {
@@ -122,6 +149,8 @@ export function usePersonnelCalculations(
     setUtilization,
     equipment,
     handleEquipmentChange,
+    manualEntries,
+    handleManualEntryChange,
     calcResult,
     totalGCs: calcResult.grandTotal,
     gcUtilization,

@@ -5,8 +5,10 @@ import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
   EQUIPMENT_DEFAULTS,
+  GC_MANUAL_DEFAULTS,
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_SECTIONS,
   DIVISION_NAMES,
   DIVISION_LABELS,
   SAFETY_RATE_PER_MONTH,
@@ -81,11 +83,12 @@ describe("Staff Role Defaults", () => {
   });
 });
 
-describe("GC / Site Ops → Budget Line Items mapping (gc-siteops Phase 3)", () => {
+describe("GC / Site Ops → Budget Line Items mapping (gc-siteops Phase 3 + 4)", () => {
   const allLines = [
     ...STAFF_ROLE_DEFAULTS,
     ...OPERATIONAL_EXPENSE_DEFAULTS,
     ...EQUIPMENT_DEFAULTS,
+    ...GC_MANUAL_DEFAULTS,
     ...SITE_OPS_DYNAMIC_DEFAULTS,
     ...SITE_OPS_MANUAL_DEFAULTS,
   ];
@@ -103,21 +106,109 @@ describe("GC / Site Ops → Budget Line Items mapping (gc-siteops Phase 3)", () 
     expect(new Set(codes).size).toBe(codes.length);
   });
 
-  it("D2 sign-off encoded: hired cleaning maps to its sibling's BLI code", () => {
+  it("D2 sign-off encoded: all 4 orphan lines map to their sibling's BLI code", () => {
     const hired = SITE_OPS_MANUAL_DEFAULTS.find((l) => l.code === "02-9010.002");
-    expect(hired).toBeDefined();
     expect(hired!.procoreCode).toBe("2-29010.000");
+    const tempOffice = OPERATIONAL_EXPENSE_DEFAULTS.find((l) => l.code === "01-5110.002");
+    expect(tempOffice!.procoreCode).toBe("1-15110.000");
+    const sawcutting = SITE_OPS_MANUAL_DEFAULTS.find((l) => l.code === "02-4100.002");
+    expect(sawcutting!.procoreCode).toBe("2-24100.000");
+    const floorScanning = SITE_OPS_MANUAL_DEFAULTS.find((l) => l.code === "02-9200.002");
+    expect(floorScanning!.procoreCode).toBe("2-29200.000");
+  });
+
+  // ─── Phase 4: full input coverage ──────────────────────────────────
+
+  it("GC lines cover all 34 STEP-2-sourced BLI codes (findings §4.1)", () => {
+    const gcBliCodes = new Set(
+      [...STAFF_ROLE_DEFAULTS, ...OPERATIONAL_EXPENSE_DEFAULTS, ...EQUIPMENT_DEFAULTS, ...GC_MANUAL_DEFAULTS]
+        .map((l) => l.procoreCode)
+    );
+    expect(gcBliCodes.size).toBe(34);
+    for (const code of gcBliCodes) expect(code.startsWith("1-1"), code).toBe(true);
+  });
+
+  it("Site Ops lines cover all 38 STEP-3-sourced BLI codes (findings §4.2)", () => {
+    const siteOpsBliCodes = new Set(
+      [...SITE_OPS_DYNAMIC_DEFAULTS, ...SITE_OPS_MANUAL_DEFAULTS].map((l) => l.procoreCode)
+    );
+    expect(siteOpsBliCodes.size).toBe(38);
+    for (const code of siteOpsBliCodes) expect(code.startsWith("2-2"), code).toBe(true);
+  });
+
+  it("Subcontract cost types match template BLI col B (Phase 4 forensic re-verification, incl. FFE Relocation)", () => {
+    const expectedSubcontract = new Set([
+      "2-24100.000", // Demolition
+      "2-25100.000", // FFE Relocation (caught in Phase 4 — not in the Phase 3 list)
+      "2-28213.000", // Abatement
+      "2-29005.000", // Final Cleaning
+      "2-29045.000", // Temp Access Roads
+      "2-29200.000", // Survey & Layout
+    ]);
+    for (const line of allLines) {
+      const expected = line.costType === "L" ? "L" : expectedSubcontract.has(line.procoreCode) ? "S" : "M";
+      expect(line.costType, `${line.code} → ${line.procoreCode}`).toBe(expected);
+    }
+    // Staff lines are the only Labor lines
+    const laborLines = allLines.filter((l) => l.costType === "L");
+    expect(laborLines).toHaveLength(STAFF_ROLE_DEFAULTS.length);
+  });
+
+  it("persistence keys are unique within each JSONB bucket", () => {
+    const gcKeys = [...EQUIPMENT_DEFAULTS.map((l) => l.key), ...GC_MANUAL_DEFAULTS.map((l) => l.key)];
+    expect(new Set(gcKeys).size).toBe(gcKeys.length);
+    const siteOpsKeys = SITE_OPS_MANUAL_DEFAULTS.map((l) => l.key);
+    expect(new Set(siteOpsKeys).size).toBe(siteOpsKeys.length);
+  });
+
+  it("every Site Ops line belongs to a declared template section", () => {
+    const sectionIds = new Set(SITE_OPS_SECTIONS.map((s) => s.id));
+    for (const line of [...SITE_OPS_DYNAMIC_DEFAULTS, ...SITE_OPS_MANUAL_DEFAULTS]) {
+      expect(sectionIds.has(line.section), `${line.code} section "${line.section}"`).toBe(true);
+    }
+  });
+
+  it("the two %-of-estimate lines carry the template % guidance (findings §5.2)", () => {
+    const safety = GC_MANUAL_DEFAULTS.find((l) => l.code === "01-0610.001");
+    expect(safety!.pctHint).toBe(0.0002);
+    const procore = GC_MANUAL_DEFAULTS.find((l) => l.code === "01-1600.001");
+    expect(procore!.pctHint).toBe(0.0019);
   });
 });
 
 describe("Operational Expense Defaults", () => {
-  it("has exactly 3 expense types", () => {
-    expect(OPERATIONAL_EXPENSE_DEFAULTS).toHaveLength(3);
+  it("has exactly 13 expense lines (3 original + 10 Phase 4 auto lines)", () => {
+    expect(OPERATIONAL_EXPENSE_DEFAULTS).toHaveLength(13);
   });
 
   it("all expenses have valid quantity drivers", () => {
     for (const exp of OPERATIONAL_EXPENSE_DEFAULTS) {
-      expect(["superintendent", "fixed"]).toContain(exp.quantityDriver);
+      expect(["superintendent", "fixed", "sqftPer3000"]).toContain(exp.quantityDriver);
+    }
+  });
+
+  it("only Temporary Fire Extinguishers uses the sqftPer3000 driver (template =J8/3000)", () => {
+    const sqftLines = OPERATIONAL_EXPENSE_DEFAULTS.filter((e) => e.quantityDriver === "sqftPer3000");
+    expect(sqftLines).toHaveLength(1);
+    expect(sqftLines[0].code).toBe("01-5150.001");
+    expect(sqftLines[0].rate).toBe(100);
+  });
+});
+
+describe("Phase 4 manual GC lines", () => {
+  it("has exactly 11 lines (3 qty + 8 lump-sum incl. the two %-lines)", () => {
+    expect(GC_MANUAL_DEFAULTS).toHaveLength(11);
+    expect(GC_MANUAL_DEFAULTS.filter((l) => l.entry === "qty")).toHaveLength(3);
+    expect(GC_MANUAL_DEFAULTS.filter((l) => l.entry === "lumpSum")).toHaveLength(8);
+  });
+
+  it("qty lines carry their template rates; lump-sum lines carry none", () => {
+    for (const line of GC_MANUAL_DEFAULTS) {
+      if (line.entry === "qty") {
+        expect(line.rate, line.code).toBeGreaterThan(0);
+      } else {
+        expect(line.rate, line.code).toBeNull();
+      }
     }
   });
 });

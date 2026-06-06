@@ -26,7 +26,7 @@ const mockLayoutConfig = layoutWithDivisions("01", "02", "03", "04");
 // gc-siteops Phase 3: every export path requires the GC + Site Ops calc
 // results. Zero-input results = a project with no GC/Site Ops entries.
 const zeroGcResult = () =>
-  computePersonnelCosts(0, {}, { dumpsters: 0, toilets: 0, electric: 0 });
+  computePersonnelCosts(0, 0, {}, { dumpsters: 0, toilets: 0, electric: 0 });
 const zeroSiteOpsResult = () =>
   computeSiteOperations(0, 0, { knox: 0, payrollCleaning: 0, hiredCleaning: 0, soilBorings: 0 }, { soilBorings: 0 });
 
@@ -559,20 +559,36 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
     }),
   ];
 
-  // GC fixture: 10 months, Superintendent 100% + PM 50%, all 3 equipment lines
+  // GC fixture: 10 months, sqft 0 (no fire-ext line), Superintendent 100% + PM 50%,
+  // all 3 equipment lines, plus Phase 4 manual entries on three NEW lines.
   // Staff: su = 10×173.2×1.0×110 = 190,520 ; pm = 10×173.2×0.5×120 = 103,920
   // Ops:   small tools 10×500 = 5,000 ; fuel 10×1,200 = 12,000 ; cell 10×135 = 1,350
+  //        + Phase 4 auto: quality 5,000 ; temp office 8,500 ; office equip 2,500 ;
+  //        computers 3,000 ; trailer 8,000 ; fire ext 0 ; gas 9,000 ; water 6,500 ;
+  //        courier 3,500 ; plan repro 2,500  (= +48,500)
   // Equip: 5,000 + 2,000 + 3,000
-  // grandTotal = 322,790
+  // Manual (Phase 4): designArch $12,000 lump ; tempOfficeSetup 1×9,000 ; safetyConsultant $500
+  // grandTotal = 392,790
   const gcResult = () =>
-    computePersonnelCosts(10, { su: 100, pm: 50 }, { dumpsters: 5000, toilets: 2000, electric: 3000 });
+    computePersonnelCosts(
+      10, 0,
+      { su: 100, pm: 50 },
+      { dumpsters: 5000, toilets: 2000, electric: 3000 },
+      { designArch: 12000, tempOfficeSetup: 1, safetyConsultant: 500 }
+    );
+  const GC_TOTAL = 392790;
 
   // Site Ops fixture: 10 months, 10,000 sf, knox 2, payroll 100 hr, hired 50 hr,
-  // soil borings 1 × $2,500
+  // soil borings 1 × $2,500, plus Phase 4 entries on four NEW lines:
+  // demolition 1,000 sf × $6 = 6,000 ; finalCleaning 2 × $2,500 = 5,000 ;
+  // ffeRelocation $7,500 lump ; craneRental $4,000 lump
   // safety 5,000 ; temp prot 2,500 ; hoist 65,000 ; knox 1,300 ;
-  // payroll 7,400 ; hired 2,700 ; soil 2,500 → grandTotal = 86,400
+  // payroll 7,400 ; hired 2,700 ; soil 2,500 → grandTotal = 108,900
   const siteOpsResult = () =>
-    computeSiteOperations(10, 10000, { knox: 2, payrollCleaning: 100, hiredCleaning: 50, soilBorings: 1 }, { soilBorings: 2500 });
+    computeSiteOperations(10, 10000,
+      { knox: 2, payrollCleaning: 100, hiredCleaning: 50, soilBorings: 1, demolition: 1000, finalCleaning: 2, ffeRelocation: 7500, craneRental: 4000 },
+      { soilBorings: 2500 });
+  const SITE_OPS_TOTAL = 108900;
 
   it("sums shared-BLI-code lines in the GC/Site Ops rollup (D2: payroll + hired cleaning)", () => {
     const rollup = rollupGcSiteOps(collectGcSiteOpsLines(gcResult(), siteOpsResult()));
@@ -585,8 +601,8 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
     const readiness = validateExportReadiness(step4Rows, gcResult(), siteOpsResult());
     expect(readiness.ok).toBe(true);
     expect(readiness.blockers).toHaveLength(0);
-    expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
-    expect(readiness.reconciliation.rollupTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
+    expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(32400 + GC_TOTAL + SITE_OPS_TOTAL, 2);
+    expect(readiness.reconciliation.rollupTotal).toBeCloseTo(32400 + GC_TOTAL + SITE_OPS_TOTAL, 2);
   });
 
   it("writes GC + Site Ops values into their Budget Line Items rows; full 217-row tie-out; no live SUMIF survives", async () => {
@@ -643,9 +659,22 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
     // D3: the broken 1-10000.000 row gets $0 — granular GC rows carry the dollars
     expect(byCode.get("1-10000.000")).toBeCloseTo(0, 2);
 
-    // GC criteria without an app input line export $0 (findings §6)
-    expect(byCode.get("1-10130.000")).toBeCloseTo(0, 2); // Design - Architecture
-    expect(byCode.get("2-29415.000")).toBeCloseTo(0, 2); // Crane Rental
+    // Phase 4 NEW lines land on their BLI codes
+    expect(byCode.get("1-14010.000")).toBeCloseTo(5000, 2);   // Quality (auto, 10 mo × $500)
+    expect(byCode.get("1-15120.000")).toBeCloseTo(8000, 2);   // Storage Trailer (auto)
+    expect(byCode.get("1-10130.000")).toBeCloseTo(12000, 2);  // Design - Architecture (lump)
+    expect(byCode.get("1-10610.000")).toBeCloseTo(500, 2);    // Safety Consultant (%-line, typed $)
+    // D2a: Temp Office Setup (manual 1×$9,000) + Temp Office monthly (auto 10×$850)
+    // share sibling BLI row 1-15110.000
+    expect(byCode.get("1-15110.000")).toBeCloseTo(9000 + 8500, 2);
+    expect(byCode.get("2-24100.000")).toBeCloseTo(6000, 2);   // Demolition (qty 1,000 sf × $6)
+    expect(byCode.get("2-29005.000")).toBeCloseTo(5000, 2);   // Final Cleaning (qty 2 × $2,500)
+    expect(byCode.get("2-25100.000")).toBeCloseTo(7500, 2);   // FFE Relocation (lump)
+    expect(byCode.get("2-29415.000")).toBeCloseTo(4000, 2);   // Crane Rental (lump)
+
+    // Lines without an estimator entry still export $0
+    expect(byCode.get("1-10001.000")).toBeCloseTo(0, 2);      // Preconstruction Fees
+    expect(byCode.get("2-29530.000")).toBeCloseTo(0, 2);      // Gypcrete Testing
 
     // Full reconciliation: Σ all 217 BLI values = Σ line items + GC + Site Ops
     let bliTotal = 0;
@@ -653,7 +682,7 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
       expect(typeof val).toBe("number"); // every row computed — no formulas left
       bliTotal += val as number;
     }
-    expect(bliTotal).toBeCloseTo(32400 + 322790 + 86400, 2);
+    expect(bliTotal).toBeCloseTo(32400 + GC_TOTAL + SITE_OPS_TOTAL, 2);
 
     // No live SUMIF survives anywhere in the BLI sheet XML
     const outputZip = await JSZip.loadAsync(arrayBuffer);
@@ -677,6 +706,12 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
     expect(byCodeType.get("1-10420.000::L")).toBeCloseTo(190520, 2);
     // D2: payroll + hired cleaning grouped on one code as Material
     expect(byCodeType.get("2-29010.000::M")).toBeCloseTo(10100, 2);
+    // Phase 4: FFE Relocation exports as Subcontract ("S", template BLI col B
+    // — caught in the Phase 4 cost-type re-verification)
+    expect(byCodeType.get("2-25100.000::S")).toBeCloseTo(7500, 2);
+    // Phase 4: Final Cleaning is "S"; Crane Rental is "M"
+    expect(byCodeType.get("2-29005.000::S")).toBeCloseTo(5000, 2);
+    expect(byCodeType.get("2-29415.000::M")).toBeCloseTo(4000, 2);
     // Zero-dollar GC lines emit no CSV row (no budget noise)
     expect([...byCodeType.keys()].some((k) => k.startsWith("1-10310.000"))).toBe(false);
   });
