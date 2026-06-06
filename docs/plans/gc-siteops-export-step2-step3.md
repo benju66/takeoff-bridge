@@ -509,7 +509,7 @@ phase must know. Empty until Phase 1 runs.)
   rollup value (normally $0), so estimator-entered dollars on the STEP 4 GC grid rows are preserved,
   not forced to zero.
 
-- **Phase 4 (2026-06-06, commit recorded in follow-up docs commit):** Full GC + Site Ops input coverage —
+- **Phase 4 (2026-06-06, commit `73fadf9`):** Full GC + Site Ops input coverage —
   21 new GC lines (10 auto duration/sqft÷3000 lines extending `OPERATIONAL_EXPENSE_DEFAULTS`; 11 manual
   in new `GC_MANUAL_DEFAULTS`) + 34 new Site Ops lines (`SITE_OPS_MANUAL_DEFAULTS` with entry kinds
   qty/qtyRate/lumpSum, grouped by `SITE_OPS_SECTIONS` mirroring the template's 8 subtotal sections).
