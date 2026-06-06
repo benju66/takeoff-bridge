@@ -118,7 +118,7 @@ export function InfrastructureStep({
                           {isLump
                             ? `${cfg.label} (Lump Sum — enter total $)`
                             : isQtyRate
-                              ? `${cfg.label} (Lump Sum custom overrides)`
+                              ? `${cfg.label} (enter quantity and rate)`
                               : `${cfg.label} (Rate $${(cfg.rate ?? 0).toLocaleString()}/${cfg.unit})`}
                         </td>
                         <td className={unitCellClass}>{cfg.unit}</td>
