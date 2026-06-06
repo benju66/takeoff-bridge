@@ -430,7 +430,7 @@ confirmed mapping. P3 depends on P2's corrected catalog + P1's linkage map. P4 i
 (Each phase appends 3–5 lines here on completion: what landed, commit hash, anything the next
 phase must know. Empty until Phase 1 runs.)
 
-- **Phase 1 (2026-06-05):** Forensic verify complete — findings in
+- **Phase 1 (2026-06-05, commit `461b6dc`):** Forensic verify complete — findings in
   `docs/plans/2026-06-05-gc-siteops-phase1-findings.md`. Template AGREES with user mappings
   (B-1 in sync; B-2 fully present; all 217 BLI codes valid; valid-codes artifact current at 224).
   §0.C direction was backwards: STEP 4 rows 12–24 pull FROM STEP 2/3 subtotals; no BLI row references
