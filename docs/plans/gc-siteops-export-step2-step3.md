@@ -791,5 +791,110 @@ list omitted 02-9005.001 Final Cleaning) and NEVER invent rates.
 Model: Claude Opus (latest).
 ```
 
+### → Phase 5 (estimate-page linkage — P4 complete 2026-06-06, ready to run)
+
+> *(Enriched 2026-06-06 with Phase 1–4 verified facts. P5 = estimate-page linkage + modifier-basis
+> decision + double-count guard; P6 = polish. See the resequenced phase definitions in §13.)*
+
+```
+Implement PHASE 5 ONLY of the plan at:
+docs/plans/gc-siteops-export-step2-step3.md
+Read the whole plan first — especially §13 "Phases 4–6 — RESEQUENCED" (the
+authoritative P5 scope) and the §13 handoff log (P1–P4 outcomes). Then read
+the Phase 1 findings doc:
+docs/plans/2026-06-05-gc-siteops-phase1-findings.md — especially §5.1 (the
+STEP 4 ← STEP 2/3 pull map), §5.3 (no write-order constraint), and §8
+(D3 + the D4 legacy formula bugs). This is a phased plan: do Phase 5 and
+nothing else, then stop. Phase 6 (STEP 2/3 sheet detail, editable rates)
+is separate — do not start it.
+== CONTEXT ==
+Takeoff Bridge is a single-company estimating app. I'm the system architect
+(non-developer — explain things plainly, mark a (Recommended) option on
+every choice). Phase 1 (461b6dc) forensically verified the template;
+Phase 2 (5597048) re-synced catalog/DB; Phase 3 (370e66b) made all 217
+Budget Line Items rows export computed values (no live SUMIFs); Phase 4
+(73fadf9) gave every STEP 2/3 source line an app input — all 34 GC + 38
+Site Ops BLI codes are reachable and the export ties out (gate delta $0).
+Build + 202 unit tests green at P4 close.
+== GOAL ==
+The STEP 4 estimate page should show GC + Site Ops totals the way the
+template's STEP 4 rows 12–24 pull STEP 2/3 subtotals — READ-ONLY, linked
+live from the Step 2/3 modules — so the on-page subtotal, the modifiers
+(fee/contingency/insurance %), and cost-per-SF reflect the whole job.
+Today computeTakeoffSummary() computes from STEP 4 grid rows only;
+GC/Site Ops dollars exist only on Steps 2/3 and in the export.
+== VERIFIED FACTS (P1–P4 — build on these) ==
+- Template pull map (findings §5.1): STEP 4 rows 12–24 take col H from
+  STEP 2/3 SUBTOTALS (01-0000.001←STEP2 I58; 01-0400.002←I16;
+  02-0000.001←STEP3 I29; 02-4100.002←I35; 02-9200.005←I51; 02-9300.006←I62;
+  02-9400.007←I72). D4 legacy bugs: 02-9005.003 / 02-9070.004 / 02-9500.008
+  pull line cells I38/I43/blank-I81 instead of subtotals I40/I45/I82 — the
+  template's own col-S checks prove the subtotals are the intent; the app
+  implements the INTENT, not the bug.
+- NO BLI row references STEP 4 rows 12–24 (findings §5.1) — linked rows must
+  stay OUT of the Procore rollup; the 34+38 granular GC/Site Ops rows carry
+  the dollars.
+- DOUBLE-COUNT TRAP to close (P5 scope, §13): the STEP 4 catalog maps
+  01-0000.001 / 01-0400.002 → 1-10000.000 and the 02-x division rows →
+  2-20000.000; dollars manually typed on those STEP 4 grid rows TODAY reach
+  Procore alongside the granular GC/Site Ops rows. Related D3 (P3): the
+  broken 1-10000.000 BLI row receives the STEP 4 rollup value — $0 in the
+  normal flow, but it preserves estimator-typed dollars on those rows.
+- App totals already available in page.tsx and persisted: personnel.totalGCs
+  (= PersonnelCalcResult.grandTotal) and infrastructure.siteOperationsTotal
+  (project_estimates.general_conditions_total / site_operations_total).
+  computeTakeoffSummary(rows, sqft, units, rates) in calculations.ts is the
+  modifier engine and SOLE calculation authority.
+- Reconciliation gate (§7 Option A, live since P3): validateExportReadiness
+  = Σ line items + GC + Site Ops vs Σ BLI rollup. GC/Site Ops dollars must
+  keep exactly ONE representation — if linked totals also appear as STEP 4
+  rows, lineItemTotal double-counts and the gate breaks.
+- P4 note: the two %-line hints (Safety Consultant 0.02% / Procore 0.19%)
+  multiply pctHint × takeoffSummary.totalEstimatedCost — if the modifier
+  basis changes what that total means, re-check the hint still matches the
+  template's reference (STEP 4 I341).
+- If uncommitted market-sector changes are in the working tree, leave them
+  alone — separate feature, separate commit (see memory).
+== FINANCIAL DECISIONS TO RESOLVE WITH ME AT START (sign-off BEFORE code) ==
+- Modifier basis: the template computes modifiers and cost-per-SF on I331,
+  which INCLUDES GC + Site Ops (rows 12–24). The app today computes
+  modifiers on STEP 4 grid rows only. Propose options WITH dollar examples
+  (e.g. 5% fee on subtotal-with-GCs vs without on a sample project), mark
+  (Recommended = match template). calculations.ts changes only after I
+  sign off.
+- Estimate-page rendering: read-only pinned division rows (template-like)
+  vs a summary strip above the modifier footer — options + (Recommended).
+- Double-count closure mechanism: block/ignore typed dollars on the
+  division-total STEP 4 rows vs exclude those rows from rollup + gate —
+  options + (Recommended). Surface what happens to existing projects that
+  already have dollars typed there (no silent rewrite).
+== GUARDRAILS ==
+- AGENTS.md: present an implementation plan table for my approval BEFORE
+  writing code; npm run test green before presenting work.
+- calculations.ts is the sole calculation authority; never invent financial
+  values. Linked totals are READ-ONLY on STEP 4 — Steps 2/3 remain the
+  input surface.
+- Prefer a computed/display layer over mutating grid rows; if any STEP 4
+  row mutation is unavoidable it MUST go through commandHistory.pushCommand
+  with full undo fidelity (AGENTS.md).
+- resolveProcoreCode / cost_code_map stay UNTOUCHED; the GC/Site Ops
+  mapping home is constants.ts. DB access only through src/lib/db.ts;
+  line-item writes only via the save_estimate_line_items RPC. If a schema
+  change is genuinely needed: supabase_schema.sql first + my approval +
+  invoke the supabase skill before any DB code.
+- Windows + PowerShell: keep inline commands short; script files for
+  anything longer than ~one line; no emoji in PowerShell scripts.
+== EXIT CRITERIA ==
+- npm run build + npm run test green (fix regressions before delivery)
+- Manual check: estimate page shows the linked GC + Site Ops totals;
+  modifiers + cost-per-SF follow the signed-off basis; export of a project
+  with GC + Site Ops + STEP 4 dollars still ties out (reconciliation gate
+  passes; no double-counted Procore dollars on 1-10000.000 / 2-20000.000)
+- Commit; append a 3–5 line handoff note to §13 "Handoff log"; push the
+  branch
+- Then STOP. Do not start Phase 6.
+Model: Claude Opus (latest).
+```
+
 **Resolved (B-1):** `03-0000.010/.011/.012` and `03-4500.001` verified in sync — no changes needed.
 **Resolved:** `32-1313` empty-parent question — `32-1313.001` is repurposed as the Concrete Paving line, so the group is not empty.
