@@ -7,7 +7,8 @@ import {
   rollupGcSiteOps,
   collectGcSiteOpsLines,
 } from "../lib/exporter";
-import { computePersonnelCosts, computeSiteOperations } from "../lib/calculations";
+import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals } from "../lib/calculations";
+import { LINKED_DIVISION_ROWS } from "../lib/constants";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
 import fs from "fs";
@@ -362,10 +363,14 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
     procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
     description: "Footings", matchedQty: 80, unitPrice: 180, total: 14400, uom: "CY",
   });
+  // NOTE (Phase 5): itemId must NOT be a linked division row (02-0000.001 et
+  // al. are excluded from the rollup) — this fixture exercises the BLI-append
+  // path for a mapped code absent from the sheet, so it uses a manual itemId.
   const div02Row = baseRow({
-    id: "row-02-0000.001", itemId: "02-0000.001",
+    id: "row-02-1000.001", itemId: "02-1000.001",
     procoreParentCode: "2-20000.000", procoreCode: "2-20000.000",
     description: "Demolition Allowance", matchedQty: 1, unitPrice: 5000, total: 5000,
+    source: "manual",
   });
   const unmappedWithDollars = baseRow({
     id: "manual-unmapped-dollars", itemId: "03-2000.001",
@@ -714,5 +719,201 @@ describe("GC + Site Ops Budget Line Items export (Phase 3)", () => {
     expect(byCodeType.get("2-29415.000::M")).toBeCloseTo(4000, 2);
     // Zero-dollar GC lines emit no CSV row (no budget noise)
     expect([...byCodeType.keys()].some((k) => k.startsWith("1-10310.000"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gc-siteops Phase 5 — estimate-page linkage + double-count trap closure
+// ---------------------------------------------------------------------------
+
+describe("Linked division rows & double-count closure (Phase 5)", () => {
+  const mockColumns: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProject: Project = {
+    id: "project-5",
+    name: "Phase 5 Linkage Test Project",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-06",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x",
+    classification: "",
+    itemId: "",
+    procoreParentCode: "",
+    procoreCode: "",
+    description: "",
+    matchedQty: 0,
+    uom: "LS",
+    unitPrice: 0,
+    total: 0,
+    isMapped: true,
+    rawQuantities: [],
+    costType: "S",
+    customFields: {},
+    source: "template",
+    ...overrides,
+  });
+
+  // The 10 template-seeded linked division rows as they exist in a project
+  // grid (qty 0; catalog maps them to the division parent BLI codes)
+  const linkedGridRows = LINKED_DIVISION_ROWS.map((cfg) =>
+    baseRow({
+      id: `row-${cfg.itemId}`,
+      itemId: cfg.itemId,
+      procoreParentCode: cfg.itemId.startsWith("01") ? "1-10000.000" : "2-20000.000",
+      procoreCode: cfg.itemId.startsWith("01") ? "1-10000.000" : "2-20000.000",
+      description: cfg.description,
+      matchedQty: 0,
+      unitPrice: 0,
+      costType: "L",
+    })
+  );
+
+  // A linked row carrying STRAY typed dollars — the double-count trap
+  const strayGcRow = baseRow({
+    id: "row-01-0000.001-stray",
+    itemId: "01-0000.001",
+    procoreParentCode: "1-10000.000",
+    procoreCode: "1-10000.000",
+    description: "General Conditions",
+    matchedQty: 2,
+    unitPrice: 500, // $1,000 typed directly on the division-total row
+    costType: "L",
+  });
+
+  const concreteRow = baseRow({
+    id: "row-03-0000.001",
+    itemId: "03-0000.001",
+    procoreParentCode: "3-30000.000",
+    procoreCode: "3-30000.000",
+    description: "Cast In-Place Concrete",
+    matchedQty: 150,
+    unitPrice: 216, // $32,400
+    uom: "CY",
+    costType: "M",
+  });
+
+  const gcResult = () =>
+    computePersonnelCosts(10, 0, { su: 100 }, { dumpsters: 5000, toilets: 0, electric: 0 });
+  const siteOpsResult = () =>
+    computeSiteOperations(10, 10000, { demolition: 1000, craneRental: 4000 }, {});
+
+  it("rollupByProcoreCode excludes linked division rows — even with typed dollars", () => {
+    const rollup = rollupByProcoreCode([concreteRow, strayGcRow, ...linkedGridRows.slice(1)]);
+    expect(rollup["3-30000.000"]).toBeCloseTo(32400, 2);
+    expect(rollup["1-10000.000"]).toBeUndefined();
+    expect(rollup["2-20000.000"]).toBeUndefined();
+  });
+
+  it("gate ties out with stray dollars on a linked row (excluded on both sides)", () => {
+    const gc = gcResult();
+    const so = siteOpsResult();
+    const readiness = validateExportReadiness([concreteRow, strayGcRow, ...linkedGridRows.slice(1)], gc, so);
+    expect(readiness.ok).toBe(true);
+    expect(readiness.blockers).toHaveLength(0);
+    // Stray $1,000 counts nowhere; GC/Site Ops dollars keep ONE representation
+    expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(32400 + gc.grandTotal + so.grandTotal, 2);
+    expect(readiness.reconciliation.rollupTotal).toBeCloseTo(32400 + gc.grandTotal + so.grandTotal, 2);
+  });
+
+  it("workbook: STEP 4 rows 12–24 carry the linked Step 2/3 values; division BLI codes stay $0", async () => {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const gc = gcResult();
+    const so = siteOpsResult();
+    const linked = computeLinkedDivisionTotals(gc, so);
+    const linkedByItemId = new Map(linked.map((l) => [l.itemId, l.total]));
+
+    const blob = await generateExcelWorkbook(
+      [concreteRow, strayGcRow, ...linkedGridRows.slice(1)],
+      mockProject,
+      mockColumns,
+      mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer,
+      gc,
+      so
+    );
+    const arrayBuffer = await blob.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(arrayBuffer) as never);
+
+    // STEP 4 sheet: the linked rows (template rows 12–24) carry qty 1 × the
+    // computed Step 2/3 subtotal — values, not the grid's zeros, and not the
+    // stray typed dollars. (No insertions above row 24 in this fixture.)
+    const step4 = workbook.getWorksheet("STEP 4 - ESTIMATE")!;
+    const linkedRowPositions: Record<string, number> = {
+      "01-0000.001": 12, "01-0400.002": 13, "02-0000.001": 17, "02-4100.002": 18,
+      "02-9005.003": 19, "02-9070.004": 20, "02-9200.005": 21, "02-9300.006": 22,
+      "02-9400.007": 23, "02-9500.008": 24,
+    };
+    for (const [itemId, rowNum] of Object.entries(linkedRowPositions)) {
+      const qty = step4.getRow(rowNum).getCell(6).value;   // F
+      const price = step4.getRow(rowNum).getCell(8).value; // H
+      expect(qty, `${itemId} qty`).toBe(1);
+      expect(price, `${itemId} value`).toBeCloseTo(linkedByItemId.get(itemId)!, 2);
+    }
+    // Supervision = the superintendent staff line; GC = remainder (intent, not D4 bugs)
+    const supervision = linkedByItemId.get("01-0400.002")!;
+    expect(supervision).toBeCloseTo(10 * 173.2 * 110, 2);
+    expect(linkedByItemId.get("01-0000.001")!).toBeCloseTo(gc.grandTotal - supervision, 2);
+
+    // Budget Line Items: the division parent codes carry NO dollars (D3 +
+    // trap closure) and the sheet total has no double-count
+    const bli = workbook.getWorksheet("Budget Line Items")!;
+    const byCode = new Map<string, ExcelJS.CellValue>();
+    bli.eachRow((row, rowNum) => {
+      if (rowNum < 2) return;
+      const code = String(row.getCell(1).value ?? "").trim();
+      if (code && code.includes("-")) byCode.set(code, row.getCell(8).value);
+    });
+    expect(byCode.get("1-10000.000")).toBeCloseTo(0, 2);
+    expect(byCode.has("2-20000.000")).toBe(false); // never appended
+    let bliTotal = 0;
+    for (const val of byCode.values()) bliTotal += val as number;
+    expect(bliTotal).toBeCloseTo(32400 + gc.grandTotal + so.grandTotal, 2);
+  }, 30000);
+
+  it("Procore CSV: no division-total codes; modifier rows use the combined basis", () => {
+    const gc = gcResult();
+    const so = siteOpsResult();
+    const csv = generateProcoreBudget(
+      [concreteRow, strayGcRow, ...linkedGridRows.slice(1)],
+      mockProject,
+      gc,
+      so
+    );
+    const lines = csv.split("\r\n").slice(1);
+    const byCode = new Map<string, number>();
+    for (const line of lines) {
+      const cols = line.split(",");
+      const code = cols[0].replace(/^"|"$/g, "");
+      byCode.set(code, parseFloat(cols[cols.length - 1].replace(/^"|"$/g, "")));
+    }
+    // The trap is closed: no dollars on the division parent codes
+    expect(byCode.has("1-10000.000")).toBe(false);
+    expect(byCode.has("2-20000.000")).toBe(false);
+    // Modifier basis = takeoff + GC + Site Ops (template I331), stray excluded
+    const basis = 32400 + gc.grandTotal + so.grandTotal;
+    expect(byCode.get("60-4000.001")).toBeCloseTo(basis * 0.05, 2); // Fee 5%
+    expect(byCode.get("60-2020.001")).toBeCloseTo(basis * 0.01, 2); // GL 1%
   });
 });

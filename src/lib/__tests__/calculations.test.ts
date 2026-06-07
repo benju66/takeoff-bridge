@@ -6,9 +6,11 @@ import {
   computeTakeoffSummary,
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
+  computeLinkedDivisionTotals,
   evaluateDataFidelity,
   evaluateMathExpression,
 } from '../calculations';
+import { LINKED_DIVISION_ROWS, SUPERVISION_STAFF_CODES } from '../constants';
 import { ProcessedTakeoffRow } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -536,6 +538,148 @@ describe('computeSiteOperations', () => {
     const result = computeSiteOperations(1, 1, {}, {});
     const distinctBliCodes = new Set([...result.dynamicLines, ...result.manualLines].map((l) => l.procoreCode));
     expect(distinctBliCodes.size).toBe(38);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// computeLinkedDivisionTotals (gc-siteops Phase 5)
+// ═══════════════════════════════════════════════════════════════════
+
+describe('computeLinkedDivisionTotals', () => {
+  // Real calc results — values flow from the calculation authority, never invented
+  const gc = computePersonnelCosts(
+    12,
+    30000,
+    { ex: 50, su: 100, srSu: 25 },
+    { dumpsters: 1000, toilets: 2000, electric: 3000 },
+    { designCivil: 18500, tempOfficeSetup: 1 }
+  );
+  const siteOps = computeSiteOperations(
+    12,
+    10000,
+    { knox: 2, demolition: 500, sawcutting: 950, finalCleaning: 3, swpppPermit: 1, surveyLayout: 4000, equipmentRental: 2, materialsTesting: 6000 },
+    {}
+  );
+  const linked = computeLinkedDivisionTotals(gc, siteOps);
+  const byItemId = new Map(linked.map((l) => [l.itemId, l.total]));
+
+  it('returns one total per linked division row, in link-table order', () => {
+    expect(linked.map((l) => l.itemId)).toEqual(LINKED_DIVISION_ROWS.map((c) => c.itemId));
+  });
+
+  it('Supervision (01-0400.002) = the superintendent staff lines (template STEP 2 I16)', () => {
+    const supervision = gc.staffLines
+      .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+      .reduce((s, l) => s + l.total, 0);
+    expect(supervision).toBeGreaterThan(0);
+    expect(byItemId.get('01-0400.002')).toBeCloseTo(supervision);
+  });
+
+  it('General Conditions (01-0000.001) = GC grand total minus supervision (template I58)', () => {
+    const supervision = byItemId.get('01-0400.002')!;
+    expect(byItemId.get('01-0000.001')).toBeCloseTo(gc.grandTotal - supervision);
+  });
+
+  it('Demolition (02-4100.002) = the 02.B section: demolition + sawcutting lines', () => {
+    // 500 sf × $6 + $950 lump sum — the STEP 3 sawcutting line reuses the
+    // string "02-4100.002" as its own code; the section sum must not be
+    // confused by that collision.
+    expect(byItemId.get('02-4100.002')).toBeCloseTo(500 * 6 + 950);
+  });
+
+  it('section spot-checks: SWPPP, Survey, Special Inspections', () => {
+    expect(byItemId.get('02-9070.004')).toBeCloseTo(1 * 400);          // 02.D
+    expect(byItemId.get('02-9200.005')).toBeCloseTo(4000);             // 02.E lump sum
+    expect(byItemId.get('02-9500.008')).toBeCloseTo(6000);             // 02.H lump sum
+  });
+
+  it('the 10 linked totals sum to GC total + Site Ops total exactly', () => {
+    const sum = linked.reduce((s, l) => s + l.total, 0);
+    expect(sum).toBeCloseTo(gc.grandTotal + siteOps.grandTotal);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// computeTakeoffSummary — Phase 5 linked modifier basis
+// ═══════════════════════════════════════════════════════════════════
+
+describe('computeTakeoffSummary — linked GC/Site Ops basis (Phase 5)', () => {
+  const rates = {
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: 'none',
+  };
+  const linkedFixture = [
+    { itemId: '01-0000.001', description: 'General Conditions', sourceLabel: '', total: 150000 },
+    { itemId: '02-0000.001', description: 'Site Operations', sourceLabel: '', total: 80000 },
+  ];
+
+  it('modifiers and cost-per-SF compute on takeoff + linked values (template I331 basis)', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10000 }), // takeoff $1,000,000
+      makeRow({ id: 'row-gc', itemId: '01-0000.001', matchedQty: 0, unitPrice: 43300 }),
+      makeRow({ id: 'row-so', itemId: '02-0000.001', matchedQty: 0, unitPrice: 0 }),
+    ];
+    const result = computeTakeoffSummary(rows, 50000, 10, rates, linkedFixture);
+    expect(result.takeoffSubtotal).toBe(1000000);
+    expect(result.linkedDivisionsTotal).toBe(230000);
+    expect(result.subtotal).toBe(1230000);
+    expect(result.fee).toBeCloseTo(61500);          // 5% on the combined basis
+    expect(result.glInsurance).toBeCloseTo(12300);  // 1% on the combined basis
+    expect(result.totalEstimatedCost).toBeCloseTo(1303800);
+    expect(result.costPerSf).toBeCloseTo(1303800 / 50000);
+  });
+
+  it('stray typed dollars on a linked row count nowhere (trap closure)', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10 }), // takeoff $1,000
+      makeRow({ id: 'row-gc', itemId: '01-0000.001', matchedQty: 2, unitPrice: 500 }), // stray $1,000
+    ];
+    const result = computeTakeoffSummary(rows, 1000, 10, rates, [linkedFixture[0]]);
+    // Linked value (150000) counts; the typed $1,000 does not
+    expect(result.subtotal).toBe(1000 + 150000);
+  });
+
+  it('a linked value only counts while its row is present (Amendment-F filtered views)', () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 10 })]; // no linked rows visible
+    const result = computeTakeoffSummary(rows, 1000, 10, rates, linkedFixture);
+    expect(result.subtotal).toBe(1000);
+    expect(result.linkedDivisionsTotal).toBe(0);
+  });
+
+  it('a duplicated linked itemId counts its linked value once', () => {
+    const rows = [
+      makeRow({ id: 'row-a', itemId: '01-0000.001', matchedQty: 0, unitPrice: 0 }),
+      makeRow({ id: 'row-b', itemId: '01-0000.001', matchedQty: 0, unitPrice: 0 }),
+    ];
+    const result = computeTakeoffSummary(rows, 1000, 10, rates, [linkedFixture[0]]);
+    expect(result.subtotal).toBe(150000);
+  });
+
+  it('omitting linkedTotals keeps linked rows at $0 (never their typed dollars)', () => {
+    const rows = [
+      makeRow({ matchedQty: 100, unitPrice: 10 }),
+      makeRow({ id: 'row-gc', itemId: '01-0000.001', matchedQty: 1, unitPrice: 99999 }),
+    ];
+    const result = computeTakeoffSummary(rows, 1000, 10, rates);
+    expect(result.subtotal).toBe(1000);
+  });
+
+  it('division breakdown counts linked rows at their linked value', () => {
+    const rows = [
+      makeRow({ itemId: '03-1000', matchedQty: 100, unitPrice: 10 }), // $1,000 → Div 03
+      makeRow({ id: 'row-gc', itemId: '01-0000.001', matchedQty: 0, unitPrice: 43300 }),
+    ];
+    const breakdown = computeDivisionBreakdown(rows, 151000, [linkedFixture[0]]);
+    const div01 = breakdown.find((d) => d.code === '01');
+    expect(div01!.total).toBe(150000);
+    const div03 = breakdown.find((d) => d.code === '03');
+    expect(div03!.total).toBe(1000);
   });
 });
 

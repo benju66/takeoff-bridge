@@ -435,6 +435,70 @@ export const SITE_OPS_MANUAL_DEFAULTS: SiteOpsManualConfig[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// STEP 4 ← STEP 2/3 Linked Division Rows (gc-siteops Phase 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * How a linked STEP 4 division row derives its value from the Step 2/3 calc
+ * results (template pull map — Phase 1 findings §5.1, INTENT not the D4 bugs):
+ *  - "gcSupervision": Σ staff lines whose code is in SUPERVISION_STAFF_CODES
+ *                     (template STEP 2 I16 = Total Supervision)
+ *  - "gcGeneral":     personnel grandTotal − supervision
+ *                     (template STEP 2 I58 = Total Design, PM and GCs)
+ *  - "siteOpsSection": Σ Site Ops lines in one template subtotal section
+ */
+export type LinkedDivisionSource =
+  | { kind: "gcSupervision" }
+  | { kind: "gcGeneral" }
+  | { kind: "siteOpsSection"; section: SiteOpsSection };
+
+export interface LinkedDivisionRowConfig {
+  /** STEP 4 catalog itemId (template col C — codes kept as-is, user decision 2026-06-06) */
+  itemId: string;
+  /** Catalog description, for banner/test readability */
+  description: string;
+  /** Where the linked value comes from */
+  source: LinkedDivisionSource;
+  /** UI hint, e.g. "Step 3 — 02.B Demolition" */
+  sourceLabel: string;
+}
+
+/** STEP 2 staff codes forming the template's "Total Supervision" subtotal (I16). */
+export const SUPERVISION_STAFF_CODES = ["01-0410.001", "01-0420.001", "01-0430.001"];
+
+/**
+ * The 10 STEP 4 division-total rows that the template links to STEP 2/3
+ * subtotals (rows 12–24). In the app these rows are READ-ONLY displays fed by
+ * the Step 2/3 modules and are EXCLUDED from the Procore rollup, the export
+ * gate, and manual entry — the 34+38 granular GC/Site Ops BLI codes carry the
+ * dollars (double-count trap closure, user-approved 2026-06-06).
+ *
+ * ⚠ Match these itemIds against STEP 4 grid rows ONLY. The Step 3 source line
+ * "Demolition - Sawcutting" reuses the string "02-4100.002" as its STEP 3
+ * criterion code — same text, different sheet, unrelated line. Never join this
+ * table to GC/Site Ops line configs by code.
+ */
+export const LINKED_DIVISION_ROWS: readonly LinkedDivisionRowConfig[] = [
+  { itemId: "01-0000.001", description: "General Conditions",          source: { kind: "gcGeneral" },     sourceLabel: "Step 2 — Design, PM and GCs" },
+  { itemId: "01-0400.002", description: "Supervision",                 source: { kind: "gcSupervision" }, sourceLabel: "Step 2 — Supervision" },
+  { itemId: "02-0000.001", description: "Site Operations",             source: { kind: "siteOpsSection", section: "siteOperations" },     sourceLabel: "Step 3 — 02.A Site Operations" },
+  { itemId: "02-4100.002", description: "Demolition",                  source: { kind: "siteOpsSection", section: "demolition" },         sourceLabel: "Step 3 — 02.B Demolition" },
+  { itemId: "02-9005.003", description: "Final Cleaning",              source: { kind: "siteOpsSection", section: "finalCleaning" },      sourceLabel: "Step 3 — 02.C Final Cleaning" },
+  { itemId: "02-9070.004", description: "SWPPP Permit",                source: { kind: "siteOpsSection", section: "swppp" },              sourceLabel: "Step 3 — 02.D SWPPP Permit" },
+  { itemId: "02-9200.005", description: "Survey and Layout",           source: { kind: "siteOpsSection", section: "survey" },             sourceLabel: "Step 3 — 02.E Survey & Layout" },
+  { itemId: "02-9300.006", description: "Building and Site Services",  source: { kind: "siteOpsSection", section: "buildingServices" },   sourceLabel: "Step 3 — 02.F Building and Site Services" },
+  { itemId: "02-9400.007", description: "Site Equipment",              source: { kind: "siteOpsSection", section: "siteEquipment" },      sourceLabel: "Step 3 — 02.G Site Equipment" },
+  { itemId: "02-9500.008", description: "Special Inspections",         source: { kind: "siteOpsSection", section: "specialInspections" }, sourceLabel: "Step 3 — 02.H Special Inspections" },
+];
+
+const LINKED_DIVISION_ITEM_ID_SET = new Set(LINKED_DIVISION_ROWS.map((r) => r.itemId));
+
+/** True when a STEP 4 grid row is one of the 10 linked division-total rows. */
+export function isLinkedDivisionRow(itemId: string | null | undefined): boolean {
+  return LINKED_DIVISION_ITEM_ID_SET.has((itemId || "").trim());
+}
+
+// ---------------------------------------------------------------------------
 // Search & Filter Defaults
 // ---------------------------------------------------------------------------
 export const SEARCH_DEBOUNCE_MS = 300;

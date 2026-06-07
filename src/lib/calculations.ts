@@ -16,6 +16,10 @@ import {
   DIVISION_NAMES,
   COMMODITY_THRESHOLD,
   GcCostType,
+  LINKED_DIVISION_ROWS,
+  SUPERVISION_STAFF_CODES,
+  SiteOpsSection,
+  isLinkedDivisionRow,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -191,11 +195,66 @@ export function computeSiteOperations(
 }
 
 // ---------------------------------------------------------------------------
+// STEP 4 ← STEP 2/3 Linked Division Totals (gc-siteops Phase 5)
+// ---------------------------------------------------------------------------
+
+export interface LinkedDivisionTotal {
+  itemId: string;
+  description: string;
+  sourceLabel: string;
+  total: number;
+}
+
+/**
+ * Computes the live value of each of the 10 linked STEP 4 division rows from
+ * the Step 2/3 calc results, per the template pull map (findings §5.1 INTENT —
+ * the D4 single-cell bugs are not reproduced). Invariant: the 10 totals sum to
+ * gcCalcResult.grandTotal + siteOpsCalcResult.grandTotal exactly (every GC and
+ * Site Ops line belongs to exactly one linked row).
+ */
+export function computeLinkedDivisionTotals(
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
+): LinkedDivisionTotal[] {
+  const supervisionTotal = gcCalcResult.staffLines
+    .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+    .reduce((sum, l) => sum + l.total, 0);
+  const gcGeneralTotal = gcCalcResult.grandTotal - supervisionTotal;
+
+  // Section lookup: Site Ops line code → template subtotal section. Codes are
+  // unique within the Site Ops configs; this never consults STEP 4 itemIds
+  // (the "02-4100.002" string collision is between different sheets).
+  const sectionByCode = new Map<string, SiteOpsSection>();
+  for (const cfg of SITE_OPS_DYNAMIC_DEFAULTS) sectionByCode.set(cfg.code, cfg.section);
+  for (const cfg of SITE_OPS_MANUAL_DEFAULTS) sectionByCode.set(cfg.code, cfg.section);
+
+  const sectionTotals = new Map<SiteOpsSection, number>();
+  for (const line of [...siteOpsCalcResult.dynamicLines, ...siteOpsCalcResult.manualLines]) {
+    const section = sectionByCode.get(line.code);
+    if (!section) continue; // unknown line — constants test guards against this
+    sectionTotals.set(section, (sectionTotals.get(section) || 0) + line.total);
+  }
+
+  return LINKED_DIVISION_ROWS.map((cfg) => {
+    let total = 0;
+    if (cfg.source.kind === "gcSupervision") total = supervisionTotal;
+    else if (cfg.source.kind === "gcGeneral") total = gcGeneralTotal;
+    else total = sectionTotals.get(cfg.source.section) || 0;
+    return { itemId: cfg.itemId, description: cfg.description, sourceLabel: cfg.sourceLabel, total };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Step 4 — Takeoff Summary Calculations
 // ---------------------------------------------------------------------------
 
 export interface TakeoffSummary {
+  /** Whole-job subtotal: takeoff rows + linked GC/Site Ops division values (Phase 5) */
   subtotal: number;
+  /** STEP 4 takeoff rows only (linked division rows excluded) */
+  takeoffSubtotal: number;
+  /** Σ linked division values counted into `subtotal` */
+  linkedDivisionsTotal: number;
   constructionContingency: number;
   designContingency: number;
   buildersRisk: number;
@@ -217,6 +276,14 @@ export interface TakeoffSummary {
  *
  * All 7 modifier rates are decimals (e.g., 0.05 = 5%), matching the
  * company Excel template's "STEP 1 - PROJECT DATA" cells G18–G24.
+ *
+ * MODIFIER BASIS (gc-siteops Phase 5, user-approved 2026-06-06): the subtotal
+ * the modifiers and cost-per-SF/unit compute on INCLUDES the linked GC + Site
+ * Ops division values — matching the template, whose modifiers compute on
+ * STEP 4 I331 (which includes rows 12–24). The 10 linked division rows are
+ * display-only: their typed qty×price NEVER counts (double-count trap
+ * closure); each contributes its linked value instead, and only while the row
+ * is present in `rows` (so Amendment-F filtered views stay coherent).
  */
 export function computeTakeoffSummary(
   rows: ProcessedTakeoffRow[],
@@ -231,9 +298,26 @@ export function computeTakeoffSummary(
     bondRate: number;
     feeRate: number;
     roundingRule: string;
-  }
+  },
+  linkedTotals?: LinkedDivisionTotal[]
 ): TakeoffSummary {
-  const subtotal = rows.reduce((sum, r) => sum + (r.matchedQty * r.unitPrice), 0);
+  const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
+  let takeoffSubtotal = 0;
+  let linkedDivisionsTotal = 0;
+  const seenLinked = new Set<string>();
+  for (const r of rows) {
+    if (isLinkedDivisionRow(r.itemId)) {
+      // Count each linked value once, even if a duplicate row carries the itemId
+      const id = (r.itemId || "").trim();
+      if (!seenLinked.has(id)) {
+        seenLinked.add(id);
+        linkedDivisionsTotal += linkedByItemId.get(id) ?? 0;
+      }
+    } else {
+      takeoffSubtotal += r.matchedQty * r.unitPrice;
+    }
+  }
+  const subtotal = takeoffSubtotal + linkedDivisionsTotal;
 
   // Extract rates (decimals) with template defaults
   const ccRate = rates?.constructionContingencyRate ?? 0;
@@ -284,6 +368,8 @@ export function computeTakeoffSummary(
 
   return {
     subtotal: roundedSubtotal,
+    takeoffSubtotal,
+    linkedDivisionsTotal,
     constructionContingency,
     designContingency,
     buildersRisk,
@@ -302,18 +388,39 @@ export function computeTakeoffSummary(
 // ---------------------------------------------------------------------------
 
 /**
+ * Per-row dollar value for aggregations: linked division rows contribute their
+ * linked value (typed qty×price never counts — Phase 5 trap closure), all
+ * other rows contribute matchedQty × unitPrice. Counts each linked itemId once.
+ */
+function makeEffectiveAmount(linkedTotals?: LinkedDivisionTotal[]) {
+  const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
+  const seenLinked = new Set<string>();
+  return (row: ProcessedTakeoffRow): number => {
+    if (isLinkedDivisionRow(row.itemId)) {
+      const id = (row.itemId || "").trim();
+      if (seenLinked.has(id)) return 0;
+      seenLinked.add(id);
+      return linkedByItemId.get(id) ?? 0;
+    }
+    return row.matchedQty * row.unitPrice;
+  };
+}
+
+/**
  * Computes division-level budget breakdown for the analytics drawer.
  */
 export function computeDivisionBreakdown(
   rows: ProcessedTakeoffRow[],
-  subtotal: number
+  subtotal: number,
+  linkedTotals?: LinkedDivisionTotal[]
 ): DivisionAggregation[] {
   const divisionTotals: Record<string, number> = {};
+  const effectiveAmount = makeEffectiveAmount(linkedTotals);
 
   rows.forEach((row) => {
     const code = getDivisionCode(row.itemId);
     const division = code || "Unmapped";
-    divisionTotals[division] = (divisionTotals[division] || 0) + (row.matchedQty * row.unitPrice);
+    divisionTotals[division] = (divisionTotals[division] || 0) + effectiveAmount(row);
   });
 
   return Object.entries(divisionTotals)
@@ -335,16 +442,19 @@ export function computeDivisionBreakdown(
  */
 export function computeCostTypeBreakdown(
   rows: ProcessedTakeoffRow[],
-  subtotal: number
+  subtotal: number,
+  linkedTotals?: LinkedDivisionTotal[]
 ): CostTypeAggregation[] {
   const costTotals: Record<string, number> = { M: 0, L: 0, S: 0 };
+  const effectiveAmount = makeEffectiveAmount(linkedTotals);
 
   rows.forEach((row) => {
     const type = (row.costType || "M").toUpperCase();
+    const amount = effectiveAmount(row);
     if (type in costTotals) {
-      costTotals[type] += (row.matchedQty * row.unitPrice);
+      costTotals[type] += amount;
     } else {
-      costTotals.M += (row.matchedQty * row.unitPrice);
+      costTotals.M += amount;
     }
   });
 

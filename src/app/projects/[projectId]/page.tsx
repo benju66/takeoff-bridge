@@ -15,7 +15,9 @@ import {
   computeTakeoffSummary,
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
+  computeLinkedDivisionTotals,
 } from "@/lib/calculations";
+import { isLinkedDivisionRow } from "@/lib/constants";
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace";
 import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
@@ -104,6 +106,24 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFiltered, rows, table, globalFilter, columnFilters]);
 
+  // gc-siteops Phase 5: live linked values for the 10 STEP 4 division rows
+  // (template rows 12–24). They join the subtotal/modifier basis whenever
+  // their row is visible — exactly like the template's I331.
+  const linkedDivisionTotals = React.useMemo(
+    () => computeLinkedDivisionTotals(personnel.calcResult, infrastructure.calcResult),
+    [personnel.calcResult, infrastructure.calcResult]
+  );
+
+  // Stray typed dollars on linked rows count nowhere (trap closure) — surface
+  // them in the EstimateTable banner instead of silently dropping.
+  const strayLinkedRows = React.useMemo(
+    () =>
+      rows
+        .filter((r) => isLinkedDivisionRow(r.itemId) && r.matchedQty * r.unitPrice !== 0)
+        .map((r) => ({ itemId: r.itemId, description: r.description, amount: r.matchedQty * r.unitPrice })),
+    [rows]
+  );
+
   const takeoffSummary = React.useMemo(
     () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, {
       constructionContingencyRate: project?.constructionContingencyRate ?? 0,
@@ -114,19 +134,19 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       bondRate: project?.bondRate ?? 0,
       feeRate: project?.feeRate ?? 0.05,
       roundingRule: project?.roundingRule ?? "dollar"
-    }),
-    [filteredRows, squareFootage, unitCount, project]
+    }, linkedDivisionTotals),
+    [filteredRows, squareFootage, unitCount, project, linkedDivisionTotals]
   );
 
   // Divisional & Cost Type Budget Aggregations
   const subtotal = takeoffSummary.subtotal;
   const divisionBreakdown = React.useMemo(
-    () => computeDivisionBreakdown(filteredRows, subtotal),
-    [filteredRows, subtotal]
+    () => computeDivisionBreakdown(filteredRows, subtotal, linkedDivisionTotals),
+    [filteredRows, subtotal, linkedDivisionTotals]
   );
   const costTypeBreakdown = React.useMemo(
-    () => computeCostTypeBreakdown(filteredRows, subtotal),
-    [filteredRows, subtotal]
+    () => computeCostTypeBreakdown(filteredRows, subtotal, linkedDivisionTotals),
+    [filteredRows, subtotal, linkedDivisionTotals]
   );
 
   // UI Metrics
@@ -425,6 +445,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
+            strayLinkedRows={strayLinkedRows}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
             selection={selection}

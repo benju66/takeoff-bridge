@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project } from "@/types/db";
-import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
+import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
 import {
   generateExcelPayload,
   generateProcoreBudget,
@@ -93,7 +93,10 @@ export function useExportHandlers(
   };
 
   const handleExportExcel = () => {
-    const payload = generateExcelPayload(rows, columnDefs, project);
+    // Linked division values keep the payload's rows + modifier basis in
+    // step with the estimate page (gc-siteops Phase 5).
+    const linkedTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
+    const payload = generateExcelPayload(rows, columnDefs, project, linkedTotals);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 

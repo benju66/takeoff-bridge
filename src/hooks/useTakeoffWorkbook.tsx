@@ -36,8 +36,8 @@ import {
   resolveProcoreCode,
 } from "@/lib/costCodeResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
-import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
+import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
+import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -511,11 +511,40 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
+  // Linked division rows (gc-siteops Phase 5) — the 10 STEP 4 rows the template
+  // links to STEP 2/3 subtotals. Display-only: each shows its live linked value
+  // (qty 1) and is read-only while clean. A row carrying stray typed dollars
+  // (legacy data / itemId edits) stays editable so the estimator can clear it;
+  // its dollars count NOWHERE (trap closure) and the banner surfaces it.
+  // ---------------------------------------------------------------------------
+  const linkedTotalByItemId = useMemo(() => {
+    const map = new Map<string, { total: number; sourceLabel: string }>();
+    const labels = new Map(LINKED_DIVISION_ROWS.map((c) => [c.itemId, c.sourceLabel]));
+    for (const l of computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult)) {
+      map.set(l.itemId, { total: l.total, sourceLabel: labels.get(l.itemId) || "" });
+    }
+    return map;
+  }, [gcCalcResult, siteOpsCalcResult]);
+
+  /** null for normal rows; linked-row display state otherwise. */
+  const getLinkedRowState = (row: ProcessedTakeoffRow) => {
+    if (!isLinkedDivisionRow(row.itemId)) return null;
+    const entry = linkedTotalByItemId.get((row.itemId || "").trim());
+    return {
+      value: entry?.total ?? 0,
+      sourceLabel: entry?.sourceLabel ?? "",
+      stray: row.matchedQty * row.unitPrice !== 0,
+    };
+  };
+
+  // ---------------------------------------------------------------------------
   // Delete row — GAP-2: uses rowId (not index) for virtualization/sort safety
   // ---------------------------------------------------------------------------
   const deleteRow = (rowId: string) => {
     const idx = rows.findIndex((r) => r.id === rowId);
     if (idx === -1) return;
+    // Linked division rows are structural (fed by Steps 2/3) — never deletable
+    if (isLinkedDivisionRow(rows[idx].itemId)) return;
 
     // Deep-clone row data for undo restoration (GAP-3)
     const rowData: ProcessedTakeoffRow = {
@@ -650,6 +679,8 @@ export function useTakeoffWorkbook(
             cell: (info) => {
               const row = info.row.original;
               const meta = info.table.options.meta!;
+              // Linked division rows are structural — no delete affordance
+              if (isLinkedDivisionRow(row.itemId)) return null;
               return (
                 <div className="flex items-center justify-center h-full w-full">
                   <button
@@ -747,7 +778,8 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
-              const isCellHardLocked = !!meta.lockedCells[`${row.id}::itemId`];
+              const linked = getLinkedRowState(row);
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::itemId`] || (!!linked && !linked.stray);
               const suggestions = getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER);
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "itemId";
@@ -860,7 +892,8 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
-              const isCellHardLocked = !!meta.lockedCells[`${row.id}::description`];
+              const linked = getLinkedRowState(row);
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::description`] || (!!linked && !linked.stray);
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "description";
               const isEditing = isSelected && meta.selection.isEditing;
@@ -916,7 +949,15 @@ export function useTakeoffWorkbook(
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
                   }}
                 >
-                  {row.description || <span className="text-slate-400 dark:text-slate-600">...</span>}
+                  <span className="truncate">{row.description || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
+                  {linked && !linked.stray && (
+                    <span
+                      className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none"
+                      title={`Read-only — linked live from ${linked.sourceLabel}`}
+                    >
+                      🔗 {linked.sourceLabel}
+                    </span>
+                  )}
                 </div>
               );
             },
@@ -930,7 +971,8 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
-              const isCellHardLocked = !!meta.lockedCells[`${row.id}::matchedQty`];
+              const linked = getLinkedRowState(row);
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::matchedQty`] || (!!linked && !linked.stray);
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "matchedQty";
               const isEditing = isSelected && meta.selection.isEditing;
@@ -985,7 +1027,7 @@ export function useTakeoffWorkbook(
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
                   }}
                 >
-                  {row.matchedQty.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {(linked && !linked.stray ? 1 : row.matchedQty).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               );
             },
@@ -1000,7 +1042,8 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
-              const isCellHardLocked = !!meta.lockedCells[`${row.id}::uom`];
+              const linked = getLinkedRowState(row);
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::uom`] || (!!linked && !linked.stray);
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "uom";
               const isEditing = isSelected && meta.selection.isEditing;
@@ -1074,7 +1117,8 @@ export function useTakeoffWorkbook(
               const index = info.row.index;
               const row = info.row.original;
               const meta = info.table.options.meta!;
-              const isCellHardLocked = !!meta.lockedCells[`${row.id}::unitPrice`];
+              const linked = getLinkedRowState(row);
+              const isCellHardLocked = !!meta.lockedCells[`${row.id}::unitPrice`] || (!!linked && !linked.stray);
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "unitPrice";
               const isEditing = isSelected && meta.selection.isEditing;
@@ -1129,14 +1173,20 @@ export function useTakeoffWorkbook(
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
                   }}
                 >
-                  ${row.unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${(linked && !linked.stray ? linked.value : row.unitPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               );
             },
           });
         }
         case "total":
-          return columnHelper.accessor("total", {
+          return columnHelper.accessor((row) => {
+            // Linked division rows: total = live linked value; a stray row's
+            // typed dollars count nowhere (Phase 5 trap closure) so show $0.
+            const linked = getLinkedRowState(row);
+            return linked ? (linked.stray ? 0 : linked.value) : row.total;
+          }, {
+            id: "total",
             header: def.header,
             ...getSizeConfig(def),
             filterFn: multiSelect,
@@ -1149,7 +1199,11 @@ export function useTakeoffWorkbook(
             ),
           });
         case "costPerUnit":
-          return columnHelper.accessor((row) => (unitCount > 0 ? row.total / unitCount : 0), {
+          return columnHelper.accessor((row) => {
+            const linked = getLinkedRowState(row);
+            const total = linked ? (linked.stray ? 0 : linked.value) : row.total;
+            return unitCount > 0 ? total / unitCount : 0;
+          }, {
             id: "costPerUnit",
             header: def.header,
             ...getSizeConfig(def),
@@ -1161,7 +1215,11 @@ export function useTakeoffWorkbook(
             ),
           });
         case "costPerSf":
-          return columnHelper.accessor((row) => (squareFootage > 0 ? row.total / squareFootage : 0), {
+          return columnHelper.accessor((row) => {
+            const linked = getLinkedRowState(row);
+            const total = linked ? (linked.stray ? 0 : linked.value) : row.total;
+            return squareFootage > 0 ? total / squareFootage : 0;
+          }, {
             id: "costPerSf",
             header: def.header,
             ...getSizeConfig(def),
@@ -1177,7 +1235,7 @@ export function useTakeoffWorkbook(
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
+  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit, linkedTotalByItemId]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
 
   // Filter state (Phase 4)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);

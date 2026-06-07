@@ -525,6 +525,22 @@ phase must know. Empty until Phase 1 runs.)
   totals (that linkage IS Phase 5, incl. the modifier-basis decision); per-project editable rates remain
   Phase 6; `computePersonnelCosts` signature now `(duration, sqft, utilizations, equipment, manualEntries, rateOverrides?)`.
 
+- **Phase 5 (2026-06-06):** Estimate-page linkage + double-count closure. User sign-offs: modifier basis
+  INCLUDES GC + Site Ops (matches template I331); linked values display ON the 10 STEP 4 grid rows
+  (read-only, 🔗 source hint); template codes kept as-is (suffixes are sequence numbers — no re-sync);
+  trap closed via exclude + lock. New `LINKED_DIVISION_ROWS`/`SUPERVISION_STAFF_CODES` (constants.ts) +
+  `computeLinkedDivisionTotals` (calculations.ts); `computeTakeoffSummary` gains a `linkedTotals` param
+  (subtotal/modifiers/cost-per-SF on the whole job; linked rows' typed qty×price counts NOWHERE — stray
+  dollars surfaced via amber banner, rows editable until cleared, else hard-locked + undeletable).
+  Exporter: linked rows skipped in `rollupByProcoreCode`/gate/CSV (`1-10000.000` = $0, `2-20000.000`
+  never appended); STEP 4 sheet rows 12–24 now export qty 1 × computed Step 2/3 subtotals as values, so
+  the workbook's I331/modifier formulas match the app. Manual tie-out verified incl. a stray-$25k case
+  (gate delta $0; CSV/BLI carry no division-parent dollars). DB query confirmed zero existing projects
+  had dollars on the 10 rows. Build + 223 unit tests green. **Phase 6 must know:** STEP 2/3 sheets still
+  export blank — once P6 writes their line detail, the template's col-S checks on rows 12–24 will tie out
+  against the values P5 writes; per-project staff rates still pending (`rateOverrides` hook param ready);
+  test fixture note: `div02Row` in export-integrity.test.ts was re-pointed to a non-linked itemId.
+
 - **Resequencing (2026-06-06, user-approved):** remaining work reordered to Phase 4 (full Site Ops
   + GC input coverage, combined), Phase 5 (estimate-page linkage of GC/Site Ops totals incl. the
   modifier-basis decision), Phase 6 (old Phase 4 polish: STEP 2/3 sheet detail + editable rates).

@@ -64,6 +64,10 @@ interface EstimateTableProps {
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
 
+  /** Linked division rows carrying stray typed dollars — excluded from all
+   *  totals (gc-siteops Phase 5 trap closure); surfaced, never silently dropped. */
+  strayLinkedRows?: { itemId: string; description: string; amount: number }[];
+
   // Selection state (for active cell styling + click-outside-deselect)
   selection: GridSelectionState;
 
@@ -111,6 +115,7 @@ export function EstimateTable({
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
+  strayLinkedRows,
   selection,
   globalFilter,
   setGlobalFilter,
@@ -415,6 +420,26 @@ export function EstimateTable({
           </div>
         </div>
       </div>
+
+      {/* Stray dollars on linked division rows — excluded from all totals
+          (gc-siteops Phase 5); surfaced here, never silently dropped. */}
+      {strayLinkedRows && strayLinkedRows.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/25 border border-amber-300 dark:border-amber-900/50 rounded-xl p-4 text-amber-800 dark:text-amber-300 text-xs font-sans shadow-sm">
+          <div className="font-bold uppercase tracking-wider mb-1">Linked rows carrying manual dollars — excluded from totals</div>
+          <p className="mb-2">
+            These STEP 4 rows are linked live from the Step 2 / Step 3 modules; amounts typed on them
+            do not count anywhere (estimate, export, or Procore). Re-enter the dollars on Step 2/3,
+            then clear the row to restore its live link.
+          </p>
+          <ul className="font-mono list-disc list-inside">
+            {strayLinkedRows.map((r) => (
+              <li key={r.itemId}>
+                {r.itemId} — {r.description}: ${r.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Division Summary Analytics Drawer */}
       {rows.length > 0 && (
@@ -746,7 +771,7 @@ export function EstimateTable({
                     let content: React.ReactNode = "";
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
-                    else if (column.id === "description") { content = "Takeoff Subtotal"; alignClass = "text-left font-sans"; }
+                    else if (column.id === "description") { content = "Estimate Subtotal (incl. GC + Site Ops)"; alignClass = "text-left font-sans"; }
                     else if (column.id === "total") { content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }

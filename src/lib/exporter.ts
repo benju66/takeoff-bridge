@@ -1,7 +1,7 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
-import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS } from "./constants";
-import { computeTakeoffSummary, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
+import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "./constants";
+import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import JSZip from "jszip";
@@ -18,10 +18,14 @@ export { getColumnLetter } from "./exportUtils";
 export function generateExcelPayload(
   rows: ProcessedTakeoffRow[],
   columnDefs: ColumnDefinition[],
-  project?: Project | null
+  project?: Project | null,
+  // gc-siteops Phase 5: linked division values so the payload's rows and
+  // modifier basis match the estimate page (omitted → takeoff-only legacy).
+  linkedTotals?: LinkedDivisionTotal[]
 ): string {
   const csvLines: string[] = [];
   const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
+  const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
 
 
 
@@ -58,9 +62,13 @@ export function generateExcelPayload(
   });
   csvLines.push(headers.map(escapeCSVField).join(","));
 
-  // Populate each data row dynamically using active user modified grid values
+  // Populate each data row dynamically using active user modified grid values.
+  // Linked division rows print their live linked value (qty 1) — the grid's
+  // typed qty×price never counts for them (gc-siteops Phase 5).
   for (const row of rows) {
-    const calculatedTotal = row.matchedQty * row.unitPrice;
+    const isLinked = isLinkedDivisionRow(row.itemId);
+    const linkedValue = isLinked ? (linkedByItemId.get((row.itemId || "").trim()) ?? 0) : 0;
+    const calculatedTotal = isLinked ? linkedValue : row.matchedQty * row.unitPrice;
     const rowValues = activeCols.map((col) => {
       if (col.type === "default") {
         switch (col.id) {
@@ -71,11 +79,11 @@ export function generateExcelPayload(
           case "description":
             return row.description || "";
           case "matchedQty":
-            return row.matchedQty;
+            return isLinked ? 1 : row.matchedQty;
           case "uom":
             return row.uom || "";
           case "unitPrice":
-            return row.unitPrice;
+            return isLinked ? linkedValue : row.unitPrice;
           case "total":
             return calculatedTotal;
           case "notes":
@@ -95,7 +103,8 @@ export function generateExcelPayload(
     csvLines.push(rowValues.map(escapeCSVField).join(","));
   }
 
-  // Calculate dynamic subtotal and append template-aligned modifier rows
+  // Calculate dynamic subtotal and append template-aligned modifier rows.
+  // Basis includes the linked GC/Site Ops values when provided (Phase 5).
   const squareFootage = project?.squareFootage ?? 0;
   const unitCount = project?.unitCount ?? 0;
   const summary = computeTakeoffSummary(rows, squareFootage, unitCount, {
@@ -107,7 +116,7 @@ export function generateExcelPayload(
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
     roundingRule: project?.roundingRule ?? "dollar",
-  });
+  }, linkedTotals);
 
   if (summary.subtotal > 0) {
     const modifierValues: Record<string, number> = {
@@ -188,8 +197,12 @@ export function generateProcoreBudget(
     totalCost: number;
   }> = {};
 
-  // Group and sum mapped rows only to guarantee database cleanliness
+  // Group and sum mapped rows only to guarantee database cleanliness.
+  // Linked division rows never contribute (gc-siteops Phase 5): their dollars
+  // travel on the granular GC/Site Ops lines below — counting both would
+  // double-count 1-10000.000 / 2-20000.000.
   for (const row of rows) {
+    if (isLinkedDivisionRow(row.itemId)) continue;
     const costCode = ((row.procoreCode || "").trim() || (row.procoreParentCode || "").trim());
     if (!row.isMapped || !costCode) continue;
 
@@ -245,9 +258,13 @@ export function generateProcoreBudget(
     csvLines.push(columns.map(escapeCSVField).join(","));
   }
 
-  // Calculate subtotal and append template-aligned modifier rows with rounding
+  // Calculate subtotal and append template-aligned modifier rows with
+  // rounding. Modifier basis includes the linked GC + Site Ops division
+  // values (gc-siteops Phase 5) — same basis as the estimate page and the
+  // template's STEP 4 I331.
   const squareFootage = project?.squareFootage ?? 0;
   const unitCount = project?.unitCount ?? 0;
+  const linkedTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
   const summary = computeTakeoffSummary(rows, squareFootage, unitCount, {
     constructionContingencyRate: project?.constructionContingencyRate ?? 0,
     designContingencyRate: project?.designContingencyRate ?? 0,
@@ -257,7 +274,7 @@ export function generateProcoreBudget(
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
     roundingRule: project?.roundingRule ?? "dollar",
-  });
+  }, linkedTotals);
 
   if (summary.subtotal > 0) {
     const modifierValues: Record<string, number> = {
@@ -308,12 +325,16 @@ const RECONCILIATION_TOLERANCE = 0.01;
  * Groups takeoff rows by granular Procore Budget Line Items code and sums
  * matchedQty * unitPrice. Rows with an empty procoreCode are skipped — the
  * completeness gate (validateExportReadiness) blocks them upstream when they
- * carry dollars. Single source of truth for both export paths (workbook BLI
- * sheet and Procore budget CSV).
+ * carry dollars. Linked division rows (gc-siteops Phase 5) are skipped
+ * entirely: their dollars are fully represented by the 34+38 granular
+ * GC/Site Ops lines, so counting them would double-count Procore dollars on
+ * 1-10000.000 / 2-20000.000. Single source of truth for both export paths
+ * (workbook BLI sheet and Procore budget CSV).
  */
 export function rollupByProcoreCode(rows: ProcessedTakeoffRow[]): Record<string, number> {
   const rollup: Record<string, number> = {};
   for (const row of rows) {
+    if (isLinkedDivisionRow(row.itemId)) continue;
     const code = (row.procoreCode || "").trim();
     if (!code) continue;
     rollup[code] = (rollup[code] || 0) + row.matchedQty * row.unitPrice;
@@ -402,6 +423,10 @@ export function validateExportReadiness(
   const blockers: ExportBlocker[] = [];
   let lineItemTotal = 0;
   for (const row of rows) {
+    // Linked division rows are display-only (gc-siteops Phase 5): their
+    // dollars live on the granular GC/Site Ops lines added below, so they
+    // count on neither side of the gate (kept out of rollupByProcoreCode too).
+    if (isLinkedDivisionRow(row.itemId)) continue;
     const amount = row.matchedQty * row.unitPrice;
     lineItemTotal += amount;
     if (!(row.procoreCode || "").trim() && Math.abs(amount) > RECONCILIATION_TOLERANCE) {
@@ -1140,6 +1165,16 @@ export async function generateExcelWorkbook(
   let rowShift = 0;
   const insertionsByDivision: Record<string, number> = {};
 
+  // gc-siteops Phase 5: the 10 linked division rows (template rows 12–24) get
+  // qty 1 × their computed Step 2/3 subtotal written as VALUES — replacing the
+  // grid's display-only zeros — so the sheet's own subtotal (I331) and modifier
+  // formulas recompute on the same whole-job basis as the estimate page.
+  // Values come from calculations.ts (sole authority); these rows stay OUT of
+  // the BLI rollup (the granular GC/Site Ops rows carry the dollars).
+  const linkedDivisionTotalByItemId = new Map(
+    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult).map((l) => [l.itemId, l.total])
+  );
+
   for (const div of divisions) {
     const headerRowIdx = div.headerRow + rowShift;
     const startRowIdx = div.startRow + rowShift;
@@ -1174,21 +1209,30 @@ export async function generateExcelWorkbook(
         const rowEl = findRowElement(sheetDataChildren, rIdx);
         if (!rowEl) continue;
 
+        // Linked division rows: qty/price come from the linked-write pass
+        // below, never from grid values (Phase 5 — grid values are
+        // display-only zeros, or excluded stray dollars).
+        const isLinked = isLinkedDivisionRow(code);
+
         // Description (D)
         const descCell = getOrCreateCell(rowEl, "D", rIdx, getStyleFromRow(rowEl, "D"));
         setCellInlineString(descCell, row.description || "");
 
-        // Quantity (F)
-        const qtyCell = getOrCreateCell(rowEl, "F", rIdx, getStyleFromRow(rowEl, "F"));
-        setCellValue(qtyCell, Number(row.matchedQty) || 0);
+        if (!isLinked) {
+          // Quantity (F)
+          const qtyCell = getOrCreateCell(rowEl, "F", rIdx, getStyleFromRow(rowEl, "F"));
+          setCellValue(qtyCell, Number(row.matchedQty) || 0);
+        }
 
         // UOM (G)
         const uomCell = getOrCreateCell(rowEl, "G", rIdx, getStyleFromRow(rowEl, "G"));
         setCellInlineString(uomCell, row.uom || "");
 
-        // Unit Price (H)
-        const priceCell = getOrCreateCell(rowEl, "H", rIdx, getStyleFromRow(rowEl, "H"));
-        setCellValue(priceCell, Number(row.unitPrice) || 0);
+        if (!isLinked) {
+          // Unit Price (H)
+          const priceCell = getOrCreateCell(rowEl, "H", rIdx, getStyleFromRow(rowEl, "H"));
+          setCellValue(priceCell, Number(row.unitPrice) || 0);
+        }
 
         // Custom fields + notes
         for (const col of activeCols) {
@@ -1203,6 +1247,19 @@ export async function generateExcelWorkbook(
       } else {
         unmappedRows.push(row);
       }
+    }
+
+    // ── Linked division rows (Phase 5): write qty 1 × computed Step 2/3
+    // subtotal as values, independent of grid state, replacing the template's
+    // live pull formulas (which would read $0 off the blank STEP 2/3 sheets).
+    for (const [code, rIdx] of Object.entries(prepopulatedRowsMap)) {
+      if (!isLinkedDivisionRow(code)) continue;
+      const rowEl = findRowElement(sheetDataChildren, rIdx);
+      if (!rowEl) continue;
+      const qtyCell = getOrCreateCell(rowEl, "F", rIdx, getStyleFromRow(rowEl, "F"));
+      setCellValue(qtyCell, 1);
+      const priceCell = getOrCreateCell(rowEl, "H", rIdx, getStyleFromRow(rowEl, "H"));
+      setCellValue(priceCell, linkedDivisionTotalByItemId.get(code) ?? 0);
     }
 
     // ── Unmapped row insertion (overflow/manual rows) ──

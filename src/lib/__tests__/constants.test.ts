@@ -17,8 +17,12 @@ import {
   KNOX_BOX_UNIT_COST,
   PAYROLL_CLEANING_RATE_PER_EA,
   HIRED_CLEANING_RATE_PER_EA,
+  LINKED_DIVISION_ROWS,
+  SUPERVISION_STAFF_CODES,
+  isLinkedDivisionRow,
 } from "../constants";
 import PROCORE_VALID_CODES from "../procore-valid-codes.json";
+import ESTIMATE_CATALOG from "../estimate-catalog.json";
 
 describe("Estimate Modifiers", () => {
   it("has exactly 7 entries", () => {
@@ -210,6 +214,49 @@ describe("Phase 4 manual GC lines", () => {
         expect(line.rate, line.code).toBeNull();
       }
     }
+  });
+});
+
+describe("Linked division rows (gc-siteops Phase 5)", () => {
+  it("declares exactly the 10 template link rows (STEP 4 rows 12–24, findings §5.1)", () => {
+    expect(LINKED_DIVISION_ROWS.map((r) => r.itemId)).toEqual([
+      "01-0000.001", "01-0400.002", "02-0000.001", "02-4100.002", "02-9005.003",
+      "02-9070.004", "02-9200.005", "02-9300.006", "02-9400.007", "02-9500.008",
+    ]);
+  });
+
+  it("every linked itemId exists in the STEP 4 catalog and maps to a division parent BLI code", () => {
+    const catalog = ESTIMATE_CATALOG as Record<string, { procoreCode: string; description: string }>;
+    for (const row of LINKED_DIVISION_ROWS) {
+      const entry = catalog[row.itemId];
+      expect(entry, row.itemId).toBeDefined();
+      const expectedParent = row.itemId.startsWith("01") ? "1-10000.000" : "2-20000.000";
+      expect(entry.procoreCode, row.itemId).toBe(expectedParent);
+    }
+  });
+
+  it("the 8 Site Ops link rows cover all 8 template sections exactly once", () => {
+    const sections = LINKED_DIVISION_ROWS
+      .filter((r) => r.source.kind === "siteOpsSection")
+      .map((r) => (r.source.kind === "siteOpsSection" ? r.source.section : ""));
+    expect(sections.sort()).toEqual(SITE_OPS_SECTIONS.map((s) => s.id).sort());
+  });
+
+  it("supervision = the 3 superintendent staff roles (template STEP 2 I16)", () => {
+    expect(SUPERVISION_STAFF_CODES).toEqual(["01-0410.001", "01-0420.001", "01-0430.001"]);
+    const staffCodes = new Set(STAFF_ROLE_DEFAULTS.map((r) => r.code));
+    for (const code of SUPERVISION_STAFF_CODES) {
+      expect(staffCodes.has(code), code).toBe(true);
+    }
+  });
+
+  it("isLinkedDivisionRow matches linked itemIds only (incl. trim + empty handling)", () => {
+    expect(isLinkedDivisionRow("01-0000.001")).toBe(true);
+    expect(isLinkedDivisionRow(" 02-4100.002 ")).toBe(true);
+    expect(isLinkedDivisionRow("02-4100.001")).toBe(false); // STEP 3 demolition source line
+    expect(isLinkedDivisionRow("03-0000.001")).toBe(false);
+    expect(isLinkedDivisionRow("")).toBe(false);
+    expect(isLinkedDivisionRow(undefined)).toBe(false);
   });
 });
 
