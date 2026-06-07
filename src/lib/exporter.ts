@@ -1,6 +1,6 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
-import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "./constants";
+import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, isLinkedDivisionRow } from "./constants";
 import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
@@ -893,49 +893,28 @@ function getCellFormula(cellEl: ParsedElement): string | null {
   return null;
 }
 
-// ─── MAIN EXPORT FUNCTION (JSZip + fast-xml-parser) ─────────────────────────
+/**
+ * Read the display text from a cell, resolving shared string references
+ * against the workbook's sharedStrings table.
+ */
+function readCellTextResolved(cellEl: ParsedElement, sharedStrings: string[]): string {
+  const cellType = cellEl[":@"]?.["@_t"];
+  const rawValue = getCellTextValue(cellEl);
+  if (cellType === "s" && rawValue) {
+    const idx = parseInt(rawValue, 10);
+    return sharedStrings[idx] || "";
+  }
+  return rawValue;
+}
 
-export async function generateExcelWorkbook(
-  rows: ProcessedTakeoffRow[],
-  projectMetadata: Project | null | undefined,
-  columnDefs: ColumnDefinition[],
-  layoutConfig: TemplateLayoutConfig,
-  templateBuffer: ArrayBuffer,
-  // Required (gc-siteops Phase 3): an export path that omitted these would
-  // silently re-create the $0 GC/Site Ops bug this phase closes.
-  gcCalcResult: PersonnelCalcResult,
-  siteOpsCalcResult: SiteOpsCalcResult
-): Promise<Blob> {
-  // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
-
-  assertWorkbookInputs(layoutConfig, templateBuffer);
-  const { anchors, sheetNames } = layoutConfig;
-
-  const zip = await JSZip.loadAsync(templateBuffer);
-
-  let wbXml = await zip.file("xl/workbook.xml")!.async("string");
-  let relsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
-
-  const step4File = resolveSheetFile(wbXml, relsXml, "STEP 4 - ESTIMATE");
-  const step1File = resolveSheetFile(wbXml, relsXml, "STEP 1 - PROJECT DATA");
-
-  let step4Xml = await zip.file(`xl/${step4File}`)!.async("string");
-  let step1Xml = await zip.file(`xl/${step1File}`)!.async("string");
-
-  const parser = new XMLParser(XML_PARSER_OPTS);
-  const builder = new XMLBuilder(XML_BUILDER_OPTS);
-
-  // ── PHASE 2a: Flatten Shared Formulas (STEP 4 only) ────────────────────────
-
-  // Extract <sheetData>...</sheetData> from the sheet XML
-  const sheetDataMatch = step4Xml.match(/<sheetData>([\s\S]*)<\/sheetData>/);
-  if (!sheetDataMatch) throw new Error("No <sheetData> found in STEP 4 sheet XML");
-
-  const parsedSheetData: ParsedElement[] = parser.parse(`<sheetData>${sheetDataMatch[1]}</sheetData>`);
-  // parsedSheetData is an array with a single { sheetData: [...rows...] } element
-  const sheetDataWrapper = parsedSheetData[0];
-  const sheetDataChildren: ParsedElement[] = sheetDataWrapper.sheetData || [];
-
+/**
+ * Expand all shared formulas in a parsed <sheetData> children array to
+ * standalone formulas (extracted from the STEP 4 pipeline for reuse on the
+ * STEP 2/3 sheets — gc-siteops Phase 6). Overwriting a shared-formula MASTER
+ * cell with a value would orphan its dependents; after flattening, any cell
+ * can be safely replaced.
+ */
+function flattenSharedFormulas(sheetDataChildren: ParsedElement[]): void {
   // Build shared formula master index: si → { masterRow, masterCol, formula }
   const sharedMasters: Record<string, { masterRow: number; masterCol: number; formula: string }> = {};
 
@@ -1010,6 +989,242 @@ export async function generateExcelWorkbook(
       }
     }
   }
+}
+
+// ─── STEP 2/3 SHEET DETAIL (gc-siteops Phase 6) ─────────────────────────────
+
+/**
+ * One GC/Site Ops line as written onto its STEP 2/3 template row:
+ * col F = qty, col H = rate (values; the row's live I = F×H recomputes),
+ * col E = utilization fraction (staff rows only).
+ */
+interface SheetDetailLine {
+  code: string;
+  qty: number;
+  rate: number;
+  utilization?: number;
+}
+
+/**
+ * STEP 2/3 section-subtotal cells ← the linked STEP 4 division rows
+ * (computeLinkedDivisionTotals itemIds). Coordinates forensically verified
+ * (Phase 1 findings §5.1, re-verified Phase 6); STEP 2/3 rows never shift —
+ * the exporter inserts rows only on STEP 4. Written as VALUES from the exact
+ * numbers Phase 5 writes onto STEP 4 rows 12–24, so the template's
+ * exact-equality col-S checks (e.g. S13: I13='STEP 2 - GCs'!I16) compare
+ * identical numbers and tie out regardless of floating-point summation order.
+ */
+const STEP23_SUBTOTAL_CELLS: { itemId: string; sheet: string; row: number }[] = [
+  { itemId: "01-0400.002", sheet: "STEP 2 - GCs", row: 16 },       // Total Supervision
+  { itemId: "01-0000.001", sheet: "STEP 2 - GCs", row: 58 },       // Total Design, PM and GCs
+  { itemId: "02-0000.001", sheet: "STEP 3 - SITE OPS", row: 29 },  // Total Site Operations
+  { itemId: "02-4100.002", sheet: "STEP 3 - SITE OPS", row: 35 },  // Total Demolition
+  { itemId: "02-9005.003", sheet: "STEP 3 - SITE OPS", row: 40 },  // Total Final Cleaning
+  { itemId: "02-9070.004", sheet: "STEP 3 - SITE OPS", row: 45 },  // Total SWPPP Permit
+  { itemId: "02-9200.005", sheet: "STEP 3 - SITE OPS", row: 51 },  // Total Survey and Layout
+  { itemId: "02-9300.006", sheet: "STEP 3 - SITE OPS", row: 62 },  // Total Building and Site Services
+  { itemId: "02-9400.007", sheet: "STEP 3 - SITE OPS", row: 72 },  // Total Site Equipment
+  { itemId: "02-9500.008", sheet: "STEP 3 - SITE OPS", row: 82 },  // Total Site Special Inspections
+];
+
+/** The two %-of-estimate GC lines (findings §5.2) get the template-faithful write shape. */
+const PCT_LINE_CODES = new Set(
+  GC_MANUAL_DEFAULTS.filter((cfg) => cfg.pctHint !== undefined).map((cfg) => cfg.code)
+);
+
+/**
+ * Builds the STEP 2 / STEP 3 sheet-detail line lists from the calc results
+ * (calculations.ts is the sole authority — this only reshapes existing
+ * qty/rate pairs into the template's column convention):
+ *  - staff lines: utilization (col E) + computed hours (F) + hourly rate (H)
+ *  - lump-sum lines (equipment + lumpSum entries): qty 0/1 × the typed amount
+ *    (the calc layer's own convention)
+ *  - the two %-lines: template-faithful — F = typed amount ÷ estimate total
+ *    (the effective %), H = the estimate total, so I = F×H recomputes to the
+ *    typed amount and the sheet reads like the template's own instruction
+ *    ("Enter this amount in column H when estimate complete"). Falls back to
+ *    qty 0/1 × amount when the estimate total is $0.
+ */
+export function buildStep23DetailLines(
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult,
+  estimateTotalBasis: number
+): { step2: SheetDetailLine[]; step3: SheetDetailLine[] } {
+  const step2: SheetDetailLine[] = [
+    ...gcCalcResult.staffLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate, utilization: l.utilization })),
+    ...gcCalcResult.operationalLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate })),
+    ...gcCalcResult.equipmentLines.map((l) => ({ code: l.code, qty: l.total > 0 ? 1 : 0, rate: l.total })),
+    ...gcCalcResult.manualLines.map((l) => {
+      if (PCT_LINE_CODES.has(l.code)) {
+        return estimateTotalBasis > 0
+          ? { code: l.code, qty: l.total / estimateTotalBasis, rate: estimateTotalBasis }
+          : { code: l.code, qty: l.total > 0 ? 1 : 0, rate: l.total };
+      }
+      return { code: l.code, qty: l.qty, rate: l.rate };
+    }),
+  ];
+  const step3: SheetDetailLine[] = [
+    ...siteOpsCalcResult.dynamicLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate })),
+    ...siteOpsCalcResult.manualLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate })),
+  ];
+  return { step2, step3 };
+}
+
+/**
+ * Writes the GC / Site Ops line detail onto the exported workbook's
+ * "STEP 2 - GCs" and "STEP 3 - SITE OPS" sheets (gc-siteops Phase 6 — plan §8;
+ * previously these sheets exported blank). Purely informational: the Budget
+ * Line Items sheet carries computed values for all 217 rows regardless
+ * (Phase 3), so this changes no export dollars.
+ *
+ * Per-row writes go in ascending column order (E → F → H — CLAUDE.md rule);
+ * each row's live I = F×H line-total formula and the J cost-per-SF formulas
+ * are left intact and recompute on open (fullCalcOnLoad). The section
+ * subtotal cells are overwritten with the linked division VALUES (see
+ * STEP23_SUBTOTAL_CELLS) so the STEP 4 col-S checks tie out exactly.
+ */
+async function writeStep23SheetDetail(
+  zip: JSZip,
+  wbXml: string,
+  relsXml: string,
+  sharedStrings: string[],
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult,
+  estimateTotalBasis: number
+): Promise<void> {
+  const parser = new XMLParser(XML_PARSER_OPTS);
+  const builder = new XMLBuilder(XML_BUILDER_OPTS);
+
+  const detail = buildStep23DetailLines(gcCalcResult, siteOpsCalcResult, estimateTotalBasis);
+  const linkedTotalByItemId = new Map(
+    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult).map((l) => [l.itemId, l.total])
+  );
+
+  const sheets: { name: string; lines: SheetDetailLine[] }[] = [
+    { name: "STEP 2 - GCs", lines: detail.step2 },
+    { name: "STEP 3 - SITE OPS", lines: detail.step3 },
+  ];
+
+  for (const { name, lines } of sheets) {
+    const sheetFile = resolveSheetFile(wbXml, relsXml, name);
+    let sheetXml = await zip.file(`xl/${sheetFile}`)?.async("string");
+    const dataMatch = sheetXml?.match(/<sheetData>([\s\S]*)<\/sheetData>/);
+    if (!sheetXml || !dataMatch) {
+      throw new Error(`Sheet "${name}" has no <sheetData> — cannot write GC/Site Ops detail.`);
+    }
+
+    const parsed: ParsedElement[] = parser.parse(`<sheetData>${dataMatch[1]}</sheetData>`);
+    const children: ParsedElement[] = parsed[0].sheetData || [];
+
+    // Overwriting cells is only safe once no shared-formula dependents remain
+    flattenSharedFormulas(children);
+
+    // Locate each source line's row by its col-C criterion code (codes are
+    // unique per sheet — findings §4). Never keyed off STEP 4 itemIds: the
+    // string "02-4100.002" is also a STEP 4 linked-row itemId (P5 collision
+    // note), but here we only ever scan THIS sheet's own code column.
+    const rowByCode: Record<string, ParsedElement> = {};
+    for (const rowEl of getRowElements(children)) {
+      const cellC = findCellInRow(rowEl, "C");
+      if (!cellC) continue;
+      const code = readCellTextResolved(cellC, sharedStrings).trim();
+      if (code && code.includes("-")) rowByCode[code] = rowEl;
+    }
+
+    for (const line of lines) {
+      const rowEl = rowByCode[line.code];
+      if (!rowEl) {
+        // All template source lines were verified present (Phase 1). A miss
+        // with dollars means constants.ts drifted from the template.
+        if (Math.abs(line.qty * line.rate) > RECONCILIATION_TOLERANCE) {
+          throw new Error(
+            `GC/Site Ops line "${line.code}" carries dollars but has no row on "${name}" — constants.ts no longer matches the template.`
+          );
+        }
+        continue;
+      }
+      const rowNum = getRowNum(rowEl);
+      // Ascending column order within the row: E → F → H
+      if (line.utilization !== undefined) {
+        const eCell = getOrCreateCell(rowEl, "E", rowNum, getStyleFromRow(rowEl, "E"));
+        setCellValue(eCell, line.utilization);
+      }
+      const fCell = getOrCreateCell(rowEl, "F", rowNum, getStyleFromRow(rowEl, "F"));
+      setCellValue(fCell, line.qty);
+      const hCell = getOrCreateCell(rowEl, "H", rowNum, getStyleFromRow(rowEl, "H"));
+      setCellValue(hCell, line.rate);
+    }
+
+    // Section subtotal cells → linked division VALUES (exact col-S tie-out)
+    for (const sub of STEP23_SUBTOTAL_CELLS) {
+      if (sub.sheet !== name) continue;
+      const rowEl = findRowElement(children, sub.row);
+      const iCell = rowEl ? findCellInRow(rowEl, "I") : undefined;
+      if (!rowEl || !iCell) {
+        throw new Error(`Subtotal cell I${sub.row} not found on "${name}" — template layout drifted.`);
+      }
+      const formula = getCellFormula(iCell);
+      if (formula === null || !formula.toUpperCase().includes("SUM(")) {
+        // Guard: we expect to replace the template's live SUM. Anything else
+        // means the coordinates no longer point at a subtotal row.
+        throw new Error(
+          `Cell I${sub.row} on "${name}" is not a SUM subtotal (found ${formula === null ? "a static value" : `"${formula}"`}) — refusing to overwrite.`
+        );
+      }
+      setCellValue(iCell, linkedTotalByItemId.get(sub.itemId) ?? 0);
+    }
+
+    const rebuilt = fixXmlEntities(builder.build(parsed));
+    const inner = rebuilt.replace(/^<sheetData>/, "").replace(/<\/sheetData>$/, "");
+    sheetXml = sheetXml.replace(/<sheetData>[\s\S]*<\/sheetData>/, `<sheetData>${inner}</sheetData>`);
+    zip.file(`xl/${sheetFile}`, sheetXml);
+  }
+}
+
+// ─── MAIN EXPORT FUNCTION (JSZip + fast-xml-parser) ─────────────────────────
+
+export async function generateExcelWorkbook(
+  rows: ProcessedTakeoffRow[],
+  projectMetadata: Project | null | undefined,
+  columnDefs: ColumnDefinition[],
+  layoutConfig: TemplateLayoutConfig,
+  templateBuffer: ArrayBuffer,
+  // Required (gc-siteops Phase 3): an export path that omitted these would
+  // silently re-create the $0 GC/Site Ops bug this phase closes.
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult
+): Promise<Blob> {
+  // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
+
+  assertWorkbookInputs(layoutConfig, templateBuffer);
+  const { anchors, sheetNames } = layoutConfig;
+
+  const zip = await JSZip.loadAsync(templateBuffer);
+
+  let wbXml = await zip.file("xl/workbook.xml")!.async("string");
+  let relsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
+
+  const step4File = resolveSheetFile(wbXml, relsXml, "STEP 4 - ESTIMATE");
+  const step1File = resolveSheetFile(wbXml, relsXml, "STEP 1 - PROJECT DATA");
+
+  let step4Xml = await zip.file(`xl/${step4File}`)!.async("string");
+  let step1Xml = await zip.file(`xl/${step1File}`)!.async("string");
+
+  const parser = new XMLParser(XML_PARSER_OPTS);
+  const builder = new XMLBuilder(XML_BUILDER_OPTS);
+
+  // ── PHASE 2a: Flatten Shared Formulas (STEP 4 only) ────────────────────────
+
+  // Extract <sheetData>...</sheetData> from the sheet XML
+  const sheetDataMatch = step4Xml.match(/<sheetData>([\s\S]*)<\/sheetData>/);
+  if (!sheetDataMatch) throw new Error("No <sheetData> found in STEP 4 sheet XML");
+
+  const parsedSheetData: ParsedElement[] = parser.parse(`<sheetData>${sheetDataMatch[1]}</sheetData>`);
+  // parsedSheetData is an array with a single { sheetData: [...rows...] } element
+  const sheetDataWrapper = parsedSheetData[0];
+  const sheetDataChildren: ParsedElement[] = sheetDataWrapper.sheetData || [];
+
+  flattenSharedFormulas(sheetDataChildren);
 
   // ── PHASE 2b: Write STEP 1 Project Metadata ────────────────────────────────
 
@@ -1147,14 +1362,7 @@ export async function generateExcelWorkbook(
    * Read the display text from a cell, resolving shared string references.
    */
   function readCellText(cellEl: ParsedElement): string {
-    const cellType = cellEl[":@"]?.["@_t"];
-    const rawValue = getCellTextValue(cellEl);
-    if (cellType === "s" && rawValue) {
-      // Shared string index
-      const idx = parseInt(rawValue, 10);
-      return sharedStrings[idx] || "";
-    }
-    return rawValue;
+    return readCellTextResolved(cellEl, sharedStrings);
   }
 
   const divisions = JSON.parse(
@@ -1441,6 +1649,39 @@ export async function generateExcelWorkbook(
   step4Xml = step4Xml.replace(
     /<sheetData>[\s\S]*<\/sheetData>/,
     `<sheetData>${step4Inner}</sheetData>`
+  );
+
+  // ── PHASE 2g: STEP 2/3 Sheet Detail (gc-siteops Phase 6) ───────────────────
+  // Write the GC/Site Ops line qty/rate values + section-subtotal values onto
+  // the "STEP 2 - GCs" / "STEP 3 - SITE OPS" sheets. Must run BEFORE the 3d
+  // cross-sheet fixup so any 'STEP 4 - ESTIMATE'! references that survive on
+  // those sheets (e.g. the L-column % hints) are row-shifted on the updated
+  // XML. The %-line basis is the same whole-job summary the estimate page and
+  // both CSV paths use (computeTakeoffSummary + linked totals — Phase 5 basis).
+  const step23Summary = computeTakeoffSummary(
+    rows,
+    projectMetadata?.squareFootage ?? 0,
+    projectMetadata?.unitCount ?? 0,
+    {
+      constructionContingencyRate: projectMetadata?.constructionContingencyRate ?? 0,
+      designContingencyRate: projectMetadata?.designContingencyRate ?? 0,
+      buildersRiskRate: projectMetadata?.buildersRiskRate ?? 0,
+      specialInsuranceRate: projectMetadata?.specialInsuranceRate ?? 0,
+      glInsuranceRate: projectMetadata?.glInsuranceRate ?? 0.01,
+      bondRate: projectMetadata?.bondRate ?? 0,
+      feeRate: projectMetadata?.feeRate ?? 0.05,
+      roundingRule: projectMetadata?.roundingRule ?? "dollar",
+    },
+    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult)
+  );
+  await writeStep23SheetDetail(
+    zip,
+    wbXml,
+    relsXml,
+    sharedStrings,
+    gcCalcResult,
+    siteOpsCalcResult,
+    step23Summary.totalEstimatedCost
   );
 
   // ── PHASE 3: Metadata Updates + ZIP Write ──────────────────────────────────

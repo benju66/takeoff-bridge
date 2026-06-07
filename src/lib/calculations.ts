@@ -60,7 +60,8 @@ export function getTerminalProgressBar(percentage: number): string {
 // ---------------------------------------------------------------------------
 
 export interface PersonnelCalcResult {
-  staffLines: { code: string; procoreCode: string; costType: GcCostType; role: string; rate: number; qty: number; total: number }[];
+  /** `utilization` is the input fraction (0–1), exposed for the STEP 2 sheet's col E (gc-siteops Phase 6) */
+  staffLines: { code: string; procoreCode: string; costType: GcCostType; role: string; rate: number; qty: number; total: number; utilization: number }[];
   operationalLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   /** The 3 estimator-entered lump-sum equipment lines (gc-siteops Phase 3) */
   equipmentLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; total: number }[];
@@ -92,9 +93,10 @@ export function computePersonnelCosts(
   // Staff labour lines
   const staffLines = STAFF_ROLE_DEFAULTS.map((role) => {
     const effectiveRate = rateOverrides?.[role.key] ?? role.defaultRate;
-    const qty = durationMonths * HOURS_PER_MONTH * ((utilizations[role.key] || 0) / 100);
+    const utilization = (utilizations[role.key] || 0) / 100;
+    const qty = durationMonths * HOURS_PER_MONTH * utilization;
     const total = qty * effectiveRate;
-    return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total };
+    return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total, utilization };
   });
 
   // Operational expense lines (auto quantity drivers mirroring template STEP 2 col F)

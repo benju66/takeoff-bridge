@@ -6,8 +6,9 @@ import {
   rollupByProcoreCode,
   rollupGcSiteOps,
   collectGcSiteOpsLines,
+  buildStep23DetailLines,
 } from "../lib/exporter";
-import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals } from "../lib/calculations";
+import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals, computeTakeoffSummary } from "../lib/calculations";
 import { LINKED_DIVISION_ROWS } from "../lib/constants";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
@@ -916,4 +917,252 @@ describe("Linked division rows & double-count closure (Phase 5)", () => {
     expect(byCode.get("60-4000.001")).toBeCloseTo(basis * 0.05, 2); // Fee 5%
     expect(byCode.get("60-2020.001")).toBeCloseTo(basis * 0.01, 2); // GL 1%
   });
+});
+
+// ---------------------------------------------------------------------------
+// gc-siteops Phase 6 — STEP 2/3 sheet detail (plan §8)
+// ---------------------------------------------------------------------------
+
+describe("STEP 2/3 sheet detail (Phase 6)", () => {
+  const mockColumns: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProject: Project = {
+    id: "project-6",
+    name: "Phase 6 Sheet Detail Test Project",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-07",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x",
+    classification: "",
+    itemId: "",
+    procoreParentCode: "",
+    procoreCode: "",
+    description: "",
+    matchedQty: 0,
+    uom: "LS",
+    unitPrice: 0,
+    total: 0,
+    isMapped: true,
+    rawQuantities: [],
+    costType: "S",
+    customFields: {},
+    source: "template",
+    ...overrides,
+  });
+
+  // STEP 4 fixture: $32,400 of takeoff dollars + the 10 template-seeded
+  // linked division rows (qty 0) so the %-line basis includes GC + Site Ops
+  // the way a real project grid does.
+  const step4Rows = [
+    baseRow({
+      id: "row-03-0000.001", itemId: "03-0000.001",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Cast In-Place Concrete", matchedQty: 150, unitPrice: 120, total: 18000, uom: "CY", costType: "M",
+    }),
+    baseRow({
+      id: "row-03-0000.002", itemId: "03-0000.002",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Footings", matchedQty: 80, unitPrice: 180, total: 14400, uom: "CY", costType: "M",
+    }),
+    ...LINKED_DIVISION_ROWS.map((cfg) =>
+      baseRow({
+        id: `row-${cfg.itemId}`,
+        itemId: cfg.itemId,
+        procoreParentCode: cfg.itemId.startsWith("01") ? "1-10000.000" : "2-20000.000",
+        procoreCode: cfg.itemId.startsWith("01") ? "1-10000.000" : "2-20000.000",
+        description: cfg.description,
+        costType: "L",
+      })
+    ),
+  ];
+
+  // Same rich fixture as the Phase 3 block (GC_TOTAL 392,790 / SITE_OPS 108,900)
+  const gcResult = () =>
+    computePersonnelCosts(
+      10, 0,
+      { su: 100, pm: 50 },
+      { dumpsters: 5000, toilets: 2000, electric: 3000 },
+      { designArch: 12000, tempOfficeSetup: 1, safetyConsultant: 500 }
+    );
+  const siteOpsResult = () =>
+    computeSiteOperations(10, 10000,
+      { knox: 2, payrollCleaning: 100, hiredCleaning: 50, soilBorings: 1, demolition: 1000, finalCleaning: 2, ffeRelocation: 7500, craneRental: 4000 },
+      { soilBorings: 2500 });
+
+  const summaryRates = {
+    constructionContingencyRate: 0, designContingencyRate: 0, buildersRiskRate: 0,
+    specialInsuranceRate: 0, glInsuranceRate: 0.01, bondRate: 0, feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  it("buildStep23DetailLines: lump-sum lines write qty 0/1 × amount; %-lines write effective % × basis", () => {
+    const basis = 566135.4;
+    const { step2, step3 } = buildStep23DetailLines(gcResult(), siteOpsResult(), basis);
+    const s2 = new Map(step2.map((l) => [l.code, l]));
+    const s3 = new Map(step3.map((l) => [l.code, l]));
+
+    // Staff: utilization fraction + computed hours + rate
+    expect(s2.get("01-0420.001")).toMatchObject({ qty: 1732, rate: 110, utilization: 1 });
+    expect(s2.get("01-0330.001")).toMatchObject({ qty: 866, rate: 120, utilization: 0.5 });
+    // Equipment lump sums: qty 1 × typed amount (qty 0 when empty)
+    expect(s2.get("01-5130.001")).toMatchObject({ qty: 1, rate: 5000 });
+    // %-line (template-faithful): F = amount ÷ basis, H = basis → I recomputes to $500
+    const safety = s2.get("01-0610.001")!;
+    expect(safety.qty).toBeCloseTo(500 / basis, 10);
+    expect(safety.rate).toBeCloseTo(basis, 2);
+    // Untyped %-line: F = 0, H = basis → I recomputes to $0
+    expect(s3.size).toBeGreaterThan(0);
+    const procore = s2.get("01-1600.001")!;
+    expect(procore.qty).toBe(0);
+    expect(procore.rate).toBeCloseTo(basis, 2);
+    // Site Ops qty × rate lines pass through
+    expect(s3.get("02-9307.001")).toMatchObject({ qty: 2, rate: 650 });
+    expect(s3.get("02-4100.001")).toMatchObject({ qty: 1000, rate: 6 });
+  });
+
+  it("buildStep23DetailLines: %-lines fall back to qty 0/1 × amount when the basis is $0", () => {
+    const { step2 } = buildStep23DetailLines(gcResult(), siteOpsResult(), 0);
+    const s2 = new Map(step2.map((l) => [l.code, l]));
+    expect(s2.get("01-0610.001")).toMatchObject({ qty: 1, rate: 500 });
+    expect(s2.get("01-1600.001")).toMatchObject({ qty: 0, rate: 0 });
+  });
+
+  it("workbook: STEP 2/3 sheets carry line qty/rate values, live F×H line totals, and exact subtotal tie-out with STEP 4", async () => {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const gc = gcResult();
+    const so = siteOpsResult();
+    const linked = computeLinkedDivisionTotals(gc, so);
+    const linkedByItemId = new Map(linked.map((l) => [l.itemId, l.total]));
+    const summary = computeTakeoffSummary(step4Rows, 10000, 100, summaryRates, linked);
+
+    const blob = await generateExcelWorkbook(
+      step4Rows,
+      mockProject,
+      mockColumns,
+      mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer,
+      gc,
+      so
+    );
+    const arrayBuffer = await blob.arrayBuffer();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(arrayBuffer) as never);
+
+    const step2 = workbook.getWorksheet("STEP 2 - GCs")!;
+    const step3 = workbook.getWorksheet("STEP 3 - SITE OPS")!;
+    expect(step2).toBeDefined();
+    expect(step3).toBeDefined();
+
+    // ── STEP 2 line rows: utilization (E) / qty (F) / rate (H) values ──
+    // Superintendent (row 13): 100% × 10 mo × 173.2 = 1,732 hr @ $110
+    expect(step2.getCell("E13").value).toBe(1);
+    expect(step2.getCell("F13").value).toBe(1732);
+    expect(step2.getCell("H13").value).toBe(110);
+    // Project Manager (row 29): 50% → 866 hr @ $120
+    expect(step2.getCell("E29").value).toBe(0.5);
+    expect(step2.getCell("F29").value).toBe(866);
+    expect(step2.getCell("H29").value).toBe(120);
+    // Idle staff still written ($0 line, default rate visible): Project Executive row 27
+    expect(step2.getCell("E27").value).toBe(0);
+    expect(step2.getCell("F27").value).toBe(0);
+    expect(step2.getCell("H27").value).toBe(175);
+    // Auto monthly line: Small Tools (row 36) 10 mo × $500 (su-driven)
+    expect(step2.getCell("F36").value).toBe(10);
+    expect(step2.getCell("H36").value).toBe(500);
+    // Equipment lump sum: Dumpsters (row 47) qty 1 × $5,000
+    expect(step2.getCell("F47").value).toBe(1);
+    expect(step2.getCell("H47").value).toBe(5000);
+    // Manual lump sum: Design - Architecture (row 20) qty 1 × $12,000
+    expect(step2.getCell("F20").value).toBe(1);
+    expect(step2.getCell("H20").value).toBe(12000);
+    // %-line Safety Consultant (row 35): effective % × whole-job basis
+    expect(step2.getCell("F35").value).toBeCloseTo(500 / summary.totalEstimatedCost, 10);
+    expect(step2.getCell("H35").value).toBeCloseTo(summary.totalEstimatedCost, 2);
+
+    // Line totals stay LIVE F×H formulas (flattened standalone, not shared)
+    const i13 = step2.getCell("I13").value as { formula?: string };
+    expect(i13?.formula).toBe("F13*H13");
+    const i36 = step2.getCell("I36").value as { formula?: string };
+    expect(i36?.formula).toBe("F36*H36");
+
+    // ── STEP 3 line rows ──
+    expect(step3.getCell("F55").value).toBe(2);    // Knox Box qty
+    expect(step3.getCell("H55").value).toBe(650);  // Knox Box rate
+    expect(step3.getCell("F17").value).toBe(10);   // Safety: 10 mo
+    expect(step3.getCell("H17").value).toBe(500);
+    expect(step3.getCell("F18").value).toBe(10000); // Temp Protection: sqft
+    expect(step3.getCell("H18").value).toBe(0.25);
+    expect(step3.getCell("F12").value).toBe(1);    // Soil Borings qtyRate
+    expect(step3.getCell("H12").value).toBe(2500);
+    expect(step3.getCell("F32").value).toBe(1000); // Demolition
+    expect(step3.getCell("H32").value).toBe(6);
+    expect(step3.getCell("F13").value).toBe(1);    // FFE Relocation lump $7,500
+    expect(step3.getCell("H13").value).toBe(7500);
+
+    // ── Subtotal cells: VALUES identical to the STEP 4 rows 12–24 writes,
+    // so the template's exact-equality col-S checks tie out ──
+    const step4 = workbook.getWorksheet("STEP 4 - ESTIMATE")!;
+    const subtotalChecks: { itemId: string; sheet: ExcelJS.Worksheet; cell: string; step4Row: number }[] = [
+      { itemId: "01-0400.002", sheet: step2, cell: "I16", step4Row: 13 },
+      { itemId: "01-0000.001", sheet: step2, cell: "I58", step4Row: 12 },
+      { itemId: "02-0000.001", sheet: step3, cell: "I29", step4Row: 17 },
+      { itemId: "02-4100.002", sheet: step3, cell: "I35", step4Row: 18 },
+      { itemId: "02-9005.003", sheet: step3, cell: "I40", step4Row: 19 },
+      { itemId: "02-9070.004", sheet: step3, cell: "I45", step4Row: 20 },
+      { itemId: "02-9200.005", sheet: step3, cell: "I51", step4Row: 21 },
+      { itemId: "02-9300.006", sheet: step3, cell: "I62", step4Row: 22 },
+      { itemId: "02-9400.007", sheet: step3, cell: "I72", step4Row: 23 },
+      { itemId: "02-9500.008", sheet: step3, cell: "I82", step4Row: 24 },
+    ];
+    for (const check of subtotalChecks) {
+      const subtotalValue = check.sheet.getCell(check.cell).value;
+      // A value (number), not a formula — and the EXACT number on STEP 4 col H
+      expect(typeof subtotalValue, `${check.itemId} subtotal is a value`).toBe("number");
+      expect(subtotalValue, `${check.itemId} subtotal`).toBe(linkedByItemId.get(check.itemId)!);
+      expect(step4.getRow(check.step4Row).getCell(8).value, `${check.itemId} STEP 4 H`).toBe(subtotalValue);
+    }
+    // Spot-check the section math itself
+    expect(linkedByItemId.get("01-0400.002")).toBeCloseTo(190520, 2);          // Supervision (su)
+    expect(linkedByItemId.get("01-0000.001")).toBeCloseTo(392790 - 190520, 2); // GC remainder
+    expect(linkedByItemId.get("02-0000.001")).toBeCloseTo(27600, 2);           // 02.A Site Operations
+    expect(linkedByItemId.get("02-9400.007")).toBeCloseTo(69000, 2);           // 02.G Site Equipment
+
+    // ── Sheet detail must not change export dollars: BLI still ties out ──
+    const bli = workbook.getWorksheet("Budget Line Items")!;
+    let bliTotal = 0;
+    bli.eachRow((row, rowNum) => {
+      if (rowNum < 2) return;
+      const code = String(row.getCell(1).value ?? "").trim();
+      if (code && code.includes("-")) bliTotal += Number(row.getCell(8).value) || 0;
+    });
+    expect(bliTotal).toBeCloseTo(32400 + gc.grandTotal + so.grandTotal, 2);
+
+    // ── No shared formulas survive on the rebuilt STEP 2/3 sheets ──
+    const outputZip = await JSZip.loadAsync(arrayBuffer);
+    for (const sheetFile of ["xl/worksheets/sheet5.xml", "xl/worksheets/sheet6.xml"]) {
+      const xml = await outputZip.file(sheetFile)!.async("string");
+      expect(xml, `${sheetFile} shared formulas flattened`).not.toContain('t="shared"');
+    }
+  }, 30000);
 });
