@@ -21,8 +21,9 @@ When implementing a multi-phase plan: implement the current phase, run tests unt
 ## Testing
 Always run the test suite after code changes and confirm green before committing.
 
-## Shell Commands
-This environment uses PowerShell heavily; keep inline commands short and write a script file instead of long one-liners (commands over ~965 bytes fail to parse).
+## Shell & Encoding Rules
+- This is a Windows environment: do NOT use emoji in PowerShell scripts (cp1252 mangles them) and do NOT mix PowerShell here-string syntax inside the Bash tool.
+- For commands likely to exceed ~965 bytes, write a script file instead of inlining.
 
 ## Excel/XML Exports
 When generating or parsing spreadsheet XML, ensure cells are written in ascending column order to avoid corrupt files; double-check column-letter parsing.
