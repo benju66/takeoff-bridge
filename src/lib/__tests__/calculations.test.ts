@@ -451,6 +451,46 @@ describe('computePersonnelCosts', () => {
     expect(legal!.total).toBe(0);
     expect(result.grandTotal).toBe(18000 + 18500 + 4400);
   });
+
+  // ─── Phase 6: per-project staff rate overrides ─────────────────────
+
+  it('applies a rate override to that role only; others keep corporate defaults', () => {
+    const result = computePersonnelCosts(
+      10, 0,
+      { su: 100, pm: 50 },
+      { dumpsters: 0, toilets: 0, electric: 0 },
+      {},
+      { su: 130 } // Superintendent overridden from $110 to $130
+    );
+    const su = result.staffLines.find((l) => l.code === '01-0420.001')!;
+    expect(su.rate).toBe(130);
+    expect(su.total).toBeCloseTo(10 * 173.2 * 130);
+    // PM untouched: corporate default $120
+    const pm = result.staffLines.find((l) => l.code === '01-0330.001')!;
+    expect(pm.rate).toBe(120);
+    expect(pm.total).toBeCloseTo(10 * 173.2 * 0.5 * 120);
+  });
+
+  it('exposes the utilization fraction on staff lines (Phase 6 sheet detail)', () => {
+    const result = computePersonnelCosts(
+      10, 0,
+      { su: 100, pm: 50 },
+      { dumpsters: 0, toilets: 0, electric: 0 }
+    );
+    expect(result.staffLines.find((l) => l.code === '01-0420.001')!.utilization).toBe(1);
+    expect(result.staffLines.find((l) => l.code === '01-0330.001')!.utilization).toBe(0.5);
+    expect(result.staffLines.find((l) => l.code === '01-0310.001')!.utilization).toBe(0);
+  });
+
+  it('rate overrides flow into the linked Supervision/GC division totals', () => {
+    const base = computePersonnelCosts(10, 0, { su: 100 }, { dumpsters: 0, toilets: 0, electric: 0 });
+    const overridden = computePersonnelCosts(10, 0, { su: 100 }, { dumpsters: 0, toilets: 0, electric: 0 }, {}, { su: 130 });
+    const so = computeSiteOperations(0, 0, {}, {});
+    const baseSupervision = computeLinkedDivisionTotals(base, so).find((l) => l.itemId === '01-0400.002')!;
+    const overriddenSupervision = computeLinkedDivisionTotals(overridden, so).find((l) => l.itemId === '01-0400.002')!;
+    expect(baseSupervision.total).toBeCloseTo(10 * 173.2 * 110);
+    expect(overriddenSupervision.total).toBeCloseTo(10 * 173.2 * 130);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

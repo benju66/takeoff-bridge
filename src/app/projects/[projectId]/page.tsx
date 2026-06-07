@@ -390,6 +390,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             onEquipmentChange={personnel.handleEquipmentChange}
             manualEntries={personnel.manualEntries}
             onManualEntryChange={personnel.handleManualEntryChange}
+            rateOverrides={personnel.rateOverrides}
+            onRateChange={personnel.handleRateChange}
+            onRateReset={personnel.resetRate}
             estimateTotal={takeoffSummary.totalEstimatedCost}
             calcResult={personnel.calcResult}
             totalGCs={personnel.totalGCs}

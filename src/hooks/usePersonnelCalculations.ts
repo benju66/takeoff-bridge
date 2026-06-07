@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import { computePersonnelCosts, PersonnelCalcResult } from "@/lib/calculations";
-import { GC_MANUAL_DEFAULTS } from "@/lib/constants";
+import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // usePersonnelCalculations — Step 2 GC Personnel state & calculations
@@ -16,6 +16,10 @@ export interface UsePersonnelCalculationsReturn {
   /** Phase 4: estimator-typed GC values keyed by GcManualConfig.key */
   manualEntries: Record<string, number>;
   handleManualEntryChange: (key: string, valStr: string) => void;
+  /** Phase 6: per-project hourly rate overrides keyed by StaffRoleConfig.key (absent = corporate default) */
+  rateOverrides: Record<string, number>;
+  handleRateChange: (key: string, valStr: string) => void;
+  resetRate: (key: string) => void;
   calcResult: PersonnelCalcResult;
   totalGCs: number;
   // Serializable snapshots for persistence
@@ -26,13 +30,24 @@ export interface UsePersonnelCalculationsReturn {
 /** Valid persistence keys for Phase 4 manual GC entries (stale JSONB keys are dropped on load). */
 const MANUAL_GC_KEYS = new Set(GC_MANUAL_DEFAULTS.map((c) => c.key));
 
+/** Set of valid StaffRoleConfig keys ("ex", "srPm", …) for rate-override input guarding. */
+const STAFF_ROLE_KEYS = new Set(STAFF_ROLE_DEFAULTS.map((r) => r.key));
+
+/**
+ * Persistence key for a staff rate override inside the gc_utilization JSONB
+ * snapshot: role key "srSu" ↔ "rateSrSu" (sits alongside the util* keys —
+ * same free-form-JSONB pattern Phase 4 used for gc_equipment_overrides;
+ * no schema change).
+ */
+const rateKeyFor = (roleKey: string) =>
+  "rate" + roleKey.charAt(0).toUpperCase() + roleKey.slice(1);
+
 export function usePersonnelCalculations(
   durationMonths: number,
   squareFootage: number,
   isLoaded: boolean,
   initialUtilizations?: Record<string, number>,
-  initialEquipment?: Record<string, number>,
-  rateOverrides?: Record<string, number>
+  initialEquipment?: Record<string, number>
 ): UsePersonnelCalculationsReturn {
   // Individual utilization percentages (0-100)
   const [utilEx, setUtilEx] = useState<number>(initialUtilizations?.utilEx ?? 0);
@@ -53,6 +68,11 @@ export function usePersonnelCalculations(
   // the eq* keys in the same gc_equipment_overrides JSONB snapshot.
   const [manualEntries, setManualEntries] = useState<Record<string, number>>({});
 
+  // Phase 6: per-project staff rate overrides keyed by role key. Sparse —
+  // a role absent from the map uses its corporate default rate
+  // (STAFF_ROLE_DEFAULTS, the sole rate authority via computePersonnelCosts).
+  const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({});
+
   // ---------------------------------------------------------------------------
   // One-time DB sync: update state once estimate data arrives from the database.
   // useState only captures the initial value on the first render (before the
@@ -72,6 +92,13 @@ export function usePersonnelCalculations(
           setUtilSu(initialUtilizations.utilSu ?? 0);
           setUtilAsstSu(initialUtilizations.utilAsstSu ?? 0);
           setUtilPa(initialUtilizations.utilPa ?? 0);
+          // Phase 6: rate* keys share the gc_utilization JSONB snapshot
+          const loadedRates: Record<string, number> = {};
+          for (const role of STAFF_ROLE_DEFAULTS) {
+            const v = initialUtilizations[rateKeyFor(role.key)];
+            if (typeof v === "number" && v >= 0) loadedRates[role.key] = v;
+          }
+          setRateOverrides(loadedRates);
         }
         if (initialEquipment) {
           setEqDumpsters(initialEquipment.eqDumpsters ?? 0);
@@ -127,18 +154,46 @@ export function usePersonnelCalculations(
     setManualEntries((prev) => ({ ...prev, [key]: clamped }));
   };
 
+  // Phase 6: editable staff rates. Clearing the input removes the override
+  // (the corporate default returns); resetRate is the explicit affordance.
+  const handleRateChange = (key: string, valStr: string) => {
+    if (!STAFF_ROLE_KEYS.has(key)) return;
+    if (valStr === "") {
+      resetRate(key);
+      return;
+    }
+    const clamped = Math.max(0, parseFloat(valStr) || 0);
+    setRateOverrides((prev) => ({ ...prev, [key]: clamped }));
+  };
+
+  const resetRate = (key: string) => {
+    setRateOverrides((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
   const manualEntriesString = JSON.stringify(manualEntries);
+  const rateOverridesString = JSON.stringify(rateOverrides);
 
   // Compute via pure calculation layer
   const calcResult = useMemo(
     () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverrides]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString]
   );
 
-  // Serializable persistence snapshots (matching existing ProjectEstimate shape)
+  // Serializable persistence snapshots (matching existing ProjectEstimate shape).
+  // Rate overrides ride the gc_utilization JSONB as rate* keys — only
+  // overridden roles are present, so deleting an override also clears it
+  // from the saved snapshot.
   const gcUtilization: Record<string, number> = {
     utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa,
+    ...Object.fromEntries(
+      Object.entries(rateOverrides).map(([key, rate]) => [rateKeyFor(key), rate])
+    ),
   };
   const gcEquipmentOverrides: Record<string, number> = {
     eqDumpsters, eqToilets, eqElectric, ...manualEntries,
@@ -151,6 +206,9 @@ export function usePersonnelCalculations(
     handleEquipmentChange,
     manualEntries,
     handleManualEntryChange,
+    rateOverrides,
+    handleRateChange,
+    resetRate,
     calcResult,
     totalGCs: calcResult.grandTotal,
     gcUtilization,

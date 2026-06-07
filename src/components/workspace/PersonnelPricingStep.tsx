@@ -25,6 +25,10 @@ interface PersonnelPricingStepProps {
   onEquipmentChange: (field: "dumpsters" | "toilets" | "electric", valStr: string) => void;
   manualEntries: Record<string, number>;
   onManualEntryChange: (key: string, valStr: string) => void;
+  /** Phase 6: per-project staff hourly rate overrides keyed by StaffRoleConfig.key */
+  rateOverrides: Record<string, number>;
+  onRateChange: (key: string, valStr: string) => void;
+  onRateReset: (key: string) => void;
   /** Current STEP 4 total estimated cost — drives the % suggestion hints (display only) */
   estimateTotal: number;
   calcResult: PersonnelCalcResult;
@@ -70,6 +74,9 @@ export function PersonnelPricingStep({
   onEquipmentChange,
   manualEntries,
   onManualEntryChange,
+  rateOverrides,
+  onRateChange,
+  onRateReset,
   estimateTotal,
   calcResult,
   totalGCs,
@@ -165,12 +172,39 @@ export function PersonnelPricingStep({
             <SectionHeader label="01.A - Staff Labour Directs" />
             {STAFF_DISPLAY.map((row, i) => {
               const line = calcResult.staffLines[i];
+              const isOverridden = row.key in rateOverrides;
               return (
                 <tr key={row.code} className="hover:bg-blue-100/50 dark:hover:bg-slate-800/60 transition-colors">
                   <td className={codeCellClass}>{row.code}</td>
-                  <td className={descCellClass}>{row.role}</td>
+                  <td className={descCellClass}>
+                    {row.role}
+                    {isOverridden && (
+                      <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400 mt-0.5">
+                        Project rate override — corporate default ${row.rate.toFixed(2)}/hr{" "}
+                        <button
+                          type="button"
+                          className="underline font-semibold hover:text-amber-700 dark:hover:text-amber-300"
+                          onClick={() => onRateReset(row.key)}
+                        >
+                          Reset
+                        </button>
+                      </span>
+                    )}
+                  </td>
                   <td className={unitCellClass}>hr</td>
-                  <td className={rateCellClass}>${row.rate.toFixed(2)}</td>
+                  <td className={inputCellClass}>
+                    <div className="flex items-center justify-center w-full h-full relative">
+                      <span className="absolute left-2.5 text-slate-600 dark:text-slate-400 text-[10px] font-bold pointer-events-none select-none font-mono">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        className={inputClass}
+                        value={isOverridden ? rateOverrides[row.key] : ""}
+                        placeholder={row.rate.toFixed(2)}
+                        onChange={(e) => onRateChange(row.key, e.target.value)}
+                      />
+                    </div>
+                  </td>
                   <td className={inputCellClass}>
                     <div className="flex items-center justify-center w-full h-full relative">
                       <input
