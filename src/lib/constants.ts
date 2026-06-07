@@ -67,6 +67,22 @@ export const DIVISION_LABELS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Market Sector Classification
+// ---------------------------------------------------------------------------
+
+/** Market sector options — selected (required) at project creation; stored as display label. */
+export const MARKET_SECTORS = [
+  "Commercial",
+  "Educational",
+  "Government",
+  "Healthcare",
+  "Housing and Hotel",
+  "Industrial",
+  "Restaurant",
+  "Workplace",
+] as const;
+
+// ---------------------------------------------------------------------------
 // Division 01 — General Conditions Configurable Rate Table
 // ---------------------------------------------------------------------------
 

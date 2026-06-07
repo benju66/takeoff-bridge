@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu } from "lucide-react";
+import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2 } from "lucide-react";
 import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
+import { MARKET_SECTORS } from "@/lib/constants";
 import { Project } from "@/types/db";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
@@ -13,6 +14,7 @@ export default function ProjectsDashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
+  const [marketSector, setMarketSector] = useState("");
   const [squareFootage, setSquareFootage] = useState("");
   const [unitCount, setUnitCount] = useState("");
   const [bidDate, setBidDate] = useState("");
@@ -48,6 +50,7 @@ export default function ProjectsDashboard() {
       unitCount: units,
       bidDate: bDate,
       createdAt: new Date().toISOString(),
+      marketSector,
     };
 
     try {
@@ -63,6 +66,7 @@ export default function ProjectsDashboard() {
     // Reset Form Fields
     setName("");
     setLocation("");
+    setMarketSector("");
     setSquareFootage("");
     setUnitCount("");
     setBidDate("");
@@ -163,6 +167,7 @@ export default function ProjectsDashboard() {
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Project ID</th>
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Name</th>
                   <th className="p-4 border-r border-b border-grid-border font-semibold">Location</th>
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Market Sector</th>
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Square Footage</th>
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Unit Count</th>
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Bid Date</th>
@@ -178,6 +183,12 @@ export default function ProjectsDashboard() {
                       <div className="flex items-center gap-1.5">
                         <MapPin size={12} className="text-slate-600 dark:text-slate-400" />
                         {proj.location}
+                      </div>
+                    </td>
+                    <td className="p-4 text-slate-600 dark:text-slate-400 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                      <div className="flex items-center gap-1.5">
+                        <Building2 size={12} className="text-slate-600 dark:text-slate-400" />
+                        {proj.marketSector || "—"}
                       </div>
                     </td>
                     <td className="p-4 text-right text-foreground font-bold border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40 font-mono">
@@ -260,6 +271,26 @@ export default function ProjectsDashboard() {
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                   />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5 font-bold">
+                  Market Sector
+                </label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400" size={14} />
+                  <select
+                    required
+                    className="w-full bg-transparent border border-grid-border rounded-lg pl-9 pr-3 py-2 text-xs text-foreground outline-none font-sans transition-all focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40"
+                    value={marketSector}
+                    onChange={(e) => setMarketSector(e.target.value)}
+                  >
+                    <option value="" disabled>Select market sector…</option>
+                    {MARKET_SECTORS.map((sector) => (
+                      <option key={sector} value={sector}>{sector}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

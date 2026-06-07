@@ -41,6 +41,7 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     feeRate: row.fee_rate != null ? Number(row.fee_rate) : 0.05,
     roundingRule: (row.rounding_rule as string) || "dollar",
     projectType: (row.project_type as string) || "multifamily",
+    marketSector: (row.market_sector as string) || "",
   };
 }
 
@@ -71,6 +72,7 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     fee_rate: project.feeRate ?? 0.05,
     rounding_rule: project.roundingRule ?? "dollar",
     project_type: project.projectType ?? "multifamily",
+    market_sector: project.marketSector ?? "",
   };
 }
 

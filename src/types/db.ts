@@ -27,6 +27,8 @@ export interface Project {
   roundingRule?: string;
   /** Phase 3a: template selection key (multifamily | ti | medical); UI wiring lands in Phase 3b */
   projectType?: string;
+  /** Market sector classification (display label, e.g. 'Healthcare'; '' = unset legacy project) */
+  marketSector?: string;
 }
 
 export interface ProjectEstimate {

@@ -1,7 +1,7 @@
 import React from "react";
 import { Activity, DollarSign, HelpCircle } from "lucide-react";
 import { Project } from "@/types/db";
-import { ESTIMATE_MODIFIERS } from "@/lib/constants";
+import { ESTIMATE_MODIFIERS, MARKET_SECTORS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // ArchitecturalParametersStep — Step 1 Panel
@@ -92,6 +92,20 @@ export function ArchitecturalParametersStep({
               </div>
             );
           })}
+
+          <div className="flex flex-col gap-2">
+            <label className={labelClass}>Market Sector</label>
+            <select
+              value={project.marketSector ?? ""}
+              onChange={(e) => onParamChange("marketSector", e.target.value)}
+              className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">— Not Set —</option>
+              {MARKET_SECTORS.map((sector) => (
+                <option key={sector} value={sector}>{sector}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 

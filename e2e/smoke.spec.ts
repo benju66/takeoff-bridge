@@ -43,6 +43,7 @@ test.describe("Takeoff Bridge E2E Smoke Suite", () => {
       // Wait for modal and fill fields
       await page.locator("input[placeholder*='Oakridge']").fill("Smoke Test Project");
       await page.locator("input[placeholder*='Chicago']").fill("Local Dev Machine");
+      await page.locator("form select").selectOption("Commercial");
       await page.locator("input[placeholder*='145000']").fill("5000");
       await page.locator("input[placeholder*='120']").fill("10");
       

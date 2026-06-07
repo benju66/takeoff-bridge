@@ -63,7 +63,9 @@ CREATE TABLE projects (
   fee_rate NUMERIC NOT NULL DEFAULT 0.05,
   rounding_rule TEXT NOT NULL DEFAULT 'dollar',
   -- Phase 3a: per-project template selection (multifamily | ti | medical)
-  project_type TEXT NOT NULL DEFAULT 'multifamily'
+  project_type TEXT NOT NULL DEFAULT 'multifamily',
+  -- Market sector classification (display label, e.g. 'Healthcare'; '' = unset legacy project)
+  market_sector TEXT NOT NULL DEFAULT ''
 );
 
 -- ─────────────────────────────────────────────────
