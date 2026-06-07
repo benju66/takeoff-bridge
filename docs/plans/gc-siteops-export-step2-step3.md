@@ -912,5 +912,123 @@ GC/Site Ops dollars exist only on Steps 2/3 and in the export.
 Model: Claude Opus (latest).
 ```
 
+### → Phase 6 (polish: STEP 2/3 sheet detail + editable staff rates — P5 complete 2026-06-06, ready to run)
+
+> *(Enriched 2026-06-07 with Phase 1–5 verified facts. P6 is the FINAL phase of this plan.)*
+
+```
+Implement PHASE 6 ONLY of the plan at:
+docs/plans/gc-siteops-export-step2-step3.md
+Read the whole plan first — especially §8 (STEP 2/3 sheets decision), §13
+"Phases 4–6 — RESEQUENCED" (the authoritative P6 scope) and the §13 handoff
+log (P1–P5 outcomes). Then read the Phase 1 findings doc:
+docs/plans/2026-06-05-gc-siteops-phase1-findings.md — especially §4 (the
+criterion-cell tables: they give each source line's STEP 2/3 ROW number) and
+§5.2 (the two %-lines the estimator hand-types). This is the LAST phase of
+this plan: do Phase 6, close out the plan, then stop.
+== CONTEXT ==
+Takeoff Bridge is a single-company estimating app. I'm the system architect
+(non-developer — explain things plainly, mark a (Recommended) option on
+every choice). P1 (461b6dc) forensically verified the template; P2 (5597048)
+re-synced catalog/DB; P3 (370e66b) made all 217 Budget Line Items rows
+export computed values; P4 (73fadf9) gave every STEP 2/3 source line an app
+input; P5 (2ee34ac) linked the 10 STEP 4 division rows live from Steps 2/3
+(read-only), moved the modifier basis to the whole job (template I331), and
+closed the double-count trap (linked rows excluded from rollup/gate/CSV).
+Build + 223 unit tests green at P5 close.
+== GOAL (two small, independently shippable deliverables — separate commits) ==
+A. STEP 2/3 SHEET DETAIL: the exported workbook's "STEP 2 - GCs" and
+   "STEP 3 - SITE OPS" sheets currently export BLANK. Write each app
+   GC/Site Ops line's qty/rate (computed values) onto its template row so
+   an estimator opening the workbook sees where the dollars came from.
+   The BLI does NOT depend on these sheets (P3 wrote computed values
+   everywhere), so this is purely informational — but it resolves the one
+   visible loose end: the template's col-S checks on STEP 4 rows 12–24
+   compare P5's written values against the (currently blank) STEP 2/3
+   subtotals; once the sheets are filled, those checks tie out.
+B. PER-PROJECT EDITABLE STAFF RATES: UI on Step 2 to override the 8
+   corporate default hourly rates per project. The calculation engine
+   already accepts them — computePersonnelCosts(duration, sqft,
+   utilizations, equipment, manualEntries, rateOverrides?) — only UI +
+   persistence are missing.
+== VERIFIED FACTS (P1–P5 — build on these) ==
+- Row map is ALREADY KNOWN: findings §4 criterion cells give each source
+  line's sheet row (e.g. 01-0001.001 = STEP 2 row 19; supervision staff =
+  STEP 2 rows 12–14; 02-9530.001 = STEP 3 row 80). The 4 D2 orphan lines
+  also live on real rows: 01-5110.002 row 42, 02-9010.002 row 16,
+  02-4100.002 row 33, 02-9200.002 row 49. The line list = the constants.ts
+  configs (P4 covers every template source line; codes are unique per sheet).
+- FORENSICALLY VERIFY (don't assume) the STEP 2/3 column layout before
+  writing: which columns hold qty/rate/total, whether col I is a live
+  F×H-style formula (if so: write qty+rate values, let I recompute —
+  fullCalcOnLoad="1" is already set by the exporter), and the utilization
+  column for staff rows. Same unzip-and-parse method as P1.
+- The two %-lines (STEP 2 H35 Safety Consultant / H39 Procore): the
+  template has the estimator hand-type the amount into col H — the app's
+  typed dollar amounts land there as values, exactly matching the
+  template's own convention (findings §5.2).
+- Subtotal cells (STEP 2 I16/I58; STEP 3 I29/I35/I40/I45/I51/I62/I72/I82)
+  are SUM formulas — leave them LIVE so they recompute from the written
+  line values. P5 wrote STEP 4 rows 12–24 from computeLinkedDivisionTotals,
+  whose section sums are identical by construction → the col-S checks will
+  tie out. Do NOT touch the STEP 4 rows 12–24 write logic.
+- Zero new threading needed: generateExcelWorkbook already receives
+  gcCalcResult + siteOpsCalcResult (required since P3); all line values
+  come from those results (calculations.ts is the sole authority).
+- CLAUDE.md Excel rule: write cells in ascending column order within each
+  row (the P3b out-of-order-cell corruption lesson) and reuse the existing
+  exporter helpers (getOrCreateCell/setCellValue/setCellInlineString).
+- Rate persistence: gc_utilization / gc_equipment_overrides /
+  site_ops_quantities / site_ops_rates JSONB columns exist on
+  project_estimates. Decide whether rate overrides fit an existing JSONB
+  (P4 precedent: new GC entries ride gc_equipment_overrides with a key
+  whitelist) or genuinely need a new column — if a schema change is needed:
+  supabase_schema.sql FIRST + my approval + invoke the supabase skill
+  before any DB code.
+- Sawcutting collision reminder (P5): the string "02-4100.002" is BOTH a
+  STEP 3 source-line code and a STEP 4 linked-row itemId — STEP 3 sheet
+  writes key off the Site Ops config codes/rows, never off STEP 4 itemIds.
+- Test fixture note (P5): export-integrity's div02Row was re-pointed to a
+  non-linked itemId; don't reintroduce linked itemIds as dollar-carrying
+  fixtures.
+== DECISIONS TO RESOLVE WITH ME AT START ==
+- Sheet-detail write shape: values-only into qty/rate cells with live
+  line-total + subtotal formulas recomputing (Recommended — matches the
+  template's own structure and the P5 tie-out) vs writing flat values into
+  totals too. Propose after the forensic column read.
+- Zero-dollar lines: write every line's qty/rate (zeros included, sheet
+  looks complete — Recommended) vs only non-zero lines. Confirm.
+- Rate-override persistence home (existing JSONB vs new column) + whether
+  rate edits also need a "reset to corporate default" affordance.
+- Scope check: P4 deferred "auto-line overrides" (making the always-on
+  monthly GC lines individually adjustable) — propose in/out, default OUT
+  (separate small follow-up if wanted).
+== GUARDRAILS ==
+- AGENTS.md: present an implementation plan table for my approval BEFORE
+  writing code; npm run test green before presenting work.
+- calculations.ts is the sole calculation authority; never invent rates —
+  defaults stay the constants.ts values harvested from the template.
+- Linked STEP 4 rows stay READ-ONLY and excluded (P5 closure is settled —
+  do not revisit). resolveProcoreCode / cost_code_map untouched.
+- DB access only through src/lib/db.ts; line-item writes only via the
+  save_estimate_line_items RPC.
+- Windows + PowerShell: keep inline commands short; script files for
+  anything longer than ~one line; no emoji in PowerShell scripts.
+== EXIT CRITERIA ==
+- npm run build + npm run test green (fix regressions before delivery)
+- Manual check: export a project with GC + Site Ops + STEP 4 dollars →
+  STEP 2/3 sheets show the line detail matching the app's Step 2/3 tables;
+  subtotals recompute; STEP 4 rows 12–24 col-S checks tie out; the
+  reconciliation gate still passes (sheet detail must not change BLI/CSV
+  dollars). Rate overrides: change a staff rate → Step 2 totals, STEP 4
+  linked GC row, export, and gate all follow; reload restores the override.
+- Commit (A and B separately); append a 3–5 line handoff note to §13
+  marking the PLAN COMPLETE; push the branch
+- Then STOP. This plan is finished — remaining backlog (per-type templates,
+  procoreParentCode removal, suffix alignment, security advisors) lives
+  outside it.
+Model: Claude Opus (latest).
+```
+
 **Resolved (B-1):** `03-0000.010/.011/.012` and `03-4500.001` verified in sync — no changes needed.
 **Resolved:** `32-1313` empty-parent question — `32-1313.001` is repurposed as the Concrete Paving line, so the group is not empty.
