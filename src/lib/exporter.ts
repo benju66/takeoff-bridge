@@ -1090,15 +1090,14 @@ async function writeStep23SheetDetail(
   sharedStrings: string[],
   gcCalcResult: PersonnelCalcResult,
   siteOpsCalcResult: SiteOpsCalcResult,
-  estimateTotalBasis: number
+  estimateTotalBasis: number,
+  linkedTotals: LinkedDivisionTotal[]
 ): Promise<void> {
   const parser = new XMLParser(XML_PARSER_OPTS);
   const builder = new XMLBuilder(XML_BUILDER_OPTS);
 
   const detail = buildStep23DetailLines(gcCalcResult, siteOpsCalcResult, estimateTotalBasis);
-  const linkedTotalByItemId = new Map(
-    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult).map((l) => [l.itemId, l.total])
-  );
+  const linkedTotalByItemId = new Map(linkedTotals.map((l) => [l.itemId, l.total]));
 
   const sheets: { name: string; lines: SheetDetailLine[] }[] = [
     { name: "STEP 2 - GCs", lines: detail.step2 },
@@ -1379,8 +1378,12 @@ export async function generateExcelWorkbook(
   // formulas recompute on the same whole-job basis as the estimate page.
   // Values come from calculations.ts (sole authority); these rows stay OUT of
   // the BLI rollup (the granular GC/Site Ops rows carry the dollars).
+  // Computed ONCE per export — PHASE 2g (sheet detail + %-line basis) reuses
+  // this same array, which also guarantees the STEP 2/3 subtotal values are
+  // bit-identical to the STEP 4 row writes (the col-S exact-equality tie-out).
+  const linkedDivisionTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
   const linkedDivisionTotalByItemId = new Map(
-    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult).map((l) => [l.itemId, l.total])
+    linkedDivisionTotals.map((l) => [l.itemId, l.total])
   );
 
   for (const div of divisions) {
@@ -1672,7 +1675,7 @@ export async function generateExcelWorkbook(
       feeRate: projectMetadata?.feeRate ?? 0.05,
       roundingRule: projectMetadata?.roundingRule ?? "dollar",
     },
-    computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult)
+    linkedDivisionTotals
   );
   await writeStep23SheetDetail(
     zip,
@@ -1681,7 +1684,8 @@ export async function generateExcelWorkbook(
     sharedStrings,
     gcCalcResult,
     siteOpsCalcResult,
-    step23Summary.totalEstimatedCost
+    step23Summary.totalEstimatedCost,
+    linkedDivisionTotals
   );
 
   // ── PHASE 3: Metadata Updates + ZIP Write ──────────────────────────────────

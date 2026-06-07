@@ -6,7 +6,7 @@
 
 - **Project:** Takeoff Bridge (`C:\Users\BUrness\Dev\takeoff-bridge`)
 - **Date authored:** 2026-06-05
-- **Status:** READY TO START — (1) ✅ Phase 3c committed + merged 2026-06-05 (`0d3484b`, `6543a8e`); (2) ✅ template finalized + closed (no lock file). Remaining: commit the template's pending changes, then run the §11 kickoff.
+- **Status:** ✅ **COMPLETE 2026-06-07** — all 6 phases delivered (P1 `461b6dc`, P2 `5597048`, P3 `370e66b`, P4 `73fadf9`, P5 `2ee34ac`, P6 `4721e32`+`0ff795a`). See the §13 handoff log for per-phase outcomes.
 - **Owner / approver:** System Architect (per `AGENTS.md`, plan must be approved before code delivery)
 - **Prerequisite session:** ✅ SATISFIED — Phase 3c fully committed and merged
 
@@ -540,6 +540,18 @@ phase must know. Empty until Phase 1 runs.)
   export blank — once P6 writes their line detail, the template's col-S checks on rows 12–24 will tie out
   against the values P5 writes; per-project staff rates still pending (`rateOverrides` hook param ready);
   test fixture note: `div02Row` in export-integrity.test.ts was re-pointed to a non-linked itemId.
+
+- **Phase 6 (2026-06-07, commits `4721e32` A + `0ff795a` B) — PLAN COMPLETE:** (A) STEP 2/3 sheets now export
+  the full GC/Site Ops line detail: qty (F) + rate (H) as values, staff utilization (E), live I=F×H line
+  totals; the 10 section subtotal cells written as VALUES from `computeLinkedDivisionTotals` because the
+  forensic read found the STEP 4 col-S checks are EXACT-equality booleans (live SUMs risk FP
+  summation-order FALSE flags) — user-approved deviation from the "leave subtotals live" default. %-lines
+  are template-faithful (F = amount ÷ whole-job total, H = total). (B) Per-project staff rates editable on
+  Step 2; overrides ride `gc_utilization` JSONB as `rate*` keys (no schema change), with reset-to-default.
+  Artifact-verified: subtotals bit-identical to STEP 4 rows 12–24 writes; BLI/CSV/gate dollars unchanged.
+  Build + 229 unit tests green. **This plan is finished** — remaining backlog (per-type templates,
+  procoreParentCode removal, suffix alignment, security advisors, P4's deferred auto-line overrides
+  [confirmed OUT 2026-06-07]) lives outside it.
 
 - **Resequencing (2026-06-06, user-approved):** remaining work reordered to Phase 4 (full Site Ops
   + GC input coverage, combined), Phase 5 (estimate-page linkage of GC/Site Ops totals incl. the
