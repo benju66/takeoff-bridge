@@ -8,11 +8,20 @@
 --
 -- Tables: 14 (added rate_card — Rate-card slice 1, Phase A)
 -- RPC Functions: 1 (save_estimate_line_items)
--- RLS Policies: 18 (added rate_card select + write — Rate-card slice 1, Phase A)
+-- RLS Policies: 20
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
--- Last updated: 2026-06-07 (Rate-card slice 1, Phase A: rate_card table + RLS;
--- project_estimates.rate_card_snapshot JSONB column)
+-- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
+-- (SELECT tenant_id FROM users WHERE id = auth.uid()) — there is NO
+-- get_auth_tenant_id() helper. This matches what is actually deployed on the
+-- live DB (project nefvkrhbbkiqnpeabyqz). A prior version of this file defined
+-- and called a (SELECT tenant_id FROM users WHERE id = auth.uid()) helper that was never present in the
+-- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
+-- file to the deployed inline form (file-only change, no live DDL).
+--
+-- Last updated: 2026-06-08 (schema-drift reconciliation: dropped the phantom
+-- get_auth_tenant_id() helper; tenant policies rewritten to the deployed inline
+-- (SELECT tenant_id FROM users WHERE id = auth.uid()) form)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -254,9 +263,11 @@ ALTER TABLE classification_history ENABLE ROW LEVEL SECURITY;
 -- only record a resolution against a project its tenant owns. No UPDATE/DELETE
 -- policy → rows are immutable to clients (each resolution is a frozen observation).
 -- NOTE: the tenant predicate is inlined as (SELECT tenant_id FROM users WHERE
--- id = auth.uid()) to match the form actually deployed by the live tenant policies
--- (the get_auth_tenant_id() helper this file defines is not present in the
--- deployed DB — a pre-existing file↔DB drift to reconcile separately).
+-- id = auth.uid()) to match the form actually deployed by the live tenant policies.
+-- (Historical note: an earlier version of this file defined and called a
+-- (SELECT tenant_id FROM users WHERE id = auth.uid()) helper that was never present in the deployed DB;
+-- that file↔DB drift was reconciled 2026-06-08 by rewriting every tenant policy
+-- in this file to this same inline form and removing the phantom helper.)
 CREATE POLICY "classification_history_select_policy" ON classification_history
   FOR SELECT
   TO authenticated
@@ -365,28 +376,22 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ═════════════════════════════════════════════════════════════════════
--- Helper: Secure Tenant Lookup (Prevents RLS Policy Circular Recursion)
--- ═════════════════════════════════════════════════════════════════════
-
-CREATE OR REPLACE FUNCTION public.get_auth_tenant_id()
-RETURNS UUID
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT tenant_id FROM public.users WHERE id = auth.uid();
-$$;
-
--- ═════════════════════════════════════════════════════════════════════
 -- Row Level Security (Scoped Identity-Aware Tenant Isolation Filters)
 -- ═════════════════════════════════════════════════════════════════════
+--
+-- Tenant isolation inlines the lookup as
+--   (SELECT tenant_id FROM users WHERE id = auth.uid())
+-- directly in each policy — this is the form deployed on the live DB. No
+-- get_auth_tenant_id() helper exists (a prior file-only phantom, removed
+-- 2026-06-08). The inline subquery does not recurse: the users table's own
+-- users_select_policy is USING(true), so the predicate resolves cleanly.
 
 -- 1. tenants
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenants_isolation_policy" ON tenants
   FOR ALL
   TO authenticated
-  USING (id = public.get_auth_tenant_id());
+  USING (id = (SELECT tenant_id FROM users WHERE id = auth.uid()));
 
 -- 2. users
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -406,8 +411,8 @@ ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "projects_tenant_policy" ON projects
   FOR ALL
   TO authenticated
-  USING (tenant_id = public.get_auth_tenant_id())
-  WITH CHECK (tenant_id = public.get_auth_tenant_id());
+  USING (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()))
+  WITH CHECK (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()));
 
 -- 4. project_estimates
 ALTER TABLE project_estimates ENABLE ROW LEVEL SECURITY;
@@ -417,12 +422,12 @@ CREATE POLICY "estimates_tenant_policy" ON project_estimates
   USING (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_estimates.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_estimates.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
 
 -- 5. estimate_line_items
@@ -433,12 +438,12 @@ CREATE POLICY "line_items_tenant_policy" ON estimate_line_items
   USING (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = estimate_line_items.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = estimate_line_items.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
 
 -- 6. project_column_defs
@@ -449,12 +454,12 @@ CREATE POLICY "column_defs_tenant_policy" ON project_column_defs
   USING (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_column_defs.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_column_defs.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
 
 -- 7. project_locked_cells
@@ -465,12 +470,12 @@ CREATE POLICY "locked_cells_tenant_policy" ON project_locked_cells
   USING (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_locked_cells.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_locked_cells.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
 
 -- 8. project_registries
@@ -481,12 +486,12 @@ CREATE POLICY "registries_tenant_policy" ON project_registries
   USING (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_registries.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ))
   WITH CHECK (EXISTS (
     SELECT 1 FROM projects
     WHERE projects.id = project_registries.project_id
-    AND projects.tenant_id = public.get_auth_tenant_id()
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
 
 -- 9. global_registry
@@ -494,8 +499,8 @@ ALTER TABLE global_registry ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "global_registry_tenant_policy" ON global_registry
   FOR ALL
   TO authenticated
-  USING (tenant_id = public.get_auth_tenant_id())
-  WITH CHECK (tenant_id = public.get_auth_tenant_id());
+  USING (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()))
+  WITH CHECK (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()));
 
 -- ─────────────────────────────────────────────────
 -- Table 10: template_config
