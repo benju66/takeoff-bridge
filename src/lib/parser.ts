@@ -1,6 +1,7 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
 import { resolveProcoreCode } from "./costCodeResolver";
+import { resolveCatalogPrice } from "./rateResolver";
 import { evaluateDataFidelity } from "./calculations";
 import { normalizeUom } from "./uom-aliases";
 
@@ -112,7 +113,10 @@ export function parseTogalCSV(
     ) || measurements[0];
 
     const qty = matchedMeasurement?.qty || 0;
-    const price = masterItem?.defaultUnitPrice || 0;
+    // Company-default layer (card rate or the catalog default). Keep the `|| 0`
+    // fallback so an unmapped/missing itemId still resolves to 0 exactly as before
+    // — the resolver returns the fallback on a card miss / when unprimed.
+    const price = resolveCatalogPrice(itemId, masterItem?.defaultUnitPrice || 0);
     const total = qty * price;
     const dataFidelity = evaluateDataFidelity(qty, targetUom, total, threshold, keywords);
 

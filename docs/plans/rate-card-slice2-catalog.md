@@ -167,3 +167,19 @@ Model: Claude Opus (latest).
   5 placeholder). Branch deleted (billing stopped). No DDL; `supabase_schema.sql` unchanged.
 - **Zero value change**: nothing consumes the catalog rows yet — that is **Phase B** (wire
   `resolveCompanyRate` into the 3 `defaultUnitPrice` reads). **Phase C** = the `/rates` Catalog section.
+
+### Phase B — DONE (2026-06-08)
+- **Wired the resolver into all 3 row-birth sites**: `useTakeoffWorkbook.tsx` template init,
+  `parser.ts` CSV import (kept the `|| 0` fallback), and the 4 reads in `useCellEditing.ts`
+  (primary row + duplicate cascade, computed once as `resolvedUnitPrice` mirroring
+  `resolvedProcoreCode`). Each now reads `resolveCatalogPrice(itemId, <json default>)`.
+- **`resolveCatalogPrice`** added to `rateResolver.ts` as a thin readability alias of
+  `resolveCompanyRate` — SAME single primed map, no new cache/state. The resolver was already
+  primed at mount in Phase A, and `getRateCard` already returns catalog rows, so no priming change.
+- **No snapshot / no backfill / no hooks state** — per-row `unit_price` already freezes saved
+  estimates; the card only feeds the default into *new* rows. `calculations.ts` untouched.
+- **Tests**: new `catalogPriceLookup.test.ts` (6) proves the day-one invariant — card primed from
+  the catalog == raw-JSON across template-init / CSV / itemId-change, `-2` and the five `0.001`
+  placeholders + a `$0` line survive, and unprimed/miss falls back to the JSON default.
+  `export-integrity` stays green. `npm run build` + `npm run test` = **265 green** (25 files).
+- **Next = Phase C**: the `/rates` Catalog editor section (division-grouped, `allowNegative`).

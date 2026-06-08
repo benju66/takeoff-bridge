@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { ProcessedTakeoffRow, WorkbookCommand, EditCellCommand } from "@/types";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { resolveProcoreCode } from "@/lib/costCodeResolver";
+import { resolveCatalogPrice } from "@/lib/rateResolver";
 import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
@@ -109,10 +110,14 @@ export function useCellEditing(
         // falls back to the parent when procoreCode is empty (removal of
         // procoreParentCode is deferred, see plan doc).
         const resolvedProcoreCode = resolveProcoreCode(newCode);
+        // Company-default layer: card rate on a hit, else the catalog default.
+        // Same newCode/targetItem feeds the primary row and the cascade siblings,
+        // so one resolved value is correct for all four assignments below.
+        const resolvedUnitPrice = resolveCatalogPrice(newCode, targetItem.defaultUnitPrice);
         row.description = targetItem.description;
         row.procoreParentCode = targetItem.procoreParentCode;
         row.procoreCode = resolvedProcoreCode;
-        row.unitPrice = targetItem.defaultUnitPrice;
+        row.unitPrice = resolvedUnitPrice;
         row.uom = targetItem.targetUom;
         row.costType = targetItem.costType;
 
@@ -123,7 +128,7 @@ export function useCellEditing(
 
         const qty = matched?.qty || 0;
         row.matchedQty = qty;
-        row.total = qty * targetItem.defaultUnitPrice;
+        row.total = qty * resolvedUnitPrice;
         row.isMapped = true;
 
         // Cascade duplicates
@@ -134,7 +139,7 @@ export function useCellEditing(
               updated[i].description = targetItem.description;
               updated[i].procoreParentCode = targetItem.procoreParentCode;
               updated[i].procoreCode = resolvedProcoreCode;
-              updated[i].unitPrice = targetItem.defaultUnitPrice;
+              updated[i].unitPrice = resolvedUnitPrice;
               updated[i].uom = targetItem.targetUom;
               updated[i].costType = targetItem.costType;
 
@@ -144,7 +149,7 @@ export function useCellEditing(
 
               const q = m?.qty || 0;
               updated[i].matchedQty = q;
-              updated[i].total = q * targetItem.defaultUnitPrice;
+              updated[i].total = q * resolvedUnitPrice;
               updated[i].isMapped = true;
               updated[i].dataFidelity = evaluateDataFidelity(q, targetItem.targetUom, updated[i].total, threshold, keywords);
             }

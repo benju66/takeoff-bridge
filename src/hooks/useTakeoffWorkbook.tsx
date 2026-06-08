@@ -36,7 +36,7 @@ import {
   primeCostCodeResolverFromCatalog,
   resolveProcoreCode,
 } from "@/lib/costCodeResolver";
-import { primeRateCard } from "@/lib/rateResolver";
+import { primeRateCard, resolveCatalogPrice } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
@@ -318,7 +318,10 @@ export function useTakeoffWorkbook(
         description: item.description,
         matchedQty: 0,
         uom: item.targetUom,
-        unitPrice: item.defaultUnitPrice,
+        // Company-default layer: card rate on a hit, else the catalog default
+        // (resolver primed at mount). Day-one byte-identical; Phase C edits flow
+        // into new rows only — the price freezes on the row once saved.
+        unitPrice: resolveCatalogPrice(item.itemId, item.defaultUnitPrice),
         total: 0,
         isMapped: true,
         rawQuantities: [],
