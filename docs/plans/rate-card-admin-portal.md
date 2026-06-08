@@ -233,6 +233,26 @@ card edit lands.
   `rateLookup` into `calculations.ts` + composes the snapshot/card chain in the calc hooks and must
   run the §5.6 backfill (branch→main) BEFORE the Phase C editor goes live.
 
+### Phase B — Wire-in + snapshot (no value change day one) — DONE 2026-06-08
+- **Landed:** injected `RateLookup` param (default `(_, fb) => fb`) on `computePersonnelCosts` /
+  `computeSiteOperations` — calc stays pure; the 4 rate-bearing reads now route through it.
+  Calc hooks compose `lookup = (code, fb) => projectSnapshot[code] ?? resolveCompanyRate(code, fb)`
+  (staff `rateOverrides[role.key]` still wins on top). `rateResolver.snapshotRateCard()`; new
+  `useRateCardSnapshot` hook (freeze-at-first-save, idempotent); `getRateCard` added to the
+  `useTakeoffWorkbook` mount `Promise.all` → `primeRateCard` + visibilitychange re-prime;
+  `rate_card_snapshot` wired through `ProjectEstimate` type + `db.ts` load/save + persistence.
+  Tests: `calculationsRateLookup.test.ts` (day-one invariant + freeze/override lifecycle) +
+  `snapshotRateCard` cases in `rateResolver.test.ts`. **Build + 247 tests green** (was 239; +8).
+- **DB state:** §5.6 backfill applied to MAIN (`nefvkrhbbkiqnpeabyqz`) as a value-neutral data-only
+  UPDATE (sourced the JSON straight from the 44 seeded `rate_card` rows, no transcription). The 1
+  existing estimate now has a 44-key snapshot `= ` the seeded card (verified `matches_seeded_card`).
+  No DDL — the column already shipped in Phase A.
+- **Next phase (C) must know:** the snapshot freezes on a NEW project's FIRST save (capture-at-save,
+  not at mount — robust because saves fire well after the mount prime). `updateRateCardEntry`
+  (db.ts) already validates + stamps `source='manual'`; the `/rates` editor only needs to call it,
+  then `primeRateCard` with the refreshed `getRateCard` rows (mirror `/cost-codes`). Editing a rate
+  affects FUTURE projects only — existing snapshots are immune (verified by the lifecycle test).
+
 ---
 
 ## 8. Kickoff prompt (paste into a fresh window, then it enters plan mode)

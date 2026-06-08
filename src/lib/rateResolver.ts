@@ -45,6 +45,17 @@ export function resolveCompanyRate(code: string, fallback: number): number {
   return rateCardMap?.get(code) ?? fallback;
 }
 
+/**
+ * Snapshot the currently-primed company card as a plain `Record<line_code,
+ * rate>` for freeze-at-first-save (Phase B). Returns a COPY (immune to later
+ * re-primes) or `null` if the card is unprimed — the caller then persists `{}`
+ * and freezes on a later save once the card is primed.
+ */
+export function snapshotRateCard(): Record<string, number> | null {
+  if (!rateCardMap) return null;
+  return Object.fromEntries(rateCardMap);
+}
+
 /** Test-only: clear the module-level cache. */
 export function resetRateCard(): void {
   rateCardMap = null;

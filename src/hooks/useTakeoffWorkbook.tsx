@@ -29,12 +29,14 @@ import {
   getProjectLockedCells,
   getTemplateConfig,
   getCostCodeMap,
+  getRateCard,
 } from "@/lib/db";
 import {
   primeCostCodeResolver,
   primeCostCodeResolverFromCatalog,
   resolveProcoreCode,
 } from "@/lib/costCodeResolver";
+import { primeRateCard } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
@@ -337,7 +339,7 @@ export function useTakeoffWorkbook(
     (async () => {
       try {
         // Load all data sources in parallel
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap] =
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
@@ -346,9 +348,19 @@ export function useTakeoffWorkbook(
             getProjectLockedCells(projectId),
             getTemplateConfig(MASTER_TEMPLATE_NAME),
             getCostCodeMap(MASTER_TEMPLATE_NAME),
+            getRateCard(MASTER_TEMPLATE_NAME),
           ]);
 
         if (cancelled) return;
+
+        // Prime the company-default rate chokepoint (Rate-card Phase B). On an
+        // EMPTY result (unseeded DB / template-name mismatch) leave it unprimed:
+        // resolveCompanyRate then returns the injected constants fallback, so
+        // calc stays byte-identical — no degraded path needed (unlike cost codes,
+        // the fallback IS the safe default).
+        if (savedRateCard.length > 0) {
+          primeRateCard(savedRateCard);
+        }
 
         // Prime the procoreCode chokepoint BEFORE any row initialization —
         // every row-creation path (template init, parser, itemId cascade)
@@ -467,6 +479,26 @@ export function useTakeoffWorkbook(
       getCostCodeMap(MASTER_TEMPLATE_NAME)
         .then((entries) => {
           if (entries.length > 0) primeCostCodeResolver(entries);
+        })
+        .catch(() => {}); // keep the existing prime on transient failure
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Re-prime the company rate card when the tab becomes visible again — covers
+  // rates edited in /rates (Phase C) in ANOTHER tab while this workspace stayed
+  // mounted. Mirrors the cost-code resolver re-prime above. A project that has
+  // frozen its snapshot is unaffected (the frozen snapshot wins in the calc
+  // hooks); only un-frozen new drafts see the refreshed live card.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      getRateCard(MASTER_TEMPLATE_NAME)
+        .then((entries) => {
+          if (entries.length > 0) primeRateCard(entries);
         })
         .catch(() => {}); // keep the existing prime on transient failure
     };

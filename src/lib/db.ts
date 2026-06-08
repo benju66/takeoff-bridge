@@ -128,6 +128,9 @@ function mapEstimateFromRow(row: Record<string, unknown>): Omit<ProjectEstimate,
     siteOpsRates: (row.site_ops_rates != null && typeof row.site_ops_rates === "object" && !Array.isArray(row.site_ops_rates))
       ? (row.site_ops_rates as Record<string, number>)
       : {},
+    rateCardSnapshot: (row.rate_card_snapshot != null && typeof row.rate_card_snapshot === "object" && !Array.isArray(row.rate_card_snapshot))
+      ? (row.rate_card_snapshot as Record<string, number>)
+      : {},
   };
 }
 
@@ -270,6 +273,7 @@ export async function saveProjectEstimate(
       site_operations_total: sanitizeNum(estimate.siteOperationsTotal),
       site_ops_quantities: estimate.siteOpsQuantities ?? {},
       site_ops_rates: estimate.siteOpsRates ?? {},
+      rate_card_snapshot: estimate.rateCardSnapshot ?? {},
       updated_at: new Date().toISOString(),
     },
     { onConflict: "project_id" }

@@ -23,6 +23,7 @@ import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
 import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
+import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
@@ -53,6 +54,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   const squareFootage: number = project ? project.squareFootage : 0;
 
+  // Rate-card Phase B: the per-project point-in-time rate snapshot. Frozen at
+  // first save; layered over the live company card in the calc hooks below.
+  const { rateCardSnapshot, freezeRateCardSnapshot } = useRateCardSnapshot(
+    isLoaded,
+    projectEstimate?.rateCardSnapshot,
+  );
+
   // Step 2: Division 01 General Conditions
   const personnel = usePersonnelCalculations(
     projectDurationMonths,
@@ -60,6 +68,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     isLoaded,
     projectEstimate?.gcUtilization,
     projectEstimate?.gcEquipmentOverrides,
+    rateCardSnapshot,
   );
 
   // Step 3: Division 02 Site Operations
@@ -69,6 +78,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     isLoaded,
     projectEstimate?.siteOpsQuantities,
     projectEstimate?.siteOpsRates,
+    rateCardSnapshot,
   );
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
@@ -168,7 +178,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     personnel.gcEquipmentOverrides,
     infrastructure.siteOperationsTotal,
     infrastructure.siteOpsQuantities,
-    infrastructure.siteOpsRates
+    infrastructure.siteOpsRates,
+    freezeRateCardSnapshot
   );
 
   // ---------------------------------------------------------------------------

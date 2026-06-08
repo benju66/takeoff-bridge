@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computePersonnelCosts, PersonnelCalcResult } from "@/lib/calculations";
+import { computePersonnelCosts, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
+import { resolveCompanyRate } from "@/lib/rateResolver";
 import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +48,10 @@ export function usePersonnelCalculations(
   squareFootage: number,
   isLoaded: boolean,
   initialUtilizations?: Record<string, number>,
-  initialEquipment?: Record<string, number>
+  initialEquipment?: Record<string, number>,
+  /** Frozen per-project rate snapshot (Phase B). Layered on top of the company
+   *  card: rate = rateOverrides ?? projectSnapshot ?? companyCard ?? constants. */
+  rateCardSnapshot?: Record<string, number>
 ): UsePersonnelCalculationsReturn {
   // Individual utilization percentages (0-100)
   const [utilEx, setUtilEx] = useState<number>(initialUtilizations?.utilEx ?? 0);
@@ -177,12 +181,19 @@ export function usePersonnelCalculations(
 
   const manualEntriesString = JSON.stringify(manualEntries);
   const rateOverridesString = JSON.stringify(rateOverrides);
+  const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+
+  // Layered company-default lookup (Phase B): the frozen project snapshot wins
+  // over the live company card; both fall through to the constants fallback the
+  // calc passes in. `??` (not `||`) so a legitimate 0 rate is honored.
+  const rateLookup: RateLookup = (code, fallback) =>
+    rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
   // Compute via pure calculation layer
   const calcResult = useMemo(
-    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides),
+    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString]
   );
 
   // Serializable persistence snapshots (matching existing ProjectEstimate shape).

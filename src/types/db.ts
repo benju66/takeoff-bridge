@@ -50,6 +50,13 @@ export interface ProjectEstimate {
   siteOperationsTotal?: number;
   siteOpsQuantities?: Record<string, number>;
   siteOpsRates?: Record<string, number>;
+  /**
+   * Point-in-time company rate card frozen for this estimate (Rate-card Phase B),
+   * `Record<line_code, rate>`. `{}` until the estimate's first save captures the
+   * card; thereafter immutable. Calc reads this over the live card so future
+   * card edits never move a saved estimate's totals.
+   */
+  rateCardSnapshot?: Record<string, number>;
   updatedAt?: string;
 }
 

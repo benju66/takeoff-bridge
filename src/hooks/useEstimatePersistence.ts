@@ -35,7 +35,10 @@ export function useEstimatePersistence(
   gcEquipmentOverrides: Record<string, number>,
   siteOperationsTotal: number,
   siteOpsQuantities: Record<string, number>,
-  siteOpsRates: Record<string, number>
+  siteOpsRates: Record<string, number>,
+  /** Returns (and freezes-at-first-save) the per-project rate snapshot to persist
+   *  (Rate-card Phase B). Idempotent once frozen — see useRateCardSnapshot. */
+  freezeRateCardSnapshot: () => Record<string, number>
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -98,6 +101,9 @@ export function useEstimatePersistence(
           siteOperationsTotal,
           siteOpsQuantities,
           siteOpsRates,
+          // Freeze-at-first-save: captures the live card on a new project's first
+          // save, returns the existing frozen snapshot thereafter (idempotent).
+          rateCardSnapshot: freezeRateCardSnapshot(),
         }),
         saveEstimateLineItems(projectId, rows),
       ]);
