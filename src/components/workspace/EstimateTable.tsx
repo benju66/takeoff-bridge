@@ -302,7 +302,7 @@ export function EstimateTable({
           </label>
         </div>
 
-        {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons */}
+        {/* Right side: Append Data toggler (import modifier — stays with the importer) */}
         <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
             <input
@@ -316,30 +316,6 @@ export function EstimateTable({
               Append Data
             </label>
           </div>
-
-          <button
-            onClick={handleAddCustomColumn}
-            type="button"
-            className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
-          >
-            + Add Custom Column
-          </button>
-
-          <button
-            onClick={handleUndo}
-            disabled={!canUndo}
-            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
-          >
-            <RotateCcw size={14} /> Undo ({undoStackSize})
-          </button>
-
-          <button
-            onClick={handleRedo}
-            disabled={!canRedo}
-            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
-          >
-            <RotateCw size={14} /> Redo ({redoStackSize})
-          </button>
         </div>
       </div>
 
@@ -495,9 +471,37 @@ export function EstimateTable({
             </h3>
             <SearchBar globalFilter={globalFilter} setGlobalFilter={setGlobalFilter} />
           </div>
-          <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
-            Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
-          </span>
+
+          {/* Grid-manipulation controls — grouped with the table they act on */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans font-semibold uppercase tracking-wider hidden lg:inline">
+              ↑↓ navigate
+            </span>
+
+            <button
+              onClick={handleAddCustomColumn}
+              type="button"
+              className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+            >
+              + Add Custom Column
+            </button>
+
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+            >
+              <RotateCcw size={14} /> Undo ({undoStackSize})
+            </button>
+
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+            >
+              <RotateCw size={14} /> Redo ({redoStackSize})
+            </button>
+          </div>
         </div>
 
         <div ref={parentRef} tabIndex={-1} onKeyDown={handleGridKeyDown} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border grid-scroll outline-none" style={{ maxHeight: "70vh" }}>
