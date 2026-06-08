@@ -7,7 +7,7 @@
 -- Supabase Dashboard SQL Editor.
 --
 -- Tables: 14 (added rate_card — Rate-card slice 1, Phase A)
--- RPC Functions: 1 (save_estimate_line_items)
+-- RPC Functions: 2 (save_estimate_line_items, save_estimate)
 -- RLS Policies: 20
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
@@ -226,6 +226,97 @@ BEGIN
     COALESCE(item->>'data_fidelity', 'discrete_unit')::data_fidelity_type,
     COALESCE(item->>'source', 'template')
   FROM jsonb_array_elements(p_items) AS item;
+END;
+$$;
+
+-- ═════════════════════════════════════════════════════════════════════
+-- RPC: Atomic Estimate Save (totals + line items in one transaction)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Composes the project_estimates upsert AND the line-item DELETE+INSERT
+-- into a SINGLE PostgreSQL transaction. Before this existed, the auto-save
+-- hook issued two independent calls (saveProjectEstimate + the line-item
+-- RPC) via Promise.all; if one succeeded and the other failed, the stored
+-- header totals could move without their backing line items (or vice versa).
+-- This RPC makes that impossible: either both land or neither does.
+--
+-- SECURITY INVOKER (the default — no SECURITY DEFINER clause) so the caller's
+-- RLS on project_estimates + estimate_line_items still applies; this is NOT a
+-- privilege-escalating function. search_path is pinned to public.
+--
+-- The line-item replace is delegated to save_estimate_line_items() so the
+-- INSERT column list / COALESCE defaults stay defined in exactly one place.
+-- The nested call runs inside this function's transaction, so a failure in
+-- either step rolls the whole thing back.
+--
+-- Called from client via: supabase.rpc('save_estimate', { p_estimate, p_items })
+-- p_estimate carries project_id plus the snake_case totals/markups columns.
+-- ═════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION save_estimate(
+  p_estimate JSONB,
+  p_items JSONB
+)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_project_id TEXT := p_estimate->>'project_id';
+BEGIN
+  IF v_project_id IS NULL OR v_project_id = '' THEN
+    RAISE EXCEPTION 'save_estimate: p_estimate.project_id is required';
+  END IF;
+
+  -- Step 1: Upsert totals/markups (single row per project)
+  INSERT INTO project_estimates (
+    project_id, subtotal, construction_contingency, design_contingency,
+    builders_risk, special_insurance, gl_insurance, bond, fee, total_cost,
+    general_conditions_total, gc_utilization, gc_equipment_overrides,
+    site_operations_total, site_ops_quantities, site_ops_rates,
+    rate_card_snapshot, updated_at
+  )
+  VALUES (
+    v_project_id,
+    COALESCE((p_estimate->>'subtotal')::NUMERIC, 0),
+    COALESCE((p_estimate->>'construction_contingency')::NUMERIC, 0),
+    COALESCE((p_estimate->>'design_contingency')::NUMERIC, 0),
+    COALESCE((p_estimate->>'builders_risk')::NUMERIC, 0),
+    COALESCE((p_estimate->>'special_insurance')::NUMERIC, 0),
+    COALESCE((p_estimate->>'gl_insurance')::NUMERIC, 0),
+    COALESCE((p_estimate->>'bond')::NUMERIC, 0),
+    COALESCE((p_estimate->>'fee')::NUMERIC, 0),
+    COALESCE((p_estimate->>'total_cost')::NUMERIC, 0),
+    COALESCE((p_estimate->>'general_conditions_total')::NUMERIC, 0),
+    COALESCE(p_estimate->'gc_utilization', '{}'::JSONB),
+    COALESCE(p_estimate->'gc_equipment_overrides', '{}'::JSONB),
+    COALESCE((p_estimate->>'site_operations_total')::NUMERIC, 0),
+    COALESCE(p_estimate->'site_ops_quantities', '{}'::JSONB),
+    COALESCE(p_estimate->'site_ops_rates', '{}'::JSONB),
+    COALESCE(p_estimate->'rate_card_snapshot', '{}'::JSONB),
+    now()
+  )
+  ON CONFLICT (project_id) DO UPDATE SET
+    subtotal = EXCLUDED.subtotal,
+    construction_contingency = EXCLUDED.construction_contingency,
+    design_contingency = EXCLUDED.design_contingency,
+    builders_risk = EXCLUDED.builders_risk,
+    special_insurance = EXCLUDED.special_insurance,
+    gl_insurance = EXCLUDED.gl_insurance,
+    bond = EXCLUDED.bond,
+    fee = EXCLUDED.fee,
+    total_cost = EXCLUDED.total_cost,
+    general_conditions_total = EXCLUDED.general_conditions_total,
+    gc_utilization = EXCLUDED.gc_utilization,
+    gc_equipment_overrides = EXCLUDED.gc_equipment_overrides,
+    site_operations_total = EXCLUDED.site_operations_total,
+    site_ops_quantities = EXCLUDED.site_ops_quantities,
+    site_ops_rates = EXCLUDED.site_ops_rates,
+    rate_card_snapshot = EXCLUDED.rate_card_snapshot,
+    updated_at = EXCLUDED.updated_at;
+
+  -- Step 2: Atomic line-item replace (delegates to the single-source RPC)
+  PERFORM save_estimate_line_items(v_project_id, p_items);
 END;
 $$;
 

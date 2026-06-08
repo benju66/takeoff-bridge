@@ -242,40 +242,52 @@ export async function getProjectEstimate(
 }
 
 /**
+ * NaN/Infinity → 0. Financial fields must never persist a non-finite value.
+ */
+function sanitizeNum(val: number | null | undefined): number {
+  if (val === null || val === undefined || isNaN(val) || !isFinite(val)) {
+    return 0;
+  }
+  return val;
+}
+
+/**
+ * Builds the snake_case project_estimates column object. Shared by the
+ * standalone upsert (saveProjectEstimate) and the composed atomic RPC
+ * (saveEstimate) so the column mapping + sanitization live in one place.
+ * Excludes updated_at — that is stamped by the caller (client) or now() (RPC).
+ */
+function buildEstimateRow(estimate: Omit<ProjectEstimate, "items">) {
+  return {
+    project_id: estimate.projectId,
+    subtotal: sanitizeNum(estimate.subtotal),
+    construction_contingency: sanitizeNum(estimate.constructionContingency),
+    design_contingency: sanitizeNum(estimate.designContingency),
+    builders_risk: sanitizeNum(estimate.buildersRisk),
+    special_insurance: sanitizeNum(estimate.specialInsurance),
+    gl_insurance: sanitizeNum(estimate.glInsurance),
+    bond: sanitizeNum(estimate.bond),
+    fee: sanitizeNum(estimate.fee),
+    total_cost: sanitizeNum(estimate.totalCost),
+    general_conditions_total: sanitizeNum(estimate.generalConditionsTotal),
+    gc_utilization: estimate.gcUtilization ?? {},
+    gc_equipment_overrides: estimate.gcEquipmentOverrides ?? {},
+    site_operations_total: sanitizeNum(estimate.siteOperationsTotal),
+    site_ops_quantities: estimate.siteOpsQuantities ?? {},
+    site_ops_rates: estimate.siteOpsRates ?? {},
+    rate_card_snapshot: estimate.rateCardSnapshot ?? {},
+  };
+}
+
+/**
  * Saves or updates project estimate totals/markups.
- * Does NOT persist line items — use saveEstimateLineItems() for those.
+ * Does NOT persist line items — use saveEstimate() for an atomic write of both.
  */
 export async function saveProjectEstimate(
   estimate: Omit<ProjectEstimate, "items">
 ): Promise<void> {
-  const sanitizeNum = (val: number | null | undefined): number => {
-    if (val === null || val === undefined || isNaN(val) || !isFinite(val)) {
-      return 0;
-    }
-    return val;
-  };
-
   const { error } = await supabase.from("project_estimates").upsert(
-    {
-      project_id: estimate.projectId,
-      subtotal: sanitizeNum(estimate.subtotal),
-      construction_contingency: sanitizeNum(estimate.constructionContingency),
-      design_contingency: sanitizeNum(estimate.designContingency),
-      builders_risk: sanitizeNum(estimate.buildersRisk),
-      special_insurance: sanitizeNum(estimate.specialInsurance),
-      gl_insurance: sanitizeNum(estimate.glInsurance),
-      bond: sanitizeNum(estimate.bond),
-      fee: sanitizeNum(estimate.fee),
-      total_cost: sanitizeNum(estimate.totalCost),
-      general_conditions_total: sanitizeNum(estimate.generalConditionsTotal),
-      gc_utilization: estimate.gcUtilization ?? {},
-      gc_equipment_overrides: estimate.gcEquipmentOverrides ?? {},
-      site_operations_total: sanitizeNum(estimate.siteOperationsTotal),
-      site_ops_quantities: estimate.siteOpsQuantities ?? {},
-      site_ops_rates: estimate.siteOpsRates ?? {},
-      rate_card_snapshot: estimate.rateCardSnapshot ?? {},
-      updated_at: new Date().toISOString(),
-    },
+    { ...buildEstimateRow(estimate), updated_at: new Date().toISOString() },
     { onConflict: "project_id" }
   );
 
@@ -315,15 +327,12 @@ export async function getEstimateLineItems(
 }
 
 /**
- * Atomically saves all estimate line items via Supabase RPC.
- * Wraps DELETE + INSERT in a single PostgreSQL transaction.
- * sort_order is derived from the array index to preserve visual position.
+ * Builds the p_items JSONB payload (row → snake_case, sort_order from array
+ * index to preserve visual position). Shared by saveEstimateLineItems and the
+ * composed atomic RPC (saveEstimate).
  */
-export async function saveEstimateLineItems(
-  projectId: string,
-  rows: ProcessedTakeoffRow[]
-): Promise<void> {
-  const payload = rows.map((row, index) => ({
+function buildLineItemPayload(rows: ProcessedTakeoffRow[]) {
+  return rows.map((row, index) => ({
     id: row.id,
     sort_order: index,
     classification: row.classification,
@@ -342,15 +351,48 @@ export async function saveEstimateLineItems(
     data_fidelity: row.dataFidelity || 'discrete_unit',
     source: row.source || 'template',
   }));
+}
 
+/**
+ * Atomically saves all estimate line items via Supabase RPC.
+ * Wraps DELETE + INSERT in a single PostgreSQL transaction.
+ * sort_order is derived from the array index to preserve visual position.
+ */
+export async function saveEstimateLineItems(
+  projectId: string,
+  rows: ProcessedTakeoffRow[]
+): Promise<void> {
   const { error } = await supabase.rpc("save_estimate_line_items", {
     p_project_id: projectId,
-    p_items: payload,
+    p_items: buildLineItemPayload(rows),
   });
 
   if (error) {
     console.error("Failed to save estimate line items via RPC", error);
     throw new Error(`Failed to save estimate line items: ${error.message}`);
+  }
+}
+
+/**
+ * Atomically persists BOTH estimate totals/markups AND line items in a single
+ * PostgreSQL transaction via the save_estimate RPC. Either everything lands or
+ * nothing does — stored header totals can never diverge from their backing line
+ * items. This replaces the prior two-call (saveProjectEstimate +
+ * saveEstimateLineItems via Promise.all) approach in the auto-save pipeline,
+ * which could half-commit on a partial failure (audit #4 — non-atomic save).
+ */
+export async function saveEstimate(
+  estimate: Omit<ProjectEstimate, "items">,
+  rows: ProcessedTakeoffRow[]
+): Promise<void> {
+  const { error } = await supabase.rpc("save_estimate", {
+    p_estimate: buildEstimateRow(estimate),
+    p_items: buildLineItemPayload(rows),
+  });
+
+  if (error) {
+    console.error("Failed to save estimate atomically via RPC", error);
+    throw new Error(`Failed to save estimate: ${error.message}`);
   }
 }
 
