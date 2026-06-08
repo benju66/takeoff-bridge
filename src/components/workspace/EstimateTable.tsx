@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -28,7 +28,6 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 
 interface EstimateTableProps {
   project: Project;
-  projectDurationMonths: number;
   squareFootage: number;
   unitCount: number;
 
@@ -87,7 +86,6 @@ interface EstimateTableProps {
 
 export function EstimateTable({
   project,
-  projectDurationMonths,
   squareFootage,
   unitCount,
   rows,
@@ -178,6 +176,16 @@ export function EstimateTable({
   // ---------------------------------------------------------------------------
   const [collapsedDivisions, setCollapsedDivisions] = React.useState<Record<string, boolean>>({});
   const tableRows = table.getRowModel().rows;
+
+  // Analytics drawer collapse — read-only block, remembered per browser so it stays
+  // out of the way once dismissed (single-company tool → one fixed key, no per-project state).
+  const [analyticsCollapsed, setAnalyticsCollapsed] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("tb.estimate.analyticsCollapsed") === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem("tb.estimate.analyticsCollapsed", analyticsCollapsed ? "1" : "0");
+  }, [analyticsCollapsed]);
 
   // Auto-expand division if user keyboard-navigates into a collapsed division
   useEffect(() => {
@@ -360,67 +368,6 @@ export function EstimateTable({
         </div>
       )}
 
-      {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
-      <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm font-sans text-xs text-card-foreground">
-        <div className="bg-background/80 dark:bg-background/50 border-b border-grid-border px-4 py-2.5 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Grid size={16} className="text-blue-600 dark:text-blue-400" />
-            <span>STEP 4 - COMPANY ESTIMATE WORKBOOK</span>
-          </div>
-          <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 font-semibold">ROWS 2-4</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-grid-border">
-          {/* Row 2 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
-              <span className="text-foreground font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
-              <span className="text-foreground font-bold font-mono">{project.expectedStart || "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
-              <span className="text-foreground font-bold font-mono">{project.expectedFinish || "—"}</span>
-            </div>
-          </div>
-
-          {/* Row 3 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
-              <span className="text-foreground font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
-              <span className="text-foreground font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
-              <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono">{projectDurationMonths} MONTHS</span>
-            </div>
-          </div>
-
-          {/* Row 4 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
-              <span className="text-foreground font-bold">{project.bidDate}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
-              <span className="text-foreground font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-black font-mono">${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Stray dollars on linked division rows — excluded from all totals
           (gc-siteops Phase 5); surfaced here, never silently dropped. */}
       {strayLinkedRows && strayLinkedRows.length > 0 && (
@@ -441,9 +388,23 @@ export function EstimateTable({
         </div>
       )}
 
-      {/* Division Summary Analytics Drawer */}
+      {/* Division Summary Analytics Drawer — collapsible read-only block */}
       {rows.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-grid-border bg-card rounded-xl p-5 shadow-sm font-sans text-xs">
+        <div className="border border-grid-border bg-card rounded-xl shadow-sm font-sans text-xs overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAnalyticsCollapsed((v) => !v)}
+            aria-expanded={!analyticsCollapsed}
+            className="w-full flex items-center justify-between px-5 py-2.5 bg-background/80 dark:bg-background/50 border-b border-grid-border text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold hover:text-foreground transition-colors cursor-pointer select-none"
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-blue-600 dark:text-blue-400 w-3 text-center">{analyticsCollapsed ? "▶" : "▼"}</span>
+              [SYS.ANALYTICS // DIVISIONAL + COST TYPE BREAKDOWN]
+            </span>
+            <span className="text-slate-400 dark:text-slate-500">{analyticsCollapsed ? "Show" : "Hide"}</span>
+          </button>
+          {!analyticsCollapsed && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-5">
           {/* Left Column: Divisional Breakdown */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-grid-border pb-2 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold">
@@ -520,6 +481,8 @@ export function EstimateTable({
               })}
             </div>
           </div>
+          </div>
+          )}
         </div>
       )}
 

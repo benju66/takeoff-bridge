@@ -309,6 +309,14 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
               <span>Size: {project.squareFootage.toLocaleString()} SF</span>
               <span className="text-slate-400 dark:text-slate-650">|</span>
               <span>Units: {project.unitCount.toLocaleString()}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span className="text-cyan-600 dark:text-cyan-400">Duration: {projectDurationMonths} mo</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span className="text-emerald-600 dark:text-emerald-400">${takeoffSummary.costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Start: {project.expectedStart || "—"}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Finish: {project.expectedFinish || "—"}</span>
               {saveStatus !== 'idle' && (
                 <>
                   <span className="text-slate-400 dark:text-slate-650">|</span>
@@ -430,7 +438,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         <ErrorBoundary>
           <EstimateTable
             project={project}
-            projectDurationMonths={projectDurationMonths}
             squareFootage={squareFootage}
             unitCount={unitCount}
             rows={rows}
