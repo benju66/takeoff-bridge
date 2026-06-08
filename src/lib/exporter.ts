@@ -319,7 +319,7 @@ const TEMPLATE_CODE_NORMALIZATIONS: Record<string, string> = {
 };
 
 /** Rounding tolerance for all dollar tie-out comparisons. */
-const RECONCILIATION_TOLERANCE = 0.01;
+export const RECONCILIATION_TOLERANCE = 0.01;
 
 /**
  * Groups takeoff rows by granular Procore Budget Line Items code and sums

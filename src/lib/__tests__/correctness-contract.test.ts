@@ -16,8 +16,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeTakeoffSummary,
+  computePersonnelCosts,
+  computeSiteOperations,
   type LinkedDivisionTotal,
 } from '../calculations';
+import { rollupByProcoreCode, validateExportReadiness } from '../exporter';
 import { LINKED_DIVISION_ROWS } from '../constants';
 import { ProcessedTakeoffRow } from '@/types';
 
@@ -65,7 +68,9 @@ const NO_ROUNDING = {
 // ═══════════════════════════════════════════════════════════════════
 // INV-1 — Single total (engine half: the reported subtotal is the basis
 // every modifier and per-unit figure is computed on). The full cross-layer
-// tie-out (engine → export rollup → saved) is the Phase 2 golden harness.
+// tie-out to a REAL bid, to the cent, is the Phase 2 golden harness
+// (src/__tests__/golden-mckenna.test.ts); the synthetic engine→export-rollup
+// guard below runs everywhere.
 // ═══════════════════════════════════════════════════════════════════
 
 describe('INV-1 single-total: reported subtotal is the modifier basis', () => {
@@ -95,7 +100,27 @@ describe('INV-1 single-total: reported subtotal is the modifier basis', () => {
     expect(r.costPerUnit).toBeCloseTo(r.totalEstimatedCost / units, 6);
   });
 
-  it.todo('INV-1 full tie-out: engine total == export rollup == saved total — Phase 2 golden-mckenna.test.ts');
+  it('INV-1 full tie-out: on-screen subtotal == exported Procore rollup (real-bid proof in golden-mckenna.test.ts)', () => {
+    // Phase 2 flipped this from `it.todo`. The to-the-cent proof against the
+    // real McKenna bid lives in src/__tests__/golden-mckenna.test.ts (skips
+    // cleanly without the confidential fixture); this synthetic guard runs
+    // everywhere and locks the engine → export-rollup half of the promise.
+    const rows = [
+      makeRow({ id: 'a', itemId: '03-1000.001', procoreCode: '3-30000.000', matchedQty: 150, unitPrice: 120 }), // 18,000
+      makeRow({ id: 'b', itemId: '05-2000.001', procoreCode: '5-50000.000', matchedQty: 10, unitPrice: 250 }),  //  2,500
+    ];
+    const gc = computePersonnelCosts(0, 0, {}, { dumpsters: 0, toilets: 0, electric: 0 });
+    const so = computeSiteOperations(0, 0, {}, {});
+    const summary = computeTakeoffSummary(rows, 1000, 10, NO_ROUNDING);
+    const rollupTotal = Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0);
+    const readiness = validateExportReadiness(rows, gc, so);
+
+    // On-screen takeoff subtotal == exported Procore rollup, to the cent.
+    expect(Math.abs(summary.takeoffSubtotal - rollupTotal)).toBeLessThanOrEqual(0.01);
+    // The exporter's own reconciliation gate ties line items to the rollup and passes.
+    expect(Math.abs(readiness.reconciliation.lineItemTotal - readiness.reconciliation.rollupTotal)).toBeLessThanOrEqual(0.01);
+    expect(readiness.reconciliation.ok).toBe(true);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
