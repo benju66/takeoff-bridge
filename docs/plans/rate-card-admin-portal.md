@@ -253,6 +253,34 @@ card edit lands.
   then `primeRateCard` with the refreshed `getRateCard` rows (mirror `/cost-codes`). Editing a rate
   affects FUTURE projects only — existing snapshots are immune (verified by the lifecycle test).
 
+### Phase C — Editor (/rates page) — DONE 2026-06-08 — **SLICE 1 COMPLETE**
+- **Landed:** `src/app/rates/page.tsx` — a grouped twin of `/cost-codes`. Loads via
+  `getRateCard(MASTER_TEMPLATE_NAME)`, joins each card row back to the constants line defs
+  (`src/lib/rateCardEditor.ts`: `RATE_LINE_DEFS` + `groupRateCardRows`) for label/unit/section,
+  groups by the GC `section` fields + `SITE_OPS_SECTIONS` (unmatched card rows surface in a trailing
+  group, never dropped), instant client-side search, inline numeric rate edit. Saves through the
+  EXISTING `updateRateCardEntry` (no second write path); the UI mirrors its finite >= 0 gate via
+  `parseRateInput` BEFORE writing; after save it re-fetches + `primeRateCard`s, plus a
+  `visibilitychange` re-prime. Sidebar link added (`DollarSign`, next to Cost Code Mapping). NO
+  schema change (table + column already on main). New tests: `rateCardEditor.test.ts` (join
+  completeness, grouping order, unmatched surfacing, `parseRateInput` gate). **Build + 255 tests
+  green** (was 247; +8). The new-project-picks-up / existing-frozen / override-wins lifecycle was
+  already proven in Phase B's `calculationsRateLookup.test.ts`.
+- **Slice 1 exit (§7) met:** card seeded from constants; `rateResolver` is the single company-default
+  chokepoint; export ties out unchanged (export-integrity stays green); admin can edit at `/rates`,
+  future projects pick it up, existing are immune. All DB via `db.ts`; no `supabase.ts` import in the
+  page.
+
+### → Slice 2 handoff (separate later plan — NOT started)
+- **Scope:** the **217 STEP 4 takeoff unit prices** (`defaultUnitPrice` in
+  `src/data/estimate-catalog.json`, flowing through `parser.ts` / catalog row-init), folded into the
+  SAME `rate_card` table + SAME mechanism (seed → snapshot → `resolveCompanyRate` chokepoint →
+  `/rates` editor). Bigger/messier: many `$0` placeholders; the key namespace must extend cleanly
+  (catalog `itemId` vs the GC/Site Ops line `code` used in slice 1 — confirm no collision before
+  seeding). Reuse `generate-rate-card-seed.js` (add a catalog source) and extend the `/rates` editor
+  grouping (a STEP 4 / catalog section). The market-sector / `project_type` overlay tier (plan §3) is
+  still designed-for, NOT built — add it as its own migration when wanted.
+
 ---
 
 ## 8. Kickoff prompt (paste into a fresh window, then it enters plan mode)
@@ -407,5 +435,71 @@ NOTHING changes value on day one — Phase B must preserve that exactly.
   export-integrity reconciliation stays green (ties out unchanged).
 - Backfill applied + verified on main; commit; append a 3–5 line handoff note to
   §9 for Phase C. Then STOP.
+Model: Claude Opus (latest).
+```
+
+### → Phase C (the /rates editor — pure UI on finished infra; LAST phase of Slice 1)
+
+```
+Implement PHASE C ONLY of docs/plans/rate-card-admin-portal.md. Read the whole
+file first — especially §4 (settled decisions), §5.4 (the /rates editor design),
+the §5.8 phasing table, §7 (exit criteria), and the §9 Phase A + Phase B handoff
+notes. This is a phased plan: do Phase C and nothing else, then stop. This is the
+LAST phase of Slice 1 — finish with the Slice-2 handoff note.
+== CONTEXT ==
+Takeoff Bridge is a single-company, estimate-only construction estimating app.
+I'm the system architect (non-developer — explain plainly, mark a (Recommended)
+option on every choice). Slice 1 lifts the ~44 hard-coded GC/Site Ops default
+rates into a DB-backed company rate card. Phase C adds the admin-facing /rates
+editor — built as a TWIN of the existing /cost-codes page. Editing a rate must
+affect FUTURE projects only; existing estimates are frozen by their snapshot
+(already proven in Phase B).
+== WHAT PHASES A+B ALREADY SHIPPED (commits ff6985c + 86110c9; do NOT redo) ==
+- rate_card table (44 seeded rows, source='seed', = today's constants) live on
+  MAIN; project_estimates.rate_card_snapshot column + backfill done. No schema
+  change is expected in Phase C — if you think you need one, stop and ask.
+- db.ts: getRateCard(templateName) (read) and updateRateCardEntry(templateName,
+  lineCode, rate) ALREADY EXIST. updateRateCardEntry is update-only, stamps
+  source='manual', and ALREADY validates the rate is a finite number >= 0 and
+  throws on no-row-updated. Do NOT add a second write path.
+- rateResolver.ts: primeRateCard / resolveCompanyRate / snapshotRateCard /
+  resetRateCard. The workspace (useTakeoffWorkbook) already re-primes the card on
+  visibilitychange, so a /rates save in another tab propagates to open projects
+  automatically — no workspace changes needed in Phase C.
+- The card is consumed by calc as of Phase B. Phase C is PURE UI on top of
+  finished infrastructure.
+== PHASE C SCOPE (per §5.4) ==
+1. src/app/rates/page.tsx — a near-clone of src/app/cost-codes/page.tsx:
+   - Load rows via getRateCard(MASTER_TEMPLATE_NAME).
+   - The card keys by line `code`; JOIN each card row back to the constants line
+     definitions (STAFF_ROLE_DEFAULTS, OPERATIONAL_EXPENSE_DEFAULTS, the
+     entry:"qty" rows of GC_MANUAL_DEFAULTS, SITE_OPS_DYNAMIC_DEFAULTS, the
+     entry:"qty" rows of SITE_OPS_MANUAL_DEFAULTS) to show label / unit / section.
+     A card row with no matching constants line should surface, not silently drop.
+   - Group rows by section: the GC configs' `section` fields + SITE_OPS_SECTIONS
+     (Site Ops). Instant client-side search. Inline single-row rate edit.
+   - Save via updateRateCardEntry(...); mirror the editor's finite >= 0 validation
+     in the input UI BEFORE calling (no unvalidated writes); after a successful
+     save, re-prime via primeRateCard(await getRateCard(...)). Add a
+     visibilitychange re-prime (mirror /cost-codes).
+2. Add a Sidebar link to /rates in src/components/layout/Sidebar.tsx (next to the
+   /cost-codes link).
+== GUARDRAILS ==
+- DB access only through src/lib/db.ts; line items only via save_estimate_line_items
+  (not touched here). Do NOT import supabase.ts directly in the page.
+- calculations.ts is the sole calc authority — the /rates page only edits the
+  company-default layer via the existing updateRateCardEntry; never invent rates
+  and never touch the per-project snapshot or staff-override layers.
+- No schema change expected (table + column already on main). If you think you
+  need one, stop and ask.
+- Windows + PowerShell: short inline commands; script files for anything longer.
+== EXIT (per §5.8 + §7) ==
+- npm run build + npm run test green. New tests: editing a rate at /rates updates
+  the card (source becomes 'manual'); a NEW project picks the edit up; an existing
+  project is unaffected (snapshot wins); reload restores the per-project snapshot +
+  overrides. Existing export-integrity reconciliation stays green.
+- Commit; then append a 3–5 line §9 handoff note that (a) records Phase C done +
+  Slice 1 COMPLETE, and (b) hands off Slice 2 (the 217 estimate-catalog.json STEP 4
+  unit prices — same mechanism, separate later plan). Then STOP.
 Model: Claude Opus (latest).
 ```
