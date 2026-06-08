@@ -326,3 +326,66 @@ value on day one.
   commit; append a 3–5 line handoff note to §9. Then STOP.
 Model: Claude Opus (latest).
 ```
+
+### → Phase B (wire-in + snapshot; still no value change day one)
+
+```
+Implement PHASE B ONLY of docs/plans/rate-card-admin-portal.md. Read the whole
+file first — especially §4 (settled decisions), §5.5/§5.6 (chokepoint + snapshot
++ backfill), the §5.8 phasing table, and the §9 Phase A handoff note. This is a
+phased plan: do Phase B and nothing else, then stop. Phase C (/rates editor) is a
+separate fresh window.
+== CONTEXT ==
+Takeoff Bridge is a single-company, estimate-only construction estimating app.
+I'm the system architect (non-developer — explain plainly, mark a (Recommended)
+option on every choice). Slice 1 lifts the ~44 hard-coded GC/Site Ops default
+rates into a DB-backed company rate card. The seed equals today's constants, so
+NOTHING changes value on day one — Phase B must preserve that exactly.
+== WHAT PHASE A ALREADY SHIPPED (commit ff6985c; do NOT redo) ==
+- rate_card table (44 seeded rows) + project_estimates.rate_card_snapshot JSONB
+  column are LIVE ON MAIN (migration rate_card_phase_a). Schema source of truth
+  supabase_schema.sql already updated.
+- src/lib/rateResolver.ts exists: primeRateCard(entries) /
+  resolveCompanyRate(code, fallback) / resetRateCard. Company layer ONLY; returns
+  fallback on miss/unprimed. calculations.ts still imports NOTHING from it.
+- db.ts: getRateCard(templateName) + updateRateCardEntry(...) exist; RateCardEntry
+  type in src/types/db.ts. Nothing consumes any of it yet.
+== PHASE B SCOPE (per §5.5/§5.6) ==
+1. calculations.ts stays PURE: give computePersonnelCosts / computeSiteOperations
+   an injected `rateLookup: (code, fallback) => number = (_, fb) => fb` param.
+   Replace every direct rate read (role.defaultRate, expense.rate, cfg.rate) with
+   rateLookup(line.code, <constants default>). Default param returns fallback, so
+   existing callers/tests stay byte-identical.
+2. Calc hooks compose the layered lookup: in usePersonnelCalculations /
+   useInfrastructureCalculations build
+   lookup = (code, fallback) => projectSnapshot[code] ?? resolveCompanyRate(code, fallback).
+   Full staff chain: rateOverrides[role.key] ?? projectSnapshot[code] ??
+   companyCard[code] ?? constantsDefault (staff overrides ride gc_utilization, Phase 6B).
+3. Prime the card: add getRateCard to the existing Promise.all in
+   useTakeoffWorkbook.tsx (next to getCostCodeMap) → primeRateCard; re-prime on
+   visibilitychange (mirror the cost-code resolver wiring).
+4. Snapshot persistence + freeze-at-first-save: add rate_card_snapshot to the
+   ProjectEstimate type + db.ts load/save mapping. Hook holds rateCardSnapshot
+   state (init from loaded estimate; if empty and card primed, capture a copy of
+   the current card; persist every save, idempotent once frozen).
+5. Backfill (data-only — schema already on main): UPDATE project_estimates SET
+   rate_card_snapshot = '<full seeded card JSON>' WHERE rate_card_snapshot = '{}'
+   OR rate_card_snapshot IS NULL. Only ~1 existing estimate; seed==constants so
+   value-neutral. supabase skill; verify on main (no branch dance needed since
+   the schema already landed there in Phase A — but confirm with me first).
+== GUARDRAILS ==
+- DB access only through src/lib/db.ts; line items only via save_estimate_line_items.
+- calculations.ts is the sole calc authority — never invent rates; the injected
+  default MUST return the fallback so day-one totals are byte-identical.
+- No new schema change expected (the column already exists). If you think you need
+  one, stop and ask.
+- Windows + PowerShell: short inline commands; script files for anything longer.
+== EXIT (per §5.8 + §7) ==
+- npm run build + npm run test green. New tests: day-one invariant (card-primed
+  calc == constants-only calc); snapshot lifecycle (freeze on first save → edit
+  card → reload → totals unchanged; staff rateOverride still wins on top). Existing
+  export-integrity reconciliation stays green (ties out unchanged).
+- Backfill applied + verified on main; commit; append a 3–5 line handoff note to
+  §9 for Phase C. Then STOP.
+Model: Claude Opus (latest).
+```
