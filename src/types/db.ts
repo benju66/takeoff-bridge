@@ -173,3 +173,17 @@ export interface CostCodeMapEntry {
   source: 'template' | 'sibling' | 'manual';
 }
 
+/**
+ * Company default rate for one rate-bearing GC/Site Ops line (rate_card table,
+ * Rate-card slice 1, Phase A). Keyed by the constants.ts line `code`. Seeded
+ * from constants.ts (source='seed', equals today's values); the /rates editor
+ * stamps source='manual'. The company-default layer of the resolution chain
+ * rate = projectOverride ?? projectSnapshot ?? companyCard (see rateResolver.ts).
+ */
+export interface RateCardEntry {
+  templateName: string;
+  lineCode: string;
+  rate: number;
+  source: 'seed' | 'manual';
+}
+

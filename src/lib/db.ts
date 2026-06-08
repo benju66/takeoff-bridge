@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -957,6 +957,77 @@ export async function updateCostCodeMapping(
   }
 
   return mapCostCodeMapRow(data);
+}
+
+/**
+ * Retrieves the company rate card for a template (rate_card table, Rate-card
+ * slice 1, seeded from constants.ts in Phase A). Primes the resolveCompanyRate
+ * chokepoint at workspace mount (Phase B) and feeds the /rates editor (Phase C).
+ */
+const RATE_CARD_COLUMNS = "template_name, line_code, rate, source";
+
+function mapRateCardRow(row: Record<string, unknown>): RateCardEntry {
+  return {
+    templateName: row.template_name as string,
+    lineCode: row.line_code as string,
+    rate: Number(row.rate),
+    source: row.source as RateCardEntry["source"],
+  };
+}
+
+export async function getRateCard(
+  templateName: string
+): Promise<RateCardEntry[]> {
+  const { data, error } = await supabase
+    .from("rate_card")
+    .select(RATE_CARD_COLUMNS)
+    .eq("template_name", templateName)
+    .order("line_code", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch rate card for "${templateName}"`, error);
+    throw new Error(`Failed to fetch rate card: ${error.message}`);
+  }
+
+  return (data || []).map(mapRateCardRow);
+}
+
+/**
+ * Updates one rate_card line to a new rate (Phase C /rates editor — the SOLE
+ * update path for existing rates; the seed script is insert-only). Always
+ * stamps source='manual'. Update-only by design: adding new rate lines stays
+ * with the constants/seed pipeline. Validates the rate is a finite number >= 0
+ * before writing (AGENTS.md — never write an invented/invalid financial value).
+ */
+export async function updateRateCardEntry(
+  templateName: string,
+  lineCode: string,
+  rate: number
+): Promise<RateCardEntry> {
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0) {
+    throw new Error(
+      `Invalid rate ${rate} for ${lineCode}: must be a finite number >= 0`
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("rate_card")
+    .update({
+      rate,
+      source: "manual",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("template_name", templateName)
+    .eq("line_code", lineCode)
+    .select(RATE_CARD_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to update rate card entry ${lineCode} -> ${rate}`, error);
+    throw new Error(`Failed to update rate card entry: ${error?.message ?? "no row updated"}`);
+  }
+
+  return mapRateCardRow(data);
 }
 
 
