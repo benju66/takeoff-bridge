@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -57,6 +57,12 @@ interface EstimateTableProps {
   handleDrop: (e: React.DragEvent) => void;
   handleUndo: () => void;
   handleRedo: () => void;
+
+  // Export actions (relocated from the page header into the workbook I/O bar)
+  handleExportExcelWorkbook: () => void;
+  handleExportExcel: () => void;
+  handleExportProcore: () => void;
+  isExportingExcel: boolean;
 
   // Summary data
   takeoffSummary: TakeoffSummary;
@@ -110,6 +116,10 @@ export function EstimateTable({
   handleDrop,
   handleUndo,
   handleRedo,
+  handleExportExcelWorkbook,
+  handleExportExcel,
+  handleExportProcore,
+  isExportingExcel,
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
@@ -186,6 +196,29 @@ export function EstimateTable({
   useEffect(() => {
     window.localStorage.setItem("tb.estimate.analyticsCollapsed", analyticsCollapsed ? "1" : "0");
   }, [analyticsCollapsed]);
+
+  // Unmapped rows block every export path; surfaced as a tooltip on the disabled controls.
+  const unmappedCount = useMemo(() => rows.filter((r) => !r.isMapped).length, [rows]);
+  const exportDisabledReason = unmappedCount > 0 ? `${unmappedCount} unmapped row(s) block export` : undefined;
+
+  // "Export ▾" dropdown — closes on outside click and Escape.
+  const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setExportMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [exportMenuOpen]);
 
   // Auto-expand division if user keyboard-navigates into a collapsed division
   useEffect(() => {
@@ -278,33 +311,32 @@ export function EstimateTable({
   return (
     <>
     <div className="space-y-6 animate-fade-in" {...(pendingImport ? { inert: "" } as Record<string, unknown> : {})}>
-      {/* Top Ingestion Module Tray */}
-      <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Left side: Compact Ingest / Drop Takeoff CSV box */}
-        <div
-          onDragEnter={handleDrag}
-          onDragOver={handleDrag}
-          onDragLeave={handleDrag}
-          onDrop={handleDrop}
-          className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
-            dragActive
-              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]"
-              : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
-          }`}
-        >
-          <label className="flex flex-col items-center justify-center cursor-pointer select-none">
-            <div className="flex items-center gap-2 text-foreground">
-              <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
-              <span className="text-xs font-bold uppercase tracking-wider">Import Takeoff Data</span>
-            </div>
-            <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
-            <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
-          </label>
-        </div>
+      {/* Workbook Data I/O Bar — Import (in) on the left, Export (out) on the right */}
+      <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Left: Import — drop box + Append toggle (Append modifies the next import) */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
+          <div
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
+              dragActive
+                ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]"
+                : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
+            }`}
+          >
+            <label className="flex flex-col items-center justify-center cursor-pointer select-none">
+              <div className="flex items-center gap-2 text-foreground">
+                <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
+                <span className="text-xs font-bold uppercase tracking-wider">Import Takeoff Data</span>
+              </div>
+              <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
+              <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+            </label>
+          </div>
 
-        {/* Right side: Append Data toggler (import modifier — stays with the importer) */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
+          <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none shrink-0">
             <input
               id="append-checkbox-step4"
               type="checkbox"
@@ -317,6 +349,53 @@ export function EstimateTable({
             </label>
           </div>
         </div>
+
+        {/* Right: Export — primary full-workbook download + secondary formats menu */}
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => handleExportExcelWorkbook()}
+              disabled={unmappedCount > 0 || isExportingExcel}
+              title={exportDisabledReason}
+              className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-2.5 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} />
+              {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
+            </button>
+
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setExportMenuOpen((v) => !v)}
+                disabled={unmappedCount > 0}
+                title={exportDisabledReason}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+                className="flex items-center gap-1.5 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-4 py-2.5 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:shadow-md"
+              >
+                Export <ChevronDown size={16} className={`transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {exportMenuOpen && (
+                <div role="menu" className="absolute right-0 z-20 mt-2 w-56 bg-card border border-grid-border rounded-lg shadow-lg overflow-hidden animate-fade-in">
+                  <button
+                    role="menuitem"
+                    onClick={() => { setExportMenuOpen(false); handleExportExcel(); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-foreground text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                  >
+                    <FileDown size={15} className="text-slate-500 dark:text-slate-400" /> Export Excel Payload
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { setExportMenuOpen(false); handleExportProcore(); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 text-left hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20 border-t border-grid-border transition-colors cursor-pointer"
+                  >
+                    <FileDown size={15} /> Export Procore Budget
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Unmapped Classifications Warning */}
