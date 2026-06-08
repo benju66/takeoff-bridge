@@ -197,6 +197,15 @@ export function EstimateTable({
     window.localStorage.setItem("tb.estimate.analyticsCollapsed", analyticsCollapsed ? "1" : "0");
   }, [analyticsCollapsed]);
 
+  // Data I/O bar collapse — remembered per browser, same pattern as the analytics drawer.
+  const [ioBarCollapsed, setIoBarCollapsed] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("tb.estimate.ioBarCollapsed") === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem("tb.estimate.ioBarCollapsed", ioBarCollapsed ? "1" : "0");
+  }, [ioBarCollapsed]);
+
   // Unmapped rows block every export path; surfaced as a tooltip on the disabled controls.
   const unmappedCount = useMemo(() => rows.filter((r) => !r.isMapped).length, [rows]);
   const exportDisabledReason = unmappedCount > 0 ? `${unmappedCount} unmapped row(s) block export` : undefined;
@@ -311,8 +320,22 @@ export function EstimateTable({
   return (
     <>
     <div className="space-y-6 animate-fade-in" {...(pendingImport ? { inert: "" } as Record<string, unknown> : {})}>
-      {/* Workbook Data I/O Bar — Import (in) on the left, Export (out) on the right */}
-      <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      {/* Workbook Data I/O Bar — collapsible: Import (in) left, Export (out) right */}
+      <div className="bg-card border border-grid-border text-card-foreground rounded-xl shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIoBarCollapsed((v) => !v)}
+          aria-expanded={!ioBarCollapsed}
+          className={`w-full flex items-center justify-between px-5 py-2.5 bg-background/80 dark:bg-background/50 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold hover:text-foreground transition-colors cursor-pointer select-none ${ioBarCollapsed ? "" : "border-b border-grid-border"}`}
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-blue-600 dark:text-blue-400 w-3 text-center">{ioBarCollapsed ? "▶" : "▼"}</span>
+            [DATA I/O // IMPORT + EXPORT]
+          </span>
+          <span className="text-slate-400 dark:text-slate-500">{ioBarCollapsed ? "Show" : "Hide"}</span>
+        </button>
+        {!ioBarCollapsed && (
+        <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         {/* Left: Import — drop box + Append toggle (Append modifies the next import) */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
           <div
@@ -395,6 +418,8 @@ export function EstimateTable({
               )}
             </div>
           </div>
+        )}
+        </div>
         )}
       </div>
 
