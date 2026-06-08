@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
-  FileDown,
   MapPin,
   Calendar,
   Menu
@@ -158,11 +157,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     () => computeCostTypeBreakdown(filteredRows, subtotal, linkedDivisionTotals),
     [filteredRows, subtotal, linkedDivisionTotals]
   );
-
-  // UI Metrics
-  const totalRows = rows.length;
-  const mappedCount = rows.filter((r) => r.isMapped).length;
-  const unmappedCount = totalRows - mappedCount;
 
   // ---------------------------------------------------------------------------
   // Persistence Orchestration
@@ -344,34 +338,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-4 items-center">
-          {rows.length > 0 && (
-            <>
-              <button
-                onClick={() => handleExportExcelWorkbook()}
-                disabled={unmappedCount > 0 || isExportingExcel}
-                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} />
-                {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
-              </button>
-              <button
-                onClick={handleExportExcel}
-                disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:shadow-md"
-              >
-                <FileDown size={18} /> Export Excel Payload
-              </button>
-              <button
-                onClick={() => handleExportProcore()}
-                disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-955/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <FileDown size={18} /> Export Procore Budget
-              </button>
-            </>
-          )}
-        </div>
       </header>
 
       {/* Export Error Banner */}
@@ -463,6 +429,10 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             handleDrop={handleDrop}
             handleUndo={handleUndo}
             handleRedo={handleRedo}
+            handleExportExcelWorkbook={handleExportExcelWorkbook}
+            handleExportExcel={handleExportExcel}
+            handleExportProcore={handleExportProcore}
+            isExportingExcel={isExportingExcel}
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
