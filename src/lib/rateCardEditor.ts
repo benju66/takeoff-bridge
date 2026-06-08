@@ -5,7 +5,11 @@ import {
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
   SITE_OPS_SECTIONS,
+  DIVISION_LABELS,
+  DIVISION_NAMES,
 } from "./constants";
+import { getDivisionCode } from "./division";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { RateCardEntry } from "@/types/db";
 
 // ---------------------------------------------------------------------------
@@ -13,33 +17,43 @@ import { RateCardEntry } from "@/types/db";
 // (Rate-card slice 1, Phase C). The page is a twin of /cost-codes; this module
 // holds the parts worth unit-testing on their own:
 //
-//  - The card keys by the constants.ts line `code`. To render a label / unit /
-//    section we JOIN each card row back to its constants line definition. The
-//    join is built ONCE from the same typed arrays the seed generator reads, so
-//    the editor view can never drift from the seeded card.
-//  - A card row with no matching constants line is SURFACED in an "unmatched"
-//    group, never silently dropped (so a stale/renamed code is visible, not
-//    hidden) — AGENTS.md: missing mappings must surface, not vanish.
-//  - parseRateInput mirrors db.ts/updateRateCardEntry's gate (finite >= 0) so
-//    the UI rejects a bad value BEFORE any write is attempted.
+//  - The card keys by the constants.ts line `code` (GC/Site Ops) OR the catalog
+//    `itemId` (STEP 4 unit prices, Slice 2). To render a label / unit / section
+//    we JOIN each card row back to its line definition. The join is built ONCE
+//    from the same typed arrays the seed generator reads (GC/Site Ops) plus the
+//    catalog master (Slice 2), so the editor view can never drift from the card.
+//  - A card row with no matching line is SURFACED in an "unmatched" group, never
+//    silently dropped (so a stale/renamed code is visible, not hidden) —
+//    AGENTS.md: missing mappings must surface, not vanish.
+//  - parseRateInput mirrors db.ts/updateRateCardEntry's gate per rate kind:
+//    GC/Site Ops = finite >= 0; catalog = finite (negatives allowed, e.g. the
+//    -$2 deduction line) — so the UI rejects a bad value BEFORE any write.
 //
 // This module performs NO calc and NO DB access; it only describes how to
 // present the company-default layer that updateRateCardEntry edits.
 // ---------------------------------------------------------------------------
 
-/** A constants.ts line, normalized to what the /rates table needs to render. */
+/** Which validation/presentation family a rate line belongs to. */
+export type RateLineKind = "gcSiteOps" | "catalog";
+
+/** A line, normalized to what the /rates table needs to render. */
 export interface RateLineDef {
   code: string;
   label: string;
   unit: string;
   sectionId: string;
+  kind: RateLineKind;
 }
 
 /** Synthetic section id for staff rates (StaffRoleConfig carries no `section`). */
 export const STAFF_SECTION_ID = "staff";
 
-/** Section render order + labels: staff, the GC `section` groups, then Site Ops. */
-export const RATE_SECTION_ORDER: { id: string; label: string }[] = [
+/** Section-id prefix for a catalog division group (keeps it disjoint from the
+ *  GC/Site Ops section ids, which include bare names like `demolition`). */
+export const CATALOG_SECTION_PREFIX = "catalog-";
+
+/** GC/Site Ops section render order: staff, the GC `section` groups, then Site Ops. */
+const GC_SITE_OPS_SECTIONS: { id: string; label: string }[] = [
   { id: STAFF_SECTION_ID, label: "Personnel — Staff Hourly Rates" },
   { id: "operational", label: "General Conditions — Operational Expenses" },
   { id: "gcMonthly", label: "General Conditions — Monthly Office & Site" },
@@ -49,29 +63,69 @@ export const RATE_SECTION_ORDER: { id: string; label: string }[] = [
 ];
 
 /**
- * The constants line definitions keyed by `code`. Built from the same typed
- * arrays the seed generator reads (staff use "hr"; the rest carry their own
- * `unit`). Lump-sum lines are included for completeness but carry no card row,
- * so they never render (the card only holds rate-bearing lines).
+ * One section per CSI division present in the catalog, ordered by division code
+ * ascending. Built from the same master the seed reads, so every seeded catalog
+ * itemId has a home section (none falls into "Unmatched" by accident).
+ */
+function buildCatalogDivisionSections(): { id: string; label: string }[] {
+  const divisions = new Set<string>();
+  for (const item of Object.values(ESTIMATE_ITEMS_MASTER)) {
+    const div = getDivisionCode(item.itemId);
+    if (div !== "") divisions.add(div);
+  }
+  return [...divisions]
+    .sort()
+    .map((div) => ({
+      id: `${CATALOG_SECTION_PREFIX}${div}`,
+      label: DIVISION_LABELS[div] ?? DIVISION_NAMES[div] ?? `DIVISION ${div}`,
+    }));
+}
+
+/** Full section render order: all GC/Site Ops sections first, then catalog divisions. */
+export const RATE_SECTION_ORDER: { id: string; label: string }[] = [
+  ...GC_SITE_OPS_SECTIONS,
+  ...buildCatalogDivisionSections(),
+];
+
+/**
+ * The line definitions keyed by `code`. The GC/Site Ops block is built from the
+ * same typed arrays the seed generator reads (staff use "hr"; the rest carry
+ * their own `unit`). The catalog block is built from ESTIMATE_ITEMS_MASTER
+ * (label=description, unit=targetUom) and grouped by CSI division.
+ *
+ * Catalog defs are added LAST so a catalog itemId wins the one known key overlap
+ * — `02-4100.002` is both a GC lump-sum (null-rate) line AND a catalog itemId;
+ * it must classify as `catalog` and render in its division group, listed once.
  */
 function buildLineDefs(): Map<string, RateLineDef> {
   const defs = new Map<string, RateLineDef>();
   const add = (d: RateLineDef) => defs.set(d.code, d);
 
   STAFF_ROLE_DEFAULTS.forEach((r) =>
-    add({ code: r.code, label: r.label, unit: "hr", sectionId: STAFF_SECTION_ID }),
+    add({ code: r.code, label: r.label, unit: "hr", sectionId: STAFF_SECTION_ID, kind: "gcSiteOps" }),
   );
   OPERATIONAL_EXPENSE_DEFAULTS.forEach((e) =>
-    add({ code: e.code, label: e.description, unit: e.unit, sectionId: e.section }),
+    add({ code: e.code, label: e.description, unit: e.unit, sectionId: e.section, kind: "gcSiteOps" }),
   );
   GC_MANUAL_DEFAULTS.forEach((g) =>
-    add({ code: g.code, label: g.label, unit: g.unit, sectionId: g.section }),
+    add({ code: g.code, label: g.label, unit: g.unit, sectionId: g.section, kind: "gcSiteOps" }),
   );
   SITE_OPS_DYNAMIC_DEFAULTS.forEach((d) =>
-    add({ code: d.code, label: d.label, unit: d.unit, sectionId: d.section }),
+    add({ code: d.code, label: d.label, unit: d.unit, sectionId: d.section, kind: "gcSiteOps" }),
   );
   SITE_OPS_MANUAL_DEFAULTS.forEach((s) =>
-    add({ code: s.code, label: s.label, unit: s.unit, sectionId: s.section }),
+    add({ code: s.code, label: s.label, unit: s.unit, sectionId: s.section, kind: "gcSiteOps" }),
+  );
+
+  // Catalog (STEP 4 unit prices, Slice 2) — added last so it wins on key overlap.
+  Object.values(ESTIMATE_ITEMS_MASTER).forEach((item) =>
+    add({
+      code: item.itemId,
+      label: item.description,
+      unit: item.targetUom,
+      sectionId: `${CATALOG_SECTION_PREFIX}${getDivisionCode(item.itemId)}`,
+      kind: "catalog",
+    }),
   );
   return defs;
 }
@@ -128,15 +182,21 @@ export function groupRateCardRows(entries: RateCardEntry[]): RateSectionGroup[] 
 }
 
 /**
- * Parse a rate input string, returning the numeric value only if it is a
- * finite number >= 0 (mirrors db.ts/updateRateCardEntry's gate). Returns null
- * for empty / non-numeric / negative / non-finite input so the UI can reject
- * the edit BEFORE attempting a write — no unvalidated financial value.
+ * Parse a rate input string, mirroring db.ts/updateRateCardEntry's per-kind
+ * gate: finite >= 0 by default (GC/Site Ops); finite only (negatives allowed)
+ * when `allowNegative` is set (catalog, e.g. the -$2 deduction line). Returns
+ * null for empty / non-numeric / non-finite (and negative unless allowed) input
+ * so the UI rejects the edit BEFORE a write — no unvalidated financial value.
  */
-export function parseRateInput(raw: string): number | null {
+export function parseRateInput(
+  raw: string,
+  opts?: { allowNegative?: boolean },
+): number | null {
+  const allowNegative = opts?.allowNegative ?? false;
   const trimmed = raw.trim();
   if (trimmed === "") return null;
   const value = Number(trimmed);
-  if (!Number.isFinite(value) || value < 0) return null;
+  if (!Number.isFinite(value)) return null;
+  if (!allowNegative && value < 0) return null;
   return value;
 }

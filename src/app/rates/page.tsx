@@ -23,17 +23,19 @@ import {
 import { RateCardEntry } from "@/types/db";
 
 // ---------------------------------------------------------------------------
-// Company Rate Card editor (Rate-card slice 1, Phase C) — twin of /cost-codes.
-// Global view/edit of the rate_card table: the company-DEFAULT rate for each
-// rate-bearing GC/Site Ops line, keyed by the constants.ts line `code`.
+// Company Rate Card editor (Rate-card slice 1 Phase C + slice 2 Phase C) — twin
+// of /cost-codes. Global view/edit of the rate_card table: the company-DEFAULT
+// for each rate-bearing GC/Site Ops line (keyed by the constants.ts `code`) AND
+// each STEP 4 catalog unit price (keyed by itemId), grouped by CSI division.
 //
-// - Editing a rate affects FUTURE projects only. Existing estimates are frozen
-//   by their per-project rate_card_snapshot (proven in Phase B) — a card edit
-//   never moves a saved total.
+// - Editing a value affects FUTURE projects only. Existing estimates never move:
+//   GC/Site Ops rates are frozen by each project's rate_card_snapshot, and a
+//   catalog unit price freezes on the saved line item at row birth (slice 2).
 // - All writes route through db.ts/updateRateCardEntry (single gateway), which
-//   stamps source='manual' and validates finite >= 0. The UI mirrors that gate
-//   (parseRateInput) so no invalid value is ever sent. The seed script is
-//   insert-only; this editor is the SOLE update path for an existing rate.
+//   stamps source='manual' and validates per kind (GC/Site Ops finite >= 0;
+//   catalog finite, negatives allowed). The UI mirrors that gate (parseRateInput
+//   with the row's allowNegative) so no invalid value is ever sent. The seed
+//   script is insert-only; this editor is the SOLE update path for an existing rate.
 // - After a successful save we re-fetch the card and re-prime the
 //   resolveCompanyRate chokepoint, and we re-prime on visibilitychange so an
 //   edit in another tab propagates here too (mirrors /cost-codes).
@@ -123,11 +125,18 @@ export default function RateCardDashboard() {
   };
 
   const handleRateSave = async (entry: RateCardEntry) => {
-    // Mirror the db.ts gate in the UI: reject anything that isn't finite >= 0
+    // Catalog unit prices may be negative (e.g. the -$2 deduction line); GC/Site
+    // Ops rates stay >= 0. The row's line kind drives the gate on BOTH sides.
+    const allowNegative = RATE_LINE_DEFS.get(entry.lineCode)?.kind === "catalog";
+    // Mirror the db.ts gate in the UI: reject anything outside the kind's range
     // BEFORE attempting a write (no unvalidated financial value leaves the page).
-    const parsed = parseRateInput(draftValue);
+    const parsed = parseRateInput(draftValue, { allowNegative });
     if (parsed === null) {
-      alert(`"${draftValue}" is not a valid rate. Enter a number greater than or equal to 0.`);
+      alert(
+        `"${draftValue}" is not a valid rate. Enter a finite number${
+          allowNegative ? "" : " greater than or equal to 0"
+        }.`,
+      );
       return;
     }
     if (parsed === entry.rate) {
@@ -138,7 +147,7 @@ export default function RateCardDashboard() {
     skipBlurRef.current = true; // commit in progress — swallow the unmount blur
     setSavingCode(entry.lineCode);
     try {
-      await updateRateCardEntry(MASTER_TEMPLATE_NAME, entry.lineCode, parsed);
+      await updateRateCardEntry(MASTER_TEMPLATE_NAME, entry.lineCode, parsed, { allowNegative });
       // Re-fetch + re-prime so this view and the resolveCompanyRate chokepoint
       // both reflect the persisted card (plan §5.4).
       await loadCard();
@@ -200,7 +209,7 @@ export default function RateCardDashboard() {
             </h1>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 uppercase tracking-wider font-semibold flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block"></span>
-              Default GC / Site Ops Rates // {MASTER_TEMPLATE_NAME}
+              Default GC / Site Ops Rates + STEP 4 Catalog Unit Prices // {MASTER_TEMPLATE_NAME}
             </p>
           </div>
         </div>
@@ -212,10 +221,12 @@ export default function RateCardDashboard() {
         <div>
           <h4 className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">Future Projects Only</h4>
           <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mt-1">
-            This table holds the company DEFAULT rate for each rate-bearing General Conditions and Site Operations line.
-            Editing a rate changes it for projects created AFTER the edit — existing estimates are frozen by their own
-            point-in-time rate snapshot and never move. A per-project staff rate override (set on a project) still wins on
-            top of the card. Edits are stamped MANUAL and are never overwritten by a re-seed.
+            This table holds the company DEFAULT for each rate-bearing General Conditions / Site Operations line and each
+            STEP 4 catalog unit price (grouped by CSI division). Editing a value changes it for projects created AFTER the
+            edit — existing estimates never move: GC / Site Ops rates are frozen by each project&apos;s rate snapshot, and a
+            catalog unit price freezes on the line item the moment a row is saved. A per-project staff rate override still
+            wins on top of the card. Catalog deduction lines may be negative. Edits are stamped MANUAL and are never
+            overwritten by a re-seed.
           </p>
         </div>
       </div>
@@ -228,7 +239,7 @@ export default function RateCardDashboard() {
           </div>
           <p className="text-slate-600 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold">Rate Lines</p>
           <h2 className="text-2xl font-extrabold text-foreground mt-2">{entries.length}</h2>
-          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1">Rate-bearing GC / Site Ops default lines</div>
+          <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1">GC / Site Ops rates + catalog unit prices</div>
         </div>
 
         <div className="bg-card border border-grid-border text-card-foreground p-5 rounded-xl shadow-sm relative overflow-hidden">
@@ -327,7 +338,7 @@ export default function RateCardDashboard() {
                                     <input
                                       autoFocus
                                       type="number"
-                                      min={0}
+                                      min={def?.kind === "catalog" ? undefined : 0}
                                       step="0.01"
                                       inputMode="decimal"
                                       value={draftValue}
@@ -379,8 +390,9 @@ export default function RateCardDashboard() {
           <div className="flex items-center gap-2 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-lg p-4 text-[10px] text-amber-700 dark:text-amber-500 font-bold uppercase tracking-wider">
             <Info className="text-amber-500/80 shrink-0" size={14} />
             <span>
-              Rate changes apply to projects created after the edit. Existing estimates keep the rates frozen in their
-              snapshot until an estimator chooses to refresh them.
+              Rate changes apply to projects created after the edit. Existing estimates keep their values frozen — GC /
+              Site Ops rates in each project&apos;s snapshot, catalog unit prices on the saved line items — until an
+              estimator chooses to refresh them.
             </span>
           </div>
         </div>

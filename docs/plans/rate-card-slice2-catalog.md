@@ -1,7 +1,7 @@
 # Planning Brief — Company Rate Card · Slice 2 (STEP 4 catalog unit prices)
 
-> **Status:** PLAN APPROVED 2026-06-08 — design resolved with the user (System Architect). No code
-> written yet — Phase A starts in a fresh window.
+> **Status:** SLICE 2 COMPLETE 2026-06-08 — Phases A/B/C all shipped (see §9). Only the market-sector /
+> `project_type` overlay tier remains as rate-card work (deferred, out of scope here).
 > **Predecessor:** Slice 1 (GC/Site Ops rates) is COMPLETE — see
 > `docs/plans/rate-card-admin-portal.md` (Phases A/B/C, commits `ff6985c`/`86110c9`/`97630a0`).
 
@@ -183,3 +183,29 @@ Model: Claude Opus (latest).
   placeholders + a `$0` line survive, and unprimed/miss falls back to the JSON default.
   `export-integrity` stays green. `npm run build` + `npm run test` = **265 green** (25 files).
 - **Next = Phase C**: the `/rates` Catalog editor section (division-grouped, `allowNegative`).
+
+### Phase C — DONE (2026-06-08) — **SLICE 2 COMPLETE**
+- **`rateCardEditor.ts`**: `RateLineDef` now carries `kind: 'gcSiteOps' | 'catalog'`. `buildLineDefs`
+  adds the catalog block LAST (label=`description`, unit=`targetUom`, `sectionId = 'catalog-' + division`)
+  so a catalog itemId wins the one known key overlap — `02-4100.002` (a GC lump-sum/null-rate def AND a
+  catalog itemId) classifies as `catalog` and renders once in its division-02 group. `RATE_SECTION_ORDER`
+  = all GC/Site Ops sections, then catalog division sections (built from `ESTIMATE_ITEMS_MASTER` via
+  `getDivisionCode`, sorted ascending, labels from `DIVISION_LABELS`/`DIVISION_NAMES`). `parseRateInput`
+  gained `opts?: { allowNegative? }` mirroring db.ts (default keeps finite `>= 0`). The Unmatched-never-drop
+  guarantee is untouched.
+- **`/rates/page.tsx`**: each row derives `allowNegative` from its def's `kind` and passes it to BOTH
+  `parseRateInput` and `updateRateCardEntry`; the edit input drops its `min={0}` floor for catalog rows;
+  the reject message drops the ">= 0" clause. Division-grouped catalog sections render with NO new render
+  code (data-driven off `RATE_SECTION_ORDER`). Same save → re-fetch → `primeRateCard` path; no new write
+  path, no `supabase.ts` import. Negative prices already display as `-$2.00` via the existing Intl
+  formatter. Header/banner/KPI copy lightly refreshed to name catalog unit prices.
+- **Tests**: extended `rateCardEditor.test.ts` (+12 → 18) — catalog join completeness (every itemId →
+  a `catalog` def in a known section, none Unmatched), GC-before-catalog section order + ascending
+  division order, per-kind `parseRateInput` (`-2`/`0`/`0.001` accepted for catalog, `-2` rejected for
+  GC/Site Ops), and the `02-4100.002` precedence (catalog kind, `catalog-02`, listed once). New
+  `rateCardEntryUpdate.test.ts` (3, supabase-mocked) pins that a catalog edit accepts `-2` and writes
+  `source='manual'`, and a default call rejects `-2`/non-finite before any DB write.
+- `npm run build` + `npm run test` = **278 green** (26 files). No DDL; `supabase_schema.sql` unchanged;
+  `calculations.ts` untouched (company-default layer only).
+- **Only remaining rate-card work**: the market-sector / `project_type` overlay tier (per-type
+  template rates layered on top of the company card) — deferred, out of Slice 2 scope.

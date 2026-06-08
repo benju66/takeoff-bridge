@@ -5,6 +5,7 @@ import {
   RATE_LINE_DEFS,
   RATE_SECTION_ORDER,
   STAFF_SECTION_ID,
+  CATALOG_SECTION_PREFIX,
 } from "../rateCardEditor";
 import {
   STAFF_ROLE_DEFAULTS,
@@ -13,6 +14,8 @@ import {
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
 } from "../constants";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getDivisionCode } from "../division";
 import type { RateCardEntry } from "@/types/db";
 
 const TEMPLATE = "Company_Estimate_Template.xlsx";
@@ -101,5 +104,105 @@ describe("Rate-card Phase C — parseRateInput (UI gate mirrors db.ts finite >= 
     expect(parseRateInput("-1")).toBeNull();
     expect(parseRateInput("abc")).toBeNull();
     expect(parseRateInput("Infinity")).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Slice 2 Phase C — catalog (STEP 4 unit prices) section of the /rates editor
+// ===========================================================================
+
+describe("Slice 2 Phase C — catalog join completeness", () => {
+  it("every catalog itemId has a line def tagged 'catalog' in a known section", () => {
+    const knownSectionIds = new Set(RATE_SECTION_ORDER.map((s) => s.id));
+    for (const item of Object.values(ESTIMATE_ITEMS_MASTER)) {
+      const def = RATE_LINE_DEFS.get(item.itemId);
+      expect(def, `missing line def for catalog itemId ${item.itemId}`).toBeDefined();
+      expect(def!.kind, `wrong kind for ${item.itemId}`).toBe("catalog");
+      expect(def!.label).toBe(item.description);
+      expect(def!.unit).toBe(item.targetUom);
+      expect(
+        knownSectionIds.has(def!.sectionId),
+        `catalog itemId ${item.itemId} has unknown section ${def!.sectionId}`,
+      ).toBe(true);
+    }
+  });
+
+  it("no seeded catalog itemId lands in the Unmatched group", () => {
+    const rows = Object.values(ESTIMATE_ITEMS_MASTER).map((i) => entry(i.itemId, 1));
+    const groups = groupRateCardRows(rows);
+    expect(groups.find((g) => g.id === "__unmatched__")).toBeUndefined();
+  });
+});
+
+describe("Slice 2 Phase C — division grouping order", () => {
+  it("all GC/Site Ops sections precede every catalog division section", () => {
+    const ids = RATE_SECTION_ORDER.map((s) => s.id);
+    const firstCatalog = ids.findIndex((id) => id.startsWith(CATALOG_SECTION_PREFIX));
+    const lastGc = ids.reduce(
+      (acc, id, i) => (id.startsWith(CATALOG_SECTION_PREFIX) ? acc : i),
+      -1,
+    );
+    expect(firstCatalog).toBeGreaterThan(-1); // catalog sections exist
+    expect(lastGc).toBeLessThan(firstCatalog); // every GC id comes before the first catalog id
+  });
+
+  it("catalog division sections are ordered by CSI division ascending", () => {
+    const catalogIds = RATE_SECTION_ORDER.map((s) => s.id).filter((id) =>
+      id.startsWith(CATALOG_SECTION_PREFIX),
+    );
+    const divisions = catalogIds.map((id) => id.slice(CATALOG_SECTION_PREFIX.length));
+    expect(divisions).toEqual([...divisions].sort());
+  });
+
+  it("groups a GC row before a catalog row", () => {
+    const groups = groupRateCardRows([
+      entry("03-0000.001", 5), // a catalog itemId (division 03)
+      entry("01-0310.001", 175), // staff (GC/Site Ops)
+    ]);
+    const ids = groups.map((g) => g.id);
+    expect(ids.indexOf(STAFF_SECTION_ID)).toBeLessThan(
+      ids.indexOf(`${CATALOG_SECTION_PREFIX}03`),
+    );
+  });
+});
+
+describe("Slice 2 Phase C — parseRateInput per-kind gate", () => {
+  it("accepts negatives and zero for catalog (allowNegative)", () => {
+    expect(parseRateInput("-2", { allowNegative: true })).toBe(-2);
+    expect(parseRateInput("0", { allowNegative: true })).toBe(0);
+    expect(parseRateInput("0.001", { allowNegative: true })).toBe(0.001);
+  });
+
+  it("still rejects negatives by default (GC/Site Ops) but keeps zero", () => {
+    expect(parseRateInput("-2")).toBeNull();
+    expect(parseRateInput("0")).toBe(0);
+  });
+
+  it("rejects non-finite even when negatives are allowed", () => {
+    expect(parseRateInput("Infinity", { allowNegative: true })).toBeNull();
+    expect(parseRateInput("-Infinity", { allowNegative: true })).toBeNull();
+    expect(parseRateInput("abc", { allowNegative: true })).toBeNull();
+  });
+});
+
+describe("Slice 2 Phase C — 02-4100.002 catalog precedence (no double-listing)", () => {
+  it("classifies the dual-use code as catalog in its division group, not GC", () => {
+    const def = RATE_LINE_DEFS.get("02-4100.002");
+    expect(def).toBeDefined();
+    expect(def!.kind).toBe("catalog");
+    expect(def!.sectionId).toBe(`${CATALOG_SECTION_PREFIX}${getDivisionCode("02-4100.002")}`);
+    expect(def!.sectionId).toBe(`${CATALOG_SECTION_PREFIX}02`);
+  });
+
+  it("lists the dual-use card row exactly once, in its catalog division group", () => {
+    const groups = groupRateCardRows([entry("02-4100.002", 0)]);
+    const containing = groups.filter((g) =>
+      g.rows.some((r) => r.entry.lineCode === "02-4100.002"),
+    );
+    expect(containing).toHaveLength(1);
+    expect(containing[0].id).toBe(`${CATALOG_SECTION_PREFIX}02`);
+    expect(containing[0].rows.find((r) => r.entry.lineCode === "02-4100.002")!.def!.kind).toBe(
+      "catalog",
+    );
   });
 });
