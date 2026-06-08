@@ -220,9 +220,12 @@ card edit lands.
   `resetRateCard`); `RateCardEntry` type; `getRateCard` / `updateRateCardEntry` (update-only,
   stamps `source='manual'`, validates rate finite ≥ 0) in `db.ts`. Tests: `rateResolver.test.ts`
   (6) + `rateCardSeed.test.ts` (4, drift guard vs constants). **Build + 239 tests green.**
-- **DB state:** applied + verified on Supabase **branch `rate-card-phase-a`**
-  (`yhydvfkbmshnhsrgnudc`): 44 seed rows, 0 manual, 0 bad rates, snapshot column present.
-  **NOT yet merged to main** — user triggers the merge; delete the branch after to stop billing.
+- **DB state:** verified on a preview branch, then **applied to MAIN** (`nefvkrhbbkiqnpeabyqz`)
+  as migration `rate_card_phase_a` (version `20260608023852`) + seed: 44 seed rows, 0 manual, 0 bad
+  rates, snapshot column present, the 1 existing estimate untouched (snapshot = `{}`). Preview
+  branch deleted (billing stopped). NOTE: branch changes were raw `execute_sql` (no migration
+  recorded there), so the move-to-main was a direct apply of the identical verified SQL — not a
+  Supabase branch-merge.
 - **Next phase (B) must know:** nothing consumes the resolver or snapshot column yet (zero value
   change confirmed). Seed import uses Node 24 native TS type-stripping (no `tsx` dep added; harmless
   MODULE_TYPELESS warning on generate). The only new security advisor is `rate_card_write_policy`
