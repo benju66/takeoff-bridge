@@ -86,6 +86,12 @@ ambiguous — never guess.
    classification name **and** carries its quantity into the override surface. New integration
    test under `src/hooks/__tests__/` (or `src/__tests__/`).
 
+**Carried-forward backlog (required for the final product, outside the phase sequence):** see
+`docs/backlog-math-trust.md` — B-1 CI-safe synthetic template fixture (the McKenna proof is
+machine-local), B-2 born-in-app GC/Site-Ops golden (G-2: the GC engine is not yet tied to a real
+estimate), B-3 rounding default decision + Phase 5 visibility (G-1). Not Phase 3 work, but do not
+let them evaporate across sessions.
+
 **Guardrails unchanged:** `calculations.ts` is the sole financial authority; all DB access via
 `db.ts`; **no schema change in Phase 3**. Each fix ships red→green.
 

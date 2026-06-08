@@ -237,6 +237,11 @@ rounding), a deliberate model boundary (G-2/G-3 the parametric GC aid vs a hand-
 a defect in the *source spreadsheet* that the app already corrects (G-4 broken BLI). The engine's
 STEP 4 math reproduces the real bid to $0.00.
 
+**Carried forward to the final product** (see `docs/backlog-math-trust.md`): the harness's
+real-bid proof is machine-local (B-1 — add a CI-safe synthetic template fixture), the GC/Site-Ops
+engine is not yet tied to a real estimate (B-2 — a born-in-app golden, per G-2), and the rounding
+default needs an architect decision plus Phase 5 visibility (B-3, per G-1).
+
 ---
 
 ## Appendix — invariant → test map
