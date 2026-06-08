@@ -1000,17 +1000,31 @@ export async function getRateCard(
  * Updates one rate_card line to a new rate (Phase C /rates editor — the SOLE
  * update path for existing rates; the seed script is insert-only). Always
  * stamps source='manual'. Update-only by design: adding new rate lines stays
- * with the constants/seed pipeline. Validates the rate is a finite number >= 0
- * before writing (AGENTS.md — never write an invented/invalid financial value).
+ * with the constants/seed pipeline.
+ *
+ * Validation is per-rate-kind (AGENTS.md — never write an invented/invalid
+ * financial value). By default the gate is a finite number >= 0, matching the
+ * GC/Site Ops rates (Slice 1) — existing callers are unchanged. Pass
+ * `allowNegative: true` for catalog unit prices (Slice 2), which can be a
+ * legitimate negative deduction (e.g. 03-5413.002 = -2); that relaxes the gate
+ * to finite-only. A non-finite value (NaN/Infinity) is ALWAYS rejected.
  */
 export async function updateRateCardEntry(
   templateName: string,
   lineCode: string,
-  rate: number
+  rate: number,
+  opts?: { allowNegative?: boolean }
 ): Promise<RateCardEntry> {
-  if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0) {
+  const allowNegative = opts?.allowNegative ?? false;
+  if (
+    typeof rate !== "number" ||
+    !Number.isFinite(rate) ||
+    (!allowNegative && rate < 0)
+  ) {
     throw new Error(
-      `Invalid rate ${rate} for ${lineCode}: must be a finite number >= 0`
+      `Invalid rate ${rate} for ${lineCode}: must be a finite number${
+        allowNegative ? "" : " >= 0"
+      }`
     );
   }
 
