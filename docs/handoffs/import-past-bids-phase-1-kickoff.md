@@ -74,3 +74,39 @@ Flow: **Upload → Extract → Enrich → Tie-out gate → Save as project.**
   one does not mutate the other; both persist/reload distinct; both roll up to one Procore code.
 
 Stop at green + committed + a handoff note (update `[[import-past-bids-plan]]` + this kickoff's status).
+
+---
+
+## STATUS — Phase 1 BUILT & COMMITTED (2026-06-09, branch `import-past-bids-phase-1`, `4d0b2ee`)
+
+Full vertical shipped: **Upload → Extract → Enrich → Tie-out gate → Save as project.**
+
+- **Architect fork resolved:** chose **Option A — a small `projects.is_imported` flag**
+  (schema file updated + live `ALTER` on `nefvkrhbbkiqnpeabyqz`; no new advisor) so a
+  reopened import ties (finding G-2). For imported projects the workspace derives the
+  linked-division totals from the SAVED linked rows (`linkedTotalsFromRows`) instead of
+  recomputing from STEP 2/3.
+- **Provenance:** added a clean `'imported'` source (not reused `csv_import`) + a Phase-5
+  provenance badge.
+- **What landed:** `src/lib/importEstimate.ts` (pure core), extractor ad-hoc gap closed
+  (separate `adHocLineItems` array → golden path byte-identical), `src/lib/cascade.ts`
+  (imported rows cascade-independent, wired into `useCellEditing`), `/projects/import`
+  page + dashboard entry, workspace reload-tie wiring (`[projectId]/page.tsx`,
+  `useTakeoffWorkbook` getLinkedRowState/strayLinkedRows import-aware).
+- **Tests:** `import-past-bid.test.ts` (import + reload tie-out, ad-hoc captured+flagged,
+  uncatalogued unmapped, same-code unique-ids + single-Procore-code rollup + object
+  independence) + `cascade.test.ts`. **Suite 436 pass / 0 todo**; golden McKenna +
+  synthetic tie $0.00; `tsc` + `next build` clean.
+
+### Known limitations / Phase-2 carry-forward (NOT bugs)
+1. **Export reconciliation chip for imported projects** still reads GC/Site-Ops from the
+   (zero) parametric calculators, so the in-workspace reconciliation/export gate can show a
+   delta for an imported bid. The IMPORT tie-out gate (at save) is correct; wiring the
+   export path to the imported linked statics is Phase 2/3 work.
+2. **Partial-save orphan:** if `saveProject` succeeds but `saveEstimate` then fails, an empty
+   project is left and a retry creates a second one (new uuid). Low-frequency; add a
+   rollback/delete-on-fail guard when export-of-imports is built.
+3. Imported linked rows are read-only in the grid ("review to re-drive" GC/Site-Ops editing
+   is deferred).
+
+Branch not yet merged to main.
