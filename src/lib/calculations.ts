@@ -381,7 +381,10 @@ export function computeTakeoffSummary(
   const glRate = rates?.glInsuranceRate ?? 0.01;
   const bondRate = rates?.bondRate ?? 0;
   const feeRate = rates?.feeRate ?? 0.05;
-  const roundingRule = rates?.roundingRule ?? "dollar";
+  // B-3 (math-trust slice 6): default → "none" (template-faithful — ties the
+  // unrounded company spreadsheet to the cent). A project opts into "dollar" etc.
+  // via its explicit roundingRule; this fallback only applies when unset.
+  const roundingRule = rates?.roundingRule ?? "none";
 
   // Compute raw modifier values (subtotal × rate)
   const rawCC = subtotal * ccRate;

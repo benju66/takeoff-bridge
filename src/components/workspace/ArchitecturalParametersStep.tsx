@@ -143,7 +143,7 @@ export function ArchitecturalParametersStep({
               Cell Rounding Rules
             </label>
             <select
-              value={project.roundingRule ?? "dollar"}
+              value={project.roundingRule ?? "none"}
               onChange={(e) => onParamChange("roundingRule", e.target.value)}
               className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground font-semibold outline-none focus:ring-2 focus:ring-blue-500"
             >

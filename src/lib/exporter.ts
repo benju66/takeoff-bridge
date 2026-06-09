@@ -118,7 +118,7 @@ export function generateExcelPayload(
     glInsuranceRate: project?.glInsuranceRate ?? 0.01,
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
-    roundingRule: project?.roundingRule ?? "dollar",
+    roundingRule: project?.roundingRule ?? "none",
   }, linkedTotals, overrides);
 
   if (summary.subtotal > 0) {
@@ -279,7 +279,7 @@ export function generateProcoreBudget(
     glInsuranceRate: project?.glInsuranceRate ?? 0.01,
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
-    roundingRule: project?.roundingRule ?? "dollar",
+    roundingRule: project?.roundingRule ?? "none",
   }, linkedTotals, overrides);
 
   if (summary.subtotal > 0) {
@@ -1598,7 +1598,7 @@ export async function generateExcelWorkbook(
       glInsuranceRate: projectMetadata?.glInsuranceRate ?? 0.01,
       bondRate: projectMetadata?.bondRate ?? 0,
       feeRate: projectMetadata?.feeRate ?? 0.05,
-      roundingRule: projectMetadata?.roundingRule ?? "dollar",
+      roundingRule: projectMetadata?.roundingRule ?? "none",
     },
     linkedDivisionTotals,
     overrides

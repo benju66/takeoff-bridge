@@ -202,15 +202,15 @@ describe("buildTraceModel — trace view-model (Phase 5 slice 2)", () => {
     expect(none.roundingMode).toBe("none");
     expect(none.roundingLabel).toBe(ROUNDING_MODE_LABELS.none);
 
-    // Engine default when the project leaves roundingRule unset.
+    // Engine default when the project leaves roundingRule unset (B-3 slice 6 → "none").
     const unset = buildTraceModel({ summary, linkedTotals: NO_LINKED, project: makeProject(), takeoffRowCount: 1 });
-    expect(unset.roundingMode).toBe("dollar");
-    expect(unset.roundingLabel).toBe(ROUNDING_MODE_LABELS.dollar);
+    expect(unset.roundingMode).toBe("none");
+    expect(unset.roundingLabel).toBe(ROUNDING_MODE_LABELS.none);
   });
 
-  it("roundingModeLabel falls back to the dollar label for unknown modes", () => {
-    expect(roundingModeLabel(undefined)).toBe(ROUNDING_MODE_LABELS.dollar);
-    expect(roundingModeLabel("bogus")).toBe(ROUNDING_MODE_LABELS.dollar);
+  it("roundingModeLabel falls back to the none label for unknown/unset modes (B-3 slice 6)", () => {
+    expect(roundingModeLabel(undefined)).toBe(ROUNDING_MODE_LABELS.none);
+    expect(roundingModeLabel("bogus")).toBe(ROUNDING_MODE_LABELS.none);
     expect(roundingModeLabel("ten")).toBe(ROUNDING_MODE_LABELS.ten);
   });
 });

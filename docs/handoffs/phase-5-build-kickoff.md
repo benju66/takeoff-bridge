@@ -182,10 +182,33 @@
     re-tested here** (cited). Suite **411 pass / 0 todo** (38 files); `tsc` clean; new files lint-clean
     (EstimateTable keeps only its 2 pre-existing warnings); self-review clean (the grid path is
     replicated verbatim; reused, not reimplemented per the kickoff hard constraint).
-- **Slice 6: NOT STARTED.**
-  - **Slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
-    (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill). The default stays
-    `'dollar'` in code until then — slice 3 only DISPLAYS the active mode.
+- **Slice 6 — B-3 rounding default → `none`: DONE (2026-06-09, architect-approved).**
+  - **Schema first (source of truth):** `supabase_schema.sql:73` `rounding_rule … DEFAULT 'dollar'` →
+    `DEFAULT 'none'` (with a rollout comment). **Applied live** to `Takeoff-Bridge`
+    (`nefvkrhbbkiqnpeabyqz`) via `execute_sql` `ALTER TABLE public.projects ALTER COLUMN rounding_rule
+    SET DEFAULT 'none'` — verified the column default flipped and that the **1 existing project keeps
+    `'dollar'`** (a `SET DEFAULT` never touches existing rows; `mapProjectToRow` also writes the column
+    explicitly on every save → saved projects don't move). `get_advisors` after the DDL = **still the
+    same 3 pre-existing WARNs** (cost_code_map / rate_card permissive UPDATE + leaked-password) — no new
+    advisor.
+  - **Effective-default code sites flipped `?? "dollar"` → `?? "none"`:** the engine
+    `calculations.ts:384` (THE authority, with a rationale comment); `exporter.ts` ×3 (the two
+    `project?` summary calls + the `projectMetadata?` workbook call); `db.ts` read (`|| "none"`) **and**
+    write (`?? "none"`); `page.tsx` summary memo; `ArchitecturalParametersStep.tsx` toggle default.
+  - **Also flipped the post-kickoff DISPLAY defaults in `trustInspector.ts`** (created in slices 2–3,
+    not in the original §9 list): `buildTraceModel` `roundingMode` default + `roundingModeLabel`'s
+    unset/unknown fallback → `none`, so a project with an unset `roundingRule` shows `none` in the
+    Trace/Reconcile tabs instead of the engine computing `none` while the glass box claims `dollar`.
+    Updated the 2 `trustInspector.test.ts` assertions that pinned the unset default to `dollar`.
+  - **Contract G-1 + B-3 notes** in `docs/correctness-contract.md` updated: G-1 is now RESOLVED (the
+    default matches the unrounded sheet out of the box; opting into `dollar` is a deliberate setting).
+  - **Rollout (as designed):** existing saved projects keep `'dollar'` (explicit write into a NOT NULL
+    column); only new/unsaved projects pick up `'none'`. The per-project toggle still offers
+    `none/dollar/ten/hundred`. No data migration of existing rows.
+  - **No engine-math change** — only which default applies when `roundingRule` is unset. Golden McKenna
+    still ties $0.00 (it already ran `roundingRule:"none"` explicitly). Suite **411 pass / 0 todo** (38
+    files); `tsc` clean; touched files lint-clean (exporter keeps its 3 pre-existing unused-import warns).
+  - **PHASE 5 BUILD COMPLETE** — all 6 slices landed; no slices remain.
 
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore

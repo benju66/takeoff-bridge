@@ -39,7 +39,7 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     glInsuranceRate: row.gl_insurance_rate != null ? Number(row.gl_insurance_rate) : 0.01,
     bondRate: row.bond_rate != null ? Number(row.bond_rate) : 0,
     feeRate: row.fee_rate != null ? Number(row.fee_rate) : 0.05,
-    roundingRule: (row.rounding_rule as string) || "dollar",
+    roundingRule: (row.rounding_rule as string) || "none",
     projectType: (row.project_type as string) || "multifamily",
     marketSector: (row.market_sector as string) || "",
   };
@@ -70,7 +70,7 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     gl_insurance_rate: project.glInsuranceRate ?? 0.01,
     bond_rate: project.bondRate ?? 0,
     fee_rate: project.feeRate ?? 0.05,
-    rounding_rule: project.roundingRule ?? "dollar",
+    rounding_rule: project.roundingRule ?? "none",
     project_type: project.projectType ?? "multifamily",
     market_sector: project.marketSector ?? "",
   };

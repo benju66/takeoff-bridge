@@ -157,7 +157,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     glInsuranceRate: project?.glInsuranceRate ?? 0.01,
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
-    roundingRule: project?.roundingRule ?? "dollar",
+    roundingRule: project?.roundingRule ?? "none",
   }), [project]);
 
   const takeoffSummary = React.useMemo(

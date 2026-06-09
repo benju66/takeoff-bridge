@@ -70,7 +70,11 @@ CREATE TABLE projects (
   gl_insurance_rate NUMERIC NOT NULL DEFAULT 0.01,
   bond_rate NUMERIC NOT NULL DEFAULT 0,
   fee_rate NUMERIC NOT NULL DEFAULT 0.05,
-  rounding_rule TEXT NOT NULL DEFAULT 'dollar',
+  -- B-3 (math-trust slice 6, 2026-06-09): default → 'none' (template-faithful;
+  -- ties the unrounded company spreadsheet to the cent). Existing rows keep their
+  -- persisted value (db.ts writes rounding_rule explicitly on every save), so only
+  -- new direct inserts pick up 'none'. Per-project toggle still allows 'dollar'.
+  rounding_rule TEXT NOT NULL DEFAULT 'none',
   -- Phase 3a: per-project template selection (multifamily | ti | medical)
   project_type TEXT NOT NULL DEFAULT 'multifamily',
   -- Market sector classification (display label, e.g. 'Healthcare'; '' = unset legacy project)

@@ -29,10 +29,10 @@ export const ROUNDING_MODE_LABELS: Record<string, string> = {
   hundred: "Each line rounded to the nearest $100",
 };
 
-/** Resolve a rounding-mode label, defaulting the same way the engine does (`dollar`). */
+/** Resolve a rounding-mode label, defaulting the same way the engine does (`none`, B-3 slice 6). */
 export function roundingModeLabel(mode: string | undefined): string {
-  const key = mode ?? "dollar";
-  return ROUNDING_MODE_LABELS[key] ?? ROUNDING_MODE_LABELS.dollar;
+  const key = mode ?? "none";
+  return ROUNDING_MODE_LABELS[key] ?? ROUNDING_MODE_LABELS.none;
 }
 
 /** Friendly label for a TakeoffSummary override field (audit log + flags). */
@@ -149,7 +149,7 @@ export function buildTraceModel({
     };
   });
 
-  const roundingMode = project.roundingRule ?? "dollar";
+  const roundingMode = project.roundingRule ?? "none";
 
   return {
     focusField,
