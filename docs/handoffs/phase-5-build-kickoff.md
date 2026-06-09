@@ -117,12 +117,48 @@
     consumes). Golden McKenna ties $0.00 (no overrides → inert). Suite **392 pass + 1 todo** (36
     files); `tsc` clean; no new lint (EstimateTable keeps its 2 pre-existing warnings); code-review
     clean (1 UX finding fixed: Escape-loses-input).
-- **Slices 5–6: NOT STARTED.** Next session begins at **slice 5** (5c row provenance badges
-  ▦/⬚/✎/⚠ + Flags tab: needs-review worklist, B-4 inline-recover unmapped import rows, audit log from
-  `overrideRecords`; **flip the INV-7 `it.todo` → a real assertion** in `correctness-contract.test.ts`).
-  Reminder: **slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
-  (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill). The default stays
-  `'dollar'` in code until then — slice 3 only DISPLAYS the active mode.
+- **Slice 5 — 5c row provenance badges + Flags tab + INV-7 flip: DONE (2026-06-09).**
+  - New pure helper `src/lib/rowProvenance.ts` — `rowProvenanceBadge(row) → { kind, label, tooltip }`.
+    `needsReview` wins (the ⚠ worklist signal); else `source` maps 1:1 (template/csv_import→imported/
+    manual/ai_suggestion); unset/unknown source → template. TOTAL (never undefined) — that totality
+    IS the INV-7 promise. Unit-tested in node (`rowProvenance.test.ts`, +4).
+  - New component `src/components/workspace/RowProvenanceGlyph.tsx` — maps `kind` → a lucide icon
+    (AlertTriangle/LayoutGrid/FileSpreadsheet/Pencil/Sparkles), rendered in the item-id cell
+    (`useTakeoffWorkbook.tsx`, non-editing view) as a glyph beside the code — NOT another border
+    (the unmapped amber `border-l` stays the only border). No source emoji.
+  - New pure view-model `trustInspector.buildFlagsModel({ rows, overrideRecords }) → FlagsModel`
+    (needs-review worklist + unmapped-import worklist [carries qty] + audit log projected from the
+    append-only `overrideRecords`, newest-first preserved; revert = `overrideValue === null`). Also
+    `summaryFieldLabel(field)`. Unit-tested in node (`trustInspector.test.ts`, +4).
+  - `TrustInspector.tsx` — filled the slice-2 Flags placeholder with `<FlagsTab>`: needs-review +
+    unmapped worklists (click a row → `onViewRow` closes the inspector, clears the filter, scrolls the
+    grid to that row) + the read-only override audit log (field, computed→override / "Reverted to
+    computed", reason, who, when). New `flagsModel?` + `onViewRow?` props.
+  - `EstimateTable.tsx` — new required `overrideRecords` prop; builds `flagsModel` (pure) + a
+    `handleViewRow` (same setGlobalFilter("")+scrollToRowRef path as `[view rows]`, targeting one row).
+  - `page.tsx` — destructures `overrideRecords` from `useEstimateOverrides` (no new fetch) and passes it.
+  - **Flipped INV-7** (`correctness-contract.test.ts`): the `it.todo` is now 4 real assertions over the
+    pure helper (every source → a defined badge with a kind; per-source kind mapping; needsReview
+    priority; unset-source totality).
+  - **B-4 SPLIT to slice 5b** (authorized by the kickoff): slice 5 ships the unmapped worklist
+    read-only + jump-to-grid (the grid's Code cell already assigns codes with fuzzy suggestions →
+    map-without-re-import works today). The IN-PANEL inline "assign code & place" control + its
+    command-builder (pushCommand, undo-fidelity test) is **slice 5b**.
+  - **No engine/math change** (pure view over `source`/`needsReview`/`overrideRecords`). Golden McKenna
+    ties $0.00 (no overrides / no needs-review rows → all surfaces inert). Suite **404 pass, 0 todo**
+    (37 files); `tsc` clean; EstimateTable keeps only its 2 pre-existing warnings; code-review clean
+    (2 low findings: collapsed-division scroll dead-end = pre-existing scrollToRowRef limit, left as-is;
+    redundant empty-state messaging = fixed).
+- **Slice 5b (carry-over) + Slice 6: NOT STARTED.**
+  - **Slice 5b — B-4 inline assign-and-place** in the Flags-tab unmapped worklist: an in-panel
+    "assign code & place" control (same UX as `ExportOverrideModal`) that mutates the row's code via
+    the command path (`pushCommand` per AGENTS.md "Compounding History Preservation" — undo/redo
+    fidelity), so the estimator maps without leaving the inspector. Add an assign-and-place command-
+    builder test (inverse data captured). Where the unmapped rows + qty live: directly in `rows`
+    (`!isMapped && classification`), already surfaced by `buildFlagsModel().unmappedRows`.
+  - **Slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
+    (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill). The default stays
+    `'dollar'` in code until then — slice 3 only DISPLAYS the active mode.
 
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore

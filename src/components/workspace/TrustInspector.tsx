@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock } from "lucide-react";
+import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock, ArrowRight, RotateCcw, ClipboardList } from "lucide-react";
 import type { Project } from "@/types/db";
 import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
-import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair } from "@/lib/trustInspector";
+import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair, FlagsModel, FlagsRowRef, FlagsAuditEntry } from "@/lib/trustInspector";
 import {
   selectPristineComputedValue,
   validateOverrideInput,
@@ -44,6 +44,10 @@ interface TrustInspectorProps {
   takeoffRowCount: number;
   /** Live Procore reconciliation (5b) — built from the FULL unfiltered rows (Amendment F). */
   reconciliation?: ReconciliationModel;
+  /** 5c Flags worklist — needs-review rows, unmapped imports, override audit log. */
+  flagsModel?: FlagsModel;
+  /** Jump the grid to a flagged row (closes the inspector + scrolls). */
+  onViewRow?: (rowId: string) => void;
   /** [view rows] — reveal/scroll the grid to the contributing takeoff rows. */
   onViewTakeoffRows: () => void;
   // --- Override setter (slice 4) ------------------------------------------
@@ -71,6 +75,8 @@ export function TrustInspector({
   project,
   takeoffRowCount,
   reconciliation,
+  flagsModel,
+  onViewRow,
   onViewTakeoffRows,
   isFiltered,
   onSaveOverride,
@@ -178,10 +184,14 @@ export function TrustInspector({
         )
       )}
       {tab === "flags" && (
-        <Placeholder
-          title="Provenance & override flags"
-          note="Row provenance, the needs-review worklist, and the override audit log land in slice 5."
-        />
+        flagsModel ? (
+          <FlagsTab model={flagsModel} onViewRow={onViewRow} />
+        ) : (
+          <Placeholder
+            title="Provenance & override flags"
+            note="Flags data is unavailable for this view."
+          />
+        )
       )}
     </div>
   );
@@ -623,6 +633,188 @@ function Row({
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Flags tab (5c) — the review worklist + the override audit log.
+//
+// PURE VIEW over `buildFlagsModel` (needs-review rows, unmapped imports, audit log).
+// Clicking a worklist row jumps the grid to it (onViewRow). The audit log renders
+// the append-only `overrideRecords` trail (newest first) read-only — every set/revert
+// with computed→override, reason, who, when. B-4 inline assign-and-place is slice 5b.
+// ---------------------------------------------------------------------------
+
+function FlagsTab({
+  model,
+  onViewRow,
+}: {
+  model: FlagsModel;
+  onViewRow?: (rowId: string) => void;
+}) {
+  const { needsReviewRows, unmappedRows, auditLog } = model;
+  const empty =
+    needsReviewRows.length === 0 && unmappedRows.length === 0 && auditLog.length === 0;
+
+  return (
+    <div className="p-4 font-sans text-xs text-foreground space-y-5">
+      {empty && (
+        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+          <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
+          Nothing flagged — no rows need review, every row maps to a code, and no overrides are recorded.
+        </div>
+      )}
+
+      {/* Needs-review worklist (INV-8) */}
+      {needsReviewRows.length > 0 && (
+        <FlagsSection
+          title="Needs review"
+          count={needsReviewRows.length}
+          icon={<AlertTriangle size={13} className="text-amber-600 dark:text-amber-400" />}
+          note="Ambiguous import quantities were NOT trusted. Confirm the quantity before exporting."
+        >
+          {needsReviewRows.map((r) => (
+            <WorklistRow key={r.rowId} row={r} onViewRow={onViewRow} />
+          ))}
+        </FlagsSection>
+      )}
+
+      {/* Unmapped imports (B-4) */}
+      {unmappedRows.length > 0 && (
+        <FlagsSection
+          title="Unmapped import rows"
+          count={unmappedRows.length}
+          icon={<AlertTriangle size={13} className="text-amber-600 dark:text-amber-400" />}
+          note="These rows carry a takeoff quantity but no Procore code yet. Open the row to assign a code (the grid's Code cell suggests matches) so the dollars reach the export."
+        >
+          {unmappedRows.map((r) => (
+            <WorklistRow key={r.rowId} row={r} onViewRow={onViewRow} showClassification />
+          ))}
+        </FlagsSection>
+      )}
+
+      {/* Override audit log — hidden only when the whole tab is empty (the green
+          banner already says so); otherwise always shown, even at count 0. */}
+      {!empty && (
+      <FlagsSection
+        title="Override audit log"
+        count={auditLog.length}
+        icon={<ClipboardList size={13} className="text-blue-600 dark:text-blue-400" />}
+        note={auditLog.length === 0 ? "No overrides recorded — every value is the engine's computed figure." : "Append-only, newest first. Each set/revert is an immutable record."}
+      >
+        {auditLog.map((entry, i) => (
+          <AuditEntry key={`${entry.field}-${entry.createdAt}-${i}`} entry={entry} />
+        ))}
+      </FlagsSection>
+      )}
+    </div>
+  );
+}
+
+function FlagsSection({
+  title,
+  count,
+  icon,
+  note,
+  children,
+}: {
+  title: string;
+  count: number;
+  icon: React.ReactNode;
+  note: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        {icon}
+        <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+          {title}
+        </span>
+        <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">({count})</span>
+      </div>
+      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">{note}</p>
+      {count > 0 && <div className="space-y-1">{children}</div>}
+    </div>
+  );
+}
+
+function WorklistRow({
+  row,
+  onViewRow,
+  showClassification,
+}: {
+  row: FlagsRowRef;
+  onViewRow?: (rowId: string) => void;
+  showClassification?: boolean;
+}) {
+  const label = showClassification ? row.classification : row.description || row.classification;
+  return (
+    <button
+      type="button"
+      onClick={() => onViewRow?.(row.rowId)}
+      disabled={!onViewRow}
+      className="w-full flex items-center justify-between gap-3 rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-1.5 text-left hover:bg-card disabled:cursor-default cursor-pointer transition-colors"
+    >
+      <span className="min-w-0 truncate">
+        {row.itemId && <span className="font-mono text-blue-600 dark:text-blue-400">{row.itemId} </span>}
+        <span className="text-foreground">{label || "(untitled row)"}</span>
+      </span>
+      <span className="flex items-center gap-2 shrink-0">
+        <span className="font-mono text-slate-500 dark:text-slate-400">
+          {row.matchedQty.toLocaleString()} {row.uom}
+        </span>
+        {onViewRow && (
+          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+            view
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+function AuditEntry({ entry }: { entry: FlagsAuditEntry }) {
+  const when = formatTimestamp(entry.createdAt);
+  return (
+    <div className="rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-2 space-y-1">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-1.5 font-bold text-foreground">
+          {entry.kind === "revert" ? (
+            <RotateCcw size={12} className="text-slate-500 dark:text-slate-400" />
+          ) : (
+            <Pencil size={12} className="text-amber-600 dark:text-amber-400" />
+          )}
+          {entry.fieldLabel}
+        </span>
+        <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 shrink-0">{when}</span>
+      </div>
+      <div className="font-mono text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1.5 flex-wrap">
+        {entry.kind === "revert" ? (
+          <span>Reverted to computed{entry.computedValue != null ? ` (${fmtUSD(entry.computedValue)})` : ""}</span>
+        ) : (
+          <>
+            <span className="text-slate-500 dark:text-slate-400">
+              {entry.computedValue != null ? fmtUSD(entry.computedValue) : "—"}
+            </span>
+            <ArrowRight size={11} className="text-slate-400 dark:text-slate-500" />
+            <span className="text-foreground font-semibold">
+              {entry.overrideValue != null ? fmtUSD(entry.overrideValue) : "—"}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="text-[11px] text-slate-600 dark:text-slate-300 italic">“{entry.reason}”</div>
+      <div className="text-[10px] text-slate-400 dark:text-slate-500">
+        {entry.createdBy ? `by ${entry.createdBy}` : "by an unknown user"}
+      </div>
+    </div>
+  );
+}
+
+/** Best-effort local timestamp; falls back to the raw ISO string if unparseable. */
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 function Placeholder({ title, note }: { title: string; note: string }) {

@@ -68,7 +68,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // Phase 4: active estimator overrides, layered over the computed summary below so a
   // persisted override applies on reload. The glass-box UI that sets/reverts an override
   // is Phase 5 (this is the read+apply wiring only).
-  const { activeOverrides, refresh: refreshOverrides } = useEstimateOverrides(projectId, isLoaded);
+  const { activeOverrides, overrideRecords, refresh: refreshOverrides } = useEstimateOverrides(projectId, isLoaded);
 
   // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
@@ -500,6 +500,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
             reconciliation={reconciliation}
+            overrideRecords={overrideRecords}
             isFiltered={isFiltered}
             onSaveOverride={handleSaveOverride}
             strayLinkedRows={strayLinkedRows}

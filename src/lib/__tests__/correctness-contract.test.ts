@@ -25,6 +25,7 @@ import { LINKED_DIVISION_ROWS } from '../constants';
 import { parseUsNumber } from '../parser';
 import { computeMergeResult, applyMergeInverse } from '../mergeTakeoff';
 import { ProcessedTakeoffRow } from '@/types';
+import { rowProvenanceBadge } from '../rowProvenance';
 
 // ---------------------------------------------------------------------------
 // Helper: Minimal ProcessedTakeoffRow factory (mirrors calculations.test.ts).
@@ -304,7 +305,44 @@ describe('INV-6 linked-row non-duplication', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('INV-7 provenance completeness', () => {
-  it.todo('INV-7 every persisted row carries a source and shows its provenance badge — Phase 5');
+  // The four concrete provenance sources a persisted row may carry.
+  const SOURCES: NonNullable<ProcessedTakeoffRow['source']>[] = [
+    'template',
+    'csv_import',
+    'manual',
+    'ai_suggestion',
+  ];
+
+  it('every valid source yields a defined provenance badge (the mapping is total)', () => {
+    for (const source of SOURCES) {
+      const badge = rowProvenanceBadge(makeRow({ source }));
+      expect(badge).toBeDefined();
+      expect(badge.kind).toBeTruthy();
+      expect(badge.label).toBeTruthy();
+      expect(badge.tooltip).toBeTruthy();
+    }
+  });
+
+  it('maps each source to its own provenance kind', () => {
+    expect(rowProvenanceBadge(makeRow({ source: 'template' })).kind).toBe('template');
+    expect(rowProvenanceBadge(makeRow({ source: 'csv_import' })).kind).toBe('imported');
+    expect(rowProvenanceBadge(makeRow({ source: 'manual' })).kind).toBe('manual');
+    expect(rowProvenanceBadge(makeRow({ source: 'ai_suggestion' })).kind).toBe('ai_suggestion');
+  });
+
+  it('needsReview takes visual priority over the source (the worklist signal)', () => {
+    for (const source of SOURCES) {
+      // makeRow doesn't thread needsReview — set it on the resulting row explicitly.
+      const row = { ...makeRow({ source }), needsReview: true };
+      expect(rowProvenanceBadge(row).kind).toBe('needs_review');
+    }
+  });
+
+  it('a row with no recorded source still gets a defined badge (never undefined)', () => {
+    const badge = rowProvenanceBadge({ source: undefined, needsReview: false });
+    expect(badge).toBeDefined();
+    expect(badge.kind).toBeTruthy();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

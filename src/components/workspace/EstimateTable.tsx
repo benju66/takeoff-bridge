@@ -9,13 +9,14 @@ import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-tab
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
 import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
+import { buildFlagsModel } from "@/lib/trustInspector";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
@@ -152,6 +153,10 @@ interface EstimateTableProps {
    *  status-bar chip and the Reconcile tab. */
   reconciliation: ReconciliationModel;
 
+  /** Append-only override audit trail (newest first) — the Flags-tab audit log (5c.3).
+   *  Read-only; sourced from `useEstimateOverrides`, no new fetch. */
+  overrideRecords: EstimateOverrideRecord[];
+
   /** True when a filter/search is active — the on-screen summary is then a partial
    *  (visible-rows-only) view, so the override action is disabled (Amendment F). */
   isFiltered: boolean;
@@ -216,6 +221,7 @@ export function EstimateTable({
   costTypeBreakdown,
   linkedDivisionTotals,
   reconciliation,
+  overrideRecords,
   isFiltered,
   onSaveOverride,
   strayLinkedRows,
@@ -278,6 +284,28 @@ export function EstimateTable({
     setGlobalFilter("");
     requestAnimationFrame(() => scrollToRowRef?.current?.(0));
   }, [setGlobalFilter, scrollToRowRef]);
+
+  // Flags-tab worklist jump — close the inspector, clear any filter, then scroll the
+  // grid to the flagged row so the estimator can resolve it in place. Same path as
+  // [view rows] (setGlobalFilter("") + scrollToRowRef), but targets one row by id.
+  const handleViewRow = useCallback(
+    (rowId: string) => {
+      setTrustOpen(false);
+      setGlobalFilter("");
+      requestAnimationFrame(() => {
+        const idx = table.getRowModel().rows.findIndex((r) => r.original.id === rowId);
+        if (idx >= 0) scrollToRowRef?.current?.(idx);
+      });
+    },
+    [setGlobalFilter, table, scrollToRowRef]
+  );
+
+  // 5c Flags view-model — needs-review worklist (INV-8), unmapped-import worklist
+  // (carried qty, B-4 target), and the append-only override audit log. Pure builder.
+  const flagsModel = useMemo(
+    () => buildFlagsModel({ rows, overrideRecords }),
+    [rows, overrideRecords]
+  );
 
   // ---------------------------------------------------------------------------
   // Click-outside-to-deselect (E2)
@@ -1103,6 +1131,8 @@ export function EstimateTable({
         project={project}
         takeoffRowCount={takeoffRowCount}
         reconciliation={reconciliation}
+        flagsModel={flagsModel}
+        onViewRow={handleViewRow}
         onViewTakeoffRows={handleViewTakeoffRows}
         isFiltered={isFiltered}
         onSaveOverride={onSaveOverride}

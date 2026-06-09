@@ -13,9 +13,9 @@ import { describe, it, expect } from "vitest";
 import { computeTakeoffSummary } from "../calculations";
 import type { LinkedDivisionTotal } from "../calculations";
 import { ESTIMATE_MODIFIERS } from "../constants";
-import { buildTraceModel, buildReconciliationModel, roundingModeLabel, ROUNDING_MODE_LABELS } from "../trustInspector";
+import { buildTraceModel, buildReconciliationModel, buildFlagsModel, roundingModeLabel, ROUNDING_MODE_LABELS } from "../trustInspector";
 import type { TakeoffSummary } from "../calculations";
-import { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
+import { ProcessedTakeoffRow, EstimateOverrideMap, EstimateOverrideRecord } from "@/types";
 import type { Project } from "@/types/db";
 
 function makeRow(overrides: Partial<ProcessedTakeoffRow> = {}): ProcessedTakeoffRow {
@@ -361,5 +361,68 @@ describe("buildReconciliationModel — reconciliation view-model (Phase 5 slice 
     });
     expect(model.roundingMode).toBe("none");
     expect(model.roundingLabel).toBe(ROUNDING_MODE_LABELS.none);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5c — Flags view-model (buildFlagsModel). Pure filter/projection over rows +
+// the append-only override trail; no math. Tests assert the worklist membership
+// and the audit-log projection (incl. revert classification + order).
+// ---------------------------------------------------------------------------
+
+function makeOverrideRecord(o: Partial<EstimateOverrideRecord> = {}): EstimateOverrideRecord {
+  return {
+    projectId: "p1",
+    field: o.field ?? "fee",
+    computedValue: o.computedValue ?? 1000,
+    overrideValue: o.overrideValue !== undefined ? o.overrideValue : 1200,
+    reason: o.reason ?? "test reason",
+    createdBy: o.createdBy ?? "user-1",
+    createdAt: o.createdAt ?? "2026-06-09T12:00:00.000Z",
+    ...o,
+  };
+}
+
+describe("buildFlagsModel — 5c worklists + audit log", () => {
+  it("collects only needsReview rows into the needs-review worklist (with carried qty)", () => {
+    const rows = [
+      makeRow({ id: "ok", needsReview: false }),
+      makeRow({ id: "flag1", needsReview: true, matchedQty: 42, uom: "EA" }),
+      makeRow({ id: "flag2", needsReview: true }),
+    ];
+    const model = buildFlagsModel({ rows, overrideRecords: [] });
+    expect(model.needsReviewRows.map((r) => r.rowId)).toEqual(["flag1", "flag2"]);
+    expect(model.needsReviewRows[0].matchedQty).toBe(42);
+    expect(model.needsReviewRows[0].uom).toBe("EA");
+  });
+
+  it("collects unmapped rows that carry a classification (B-4), skipping mapped + blank ones", () => {
+    const rows = [
+      makeRow({ id: "mapped", isMapped: true, classification: "Concrete" }),
+      makeRow({ id: "unmapped", isMapped: false, classification: "Mystery item" }),
+      makeRow({ id: "blank", isMapped: false, classification: "   " }),
+    ];
+    const model = buildFlagsModel({ rows, overrideRecords: [] });
+    expect(model.unmappedRows.map((r) => r.rowId)).toEqual(["unmapped"]);
+  });
+
+  it("projects override records into the audit log, preserving newest-first order", () => {
+    const records = [
+      makeOverrideRecord({ field: "fee", createdAt: "2026-06-09T13:00:00.000Z" }),
+      makeOverrideRecord({ field: "bond", createdAt: "2026-06-09T12:00:00.000Z" }),
+    ];
+    const model = buildFlagsModel({ rows: [], overrideRecords: records });
+    expect(model.auditLog.map((e) => e.field)).toEqual(["fee", "bond"]);
+    expect(model.auditLog[0].fieldLabel).toBeTruthy();
+  });
+
+  it("classifies a null-overrideValue tombstone as a revert, a number as a set", () => {
+    const records = [
+      makeOverrideRecord({ field: "fee", overrideValue: 1200 }),
+      makeOverrideRecord({ field: "fee", overrideValue: null }),
+      makeOverrideRecord({ field: "fee", overrideValue: 0 }),
+    ];
+    const model = buildFlagsModel({ rows: [], overrideRecords: records });
+    expect(model.auditLog.map((e) => e.kind)).toEqual(["set", "revert", "set"]);
   });
 });

@@ -18,6 +18,7 @@ import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
 import { SelectCellInput } from "@/components/workspace/SelectCellInput";
+import { RowProvenanceGlyph } from "@/components/workspace/RowProvenanceGlyph";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
 import { Project, DivisionLayout } from "@/types/db";
@@ -897,7 +898,10 @@ export function useTakeoffWorkbook(
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
                   }}
                 >
-                  <span className="truncate">{row.itemId || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <RowProvenanceGlyph row={row} />
+                    <span className="truncate">{row.itemId || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
+                  </span>
                   {!row.isMapped && row.classification && suggestions.length > 0 && (isSelected || isCellHardLocked) && (
                     <div className="flex gap-1 shrink-0">
                       {suggestions.slice(0, 2).map((s) => (

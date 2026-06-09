@@ -12,6 +12,7 @@
 import type { Project } from "@/types/db";
 import { ESTIMATE_MODIFIERS } from "@/lib/constants";
 import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
+import type { ProcessedTakeoffRow, EstimateOverrideRecord } from "@/types";
 
 /** The three Trust Inspector tabs (Reconcile + Flags ship in later slices). */
 export type TrustTab = "trace" | "reconcile" | "flags";
@@ -32,6 +33,14 @@ export const ROUNDING_MODE_LABELS: Record<string, string> = {
 export function roundingModeLabel(mode: string | undefined): string {
   const key = mode ?? "dollar";
   return ROUNDING_MODE_LABELS[key] ?? ROUNDING_MODE_LABELS.dollar;
+}
+
+/** Friendly label for a TakeoffSummary override field (audit log + flags). */
+export function summaryFieldLabel(field: string): string {
+  if (field === "subtotal") return "Subtotal";
+  if (field === "totalEstimatedCost") return "Total Estimated Cost";
+  const mod = ESTIMATE_MODIFIERS.find((m) => m.key === field);
+  return mod ? mod.label : field;
 }
 
 /** Where a modifier rate came from: an explicit project value (✎) or the engine default (⚙). */
@@ -304,4 +313,89 @@ export function buildReconciliationModel({
     roundingMode,
     roundingLabel: roundingModeLabel(roundingMode),
   };
+}
+
+// ---------------------------------------------------------------------------
+// 5c — Flags view-model (Phase 5, slice 5): the needs-review worklist (INV-8),
+// the unmapped-import worklist (carries each row's quantity), and the append-only
+// override audit log read from `overrideRecords`.
+//
+// PURE: it filters/arranges rows + override records already loaded by the page;
+// no math, no DB. The Flags tab renders this directly; tests assert it in node.
+// ---------------------------------------------------------------------------
+
+/** A worklist row reference — enough to show the line and jump the grid to it. */
+export interface FlagsRowRef {
+  rowId: string;
+  itemId: string;
+  classification: string;
+  description: string;
+  /** Carried quantity (Phase 3 preserves it through ingestion). */
+  matchedQty: number;
+  uom: string;
+}
+
+/** A set substitutes a value; a revert (`overrideValue === null`) returns to computed. */
+export type FlagsAuditKind = "set" | "revert";
+
+/** One immutable audit entry, projected from an `EstimateOverrideRecord`. */
+export interface FlagsAuditEntry {
+  field: string;
+  /** Friendly field label (e.g. "Fee"). */
+  fieldLabel: string;
+  kind: FlagsAuditKind;
+  computedValue: number | null;
+  /** null on a revert tombstone. */
+  overrideValue: number | null;
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface FlagsModel {
+  /** Rows flagged needsReview (INV-8) — review before export. */
+  needsReviewRows: FlagsRowRef[];
+  /** Rows carrying a classification but no Procore code yet (B-4 recovery target). */
+  unmappedRows: FlagsRowRef[];
+  /** The full append-only override trail, newest first (order preserved). */
+  auditLog: FlagsAuditEntry[];
+}
+
+function toRowRef(r: ProcessedTakeoffRow): FlagsRowRef {
+  return {
+    rowId: r.id,
+    itemId: r.itemId,
+    classification: r.classification,
+    description: r.description,
+    matchedQty: r.matchedQty,
+    uom: r.uom,
+  };
+}
+
+/**
+ * Build the Flags view-model. `overrideRecords` MUST already be newest-first (the
+ * `useEstimateOverrides` hook returns them so); the log preserves that order.
+ */
+export function buildFlagsModel({
+  rows,
+  overrideRecords,
+}: {
+  rows: ProcessedTakeoffRow[];
+  overrideRecords: EstimateOverrideRecord[];
+}): FlagsModel {
+  const needsReviewRows = rows.filter((r) => r.needsReview).map(toRowRef);
+  const unmappedRows = rows
+    .filter((r) => !r.isMapped && r.classification.trim() !== "")
+    .map(toRowRef);
+  const auditLog: FlagsAuditEntry[] = overrideRecords.map((rec) => ({
+    field: rec.field,
+    fieldLabel: summaryFieldLabel(rec.field),
+    kind: rec.overrideValue === null ? "revert" : "set",
+    computedValue: rec.computedValue,
+    overrideValue: rec.overrideValue,
+    reason: rec.reason,
+    createdBy: rec.createdBy ?? null,
+    createdAt: rec.createdAt,
+  }));
+  return { needsReviewRows, unmappedRows, auditLog };
 }
