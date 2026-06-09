@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
-  FileDown,
   MapPin,
   Calendar,
   Menu
@@ -23,6 +22,7 @@ import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
 import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
+import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
@@ -53,6 +53,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   const squareFootage: number = project ? project.squareFootage : 0;
 
+  // Rate-card Phase B: the per-project point-in-time rate snapshot. Frozen at
+  // first save; layered over the live company card in the calc hooks below.
+  const { rateCardSnapshot, freezeRateCardSnapshot } = useRateCardSnapshot(
+    isLoaded,
+    projectEstimate?.rateCardSnapshot,
+  );
+
   // Step 2: Division 01 General Conditions
   const personnel = usePersonnelCalculations(
     projectDurationMonths,
@@ -60,6 +67,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     isLoaded,
     projectEstimate?.gcUtilization,
     projectEstimate?.gcEquipmentOverrides,
+    rateCardSnapshot,
   );
 
   // Step 3: Division 02 Site Operations
@@ -69,6 +77,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     isLoaded,
     projectEstimate?.siteOpsQuantities,
     projectEstimate?.siteOpsRates,
+    rateCardSnapshot,
   );
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
@@ -149,11 +158,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [filteredRows, subtotal, linkedDivisionTotals]
   );
 
-  // UI Metrics
-  const totalRows = rows.length;
-  const mappedCount = rows.filter((r) => r.isMapped).length;
-  const unmappedCount = totalRows - mappedCount;
-
   // ---------------------------------------------------------------------------
   // Persistence Orchestration
   // ---------------------------------------------------------------------------
@@ -168,7 +172,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     personnel.gcEquipmentOverrides,
     infrastructure.siteOperationsTotal,
     infrastructure.siteOpsQuantities,
-    infrastructure.siteOpsRates
+    infrastructure.siteOpsRates,
+    freezeRateCardSnapshot
   );
 
   // ---------------------------------------------------------------------------
@@ -298,6 +303,14 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
               <span>Size: {project.squareFootage.toLocaleString()} SF</span>
               <span className="text-slate-400 dark:text-slate-650">|</span>
               <span>Units: {project.unitCount.toLocaleString()}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span className="text-cyan-600 dark:text-cyan-400">Duration: {projectDurationMonths} mo</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span className="text-emerald-600 dark:text-emerald-400">${takeoffSummary.costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Start: {project.expectedStart || "—"}</span>
+              <span className="text-slate-400 dark:text-slate-650">|</span>
+              <span>Finish: {project.expectedFinish || "—"}</span>
               {saveStatus !== 'idle' && (
                 <>
                   <span className="text-slate-400 dark:text-slate-650">|</span>
@@ -325,34 +338,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-4 items-center">
-          {rows.length > 0 && (
-            <>
-              <button
-                onClick={() => handleExportExcelWorkbook()}
-                disabled={unmappedCount > 0 || isExportingExcel}
-                className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} />
-                {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
-              </button>
-              <button
-                onClick={handleExportExcel}
-                disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:shadow-md"
-              >
-                <FileDown size={18} /> Export Excel Payload
-              </button>
-              <button
-                onClick={() => handleExportProcore()}
-                disabled={unmappedCount > 0}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm px-5 py-3 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-emerald-500/10 dark:shadow-emerald-955/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <FileDown size={18} /> Export Procore Budget
-              </button>
-            </>
-          )}
-        </div>
       </header>
 
       {/* Export Error Banner */}
@@ -419,7 +404,6 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         <ErrorBoundary>
           <EstimateTable
             project={project}
-            projectDurationMonths={projectDurationMonths}
             squareFootage={squareFootage}
             unitCount={unitCount}
             rows={rows}
@@ -445,6 +429,10 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             handleDrop={handleDrop}
             handleUndo={handleUndo}
             handleRedo={handleRedo}
+            handleExportExcelWorkbook={handleExportExcelWorkbook}
+            handleExportExcel={handleExportExcel}
+            handleExportProcore={handleExportProcore}
+            isExportingExcel={isExportingExcel}
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}

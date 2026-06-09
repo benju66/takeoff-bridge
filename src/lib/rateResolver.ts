@@ -45,6 +45,30 @@ export function resolveCompanyRate(code: string, fallback: number): number {
   return rateCardMap?.get(code) ?? fallback;
 }
 
+/**
+ * Catalog-price alias of `resolveCompanyRate` for the STEP 4 unit-price call
+ * sites that resolve a row's price at birth (template init, CSV import, itemId
+ * change). Same single primed map — NO separate cache, NO different behavior;
+ * just a name that reads as "catalog unit price" rather than "GC/Site Ops rate"
+ * where the disjoint catalog `itemId` keys are looked up. (Rate-card slice 2,
+ * Phase B.) On a card miss / unprimed it returns `fallback` (the constants.ts /
+ * JSON default), so day-one behavior is byte-identical to the hard-coded read.
+ */
+export function resolveCatalogPrice(itemId: string, fallback: number): number {
+  return resolveCompanyRate(itemId, fallback);
+}
+
+/**
+ * Snapshot the currently-primed company card as a plain `Record<line_code,
+ * rate>` for freeze-at-first-save (Phase B). Returns a COPY (immune to later
+ * re-primes) or `null` if the card is unprimed — the caller then persists `{}`
+ * and freezes on a later save once the card is primed.
+ */
+export function snapshotRateCard(): Record<string, number> | null {
+  if (!rateCardMap) return null;
+  return Object.fromEntries(rateCardMap);
+}
+
 /** Test-only: clear the module-level cache. */
 export function resetRateCard(): void {
   rateCardMap = null;

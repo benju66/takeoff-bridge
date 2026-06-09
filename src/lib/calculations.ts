@@ -23,6 +23,19 @@ import {
 } from "./constants";
 
 // ---------------------------------------------------------------------------
+// Company-default rate injection (Rate-card slice 1, Phase B)
+// ---------------------------------------------------------------------------
+
+/**
+ * Injected company-default rate lookup. Calc stays PURE — it imports nothing
+ * from rateResolver; the caller (the calc hooks) composes the layered chain
+ * `projectSnapshot[code] ?? resolveCompanyRate(code, fallback)` and passes it
+ * in. The DEFAULT returns the caller's `fallback` (the constants default), so
+ * every existing caller/test is byte-identical and day-one totals never move.
+ */
+export type RateLookup = (code: string, fallback: number) => number;
+
+// ---------------------------------------------------------------------------
 // Date Utility
 // ---------------------------------------------------------------------------
 
@@ -81,6 +94,10 @@ export interface PersonnelCalcResult {
  *                        "qty" lines hold a quantity; "lumpSum" lines hold a dollar amount.
  * @param rateOverrides - Optional project-level hourly rate overrides keyed by StaffRoleConfig.key.
  *                        Falls back to STAFF_ROLE_DEFAULTS.defaultRate when a key is absent.
+ * @param rateLookup - Injected company-default rate resolver (Rate-card Phase B).
+ *                     Defaults to returning the fallback, so day-one behavior is
+ *                     byte-identical. Full staff chain: rateOverrides[role.key]
+ *                     ?? rateLookup(role.code, role.defaultRate).
  */
 export function computePersonnelCosts(
   durationMonths: number,
@@ -88,11 +105,12 @@ export function computePersonnelCosts(
   utilizations: Record<string, number>,
   equipmentOverrides: { dumpsters: number; toilets: number; electric: number },
   manualEntries: Record<string, number> = {},
-  rateOverrides?: Record<string, number>
+  rateOverrides?: Record<string, number>,
+  rateLookup: RateLookup = (_, fb) => fb
 ): PersonnelCalcResult {
   // Staff labour lines
   const staffLines = STAFF_ROLE_DEFAULTS.map((role) => {
-    const effectiveRate = rateOverrides?.[role.key] ?? role.defaultRate;
+    const effectiveRate = rateOverrides?.[role.key] ?? rateLookup(role.code, role.defaultRate);
     const utilization = (utilizations[role.key] || 0) / 100;
     const qty = durationMonths * HOURS_PER_MONTH * utilization;
     const total = qty * effectiveRate;
@@ -110,8 +128,9 @@ export function computePersonnelCosts(
     } else {
       qty = durationMonths;
     }
-    const total = qty * expense.rate;
-    return { code: expense.code, procoreCode: expense.procoreCode, costType: expense.costType, desc: expense.description, unit: expense.unit, rate: expense.rate, qty, total };
+    const rate = rateLookup(expense.code, expense.rate);
+    const total = qty * rate;
+    return { code: expense.code, procoreCode: expense.procoreCode, costType: expense.costType, desc: expense.description, unit: expense.unit, rate, qty, total };
   });
 
   // Equipment lines (user-entered fixed values) — carried as mapped lines so
@@ -129,8 +148,10 @@ export function computePersonnelCosts(
     const value = manualEntries[cfg.key] ?? 0;
     const isQty = cfg.entry === "qty";
     const qty = isQty ? value : value > 0 ? 1 : 0;
-    const rate = isQty ? (cfg.rate ?? 0) : value;
-    const total = isQty ? value * (cfg.rate ?? 0) : value;
+    // qty lines source their unit rate from the card (fallback = constants);
+    // lumpSum lines carry the estimator-typed dollar amount (no card entry).
+    const rate = isQty ? rateLookup(cfg.code, cfg.rate ?? 0) : value;
+    const total = isQty ? value * rate : value;
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
@@ -164,11 +185,13 @@ export function computeSiteOperations(
   durationMonths: number,
   squareFootage: number,
   quantities: Record<string, number>,
-  rates: Record<string, number>
+  rates: Record<string, number>,
+  rateLookup: RateLookup = (_, fb) => fb
 ): SiteOpsCalcResult {
   const dynamicLines = SITE_OPS_DYNAMIC_DEFAULTS.map((cfg) => {
     const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
-    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate: cfg.rate, qty, total: qty * cfg.rate };
+    const rate = rateLookup(cfg.code, cfg.rate);
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
   });
 
   const manualLines = SITE_OPS_MANUAL_DEFAULTS.map((cfg) => {
@@ -183,7 +206,8 @@ export function computeSiteOperations(
       rate = rates[cfg.key] ?? 0; // estimator-typed rate (soil borings)
     } else {
       qty = value;
-      rate = cfg.rate ?? 0;
+      // qty lines source their unit rate from the card (fallback = constants).
+      rate = rateLookup(cfg.code, cfg.rate ?? 0);
     }
     const total = cfg.entry === "lumpSum" ? value : qty * rate;
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };

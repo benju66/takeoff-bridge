@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, Grid } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -28,7 +28,6 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 
 interface EstimateTableProps {
   project: Project;
-  projectDurationMonths: number;
   squareFootage: number;
   unitCount: number;
 
@@ -59,6 +58,12 @@ interface EstimateTableProps {
   handleUndo: () => void;
   handleRedo: () => void;
 
+  // Export actions (relocated from the page header into the workbook I/O bar)
+  handleExportExcelWorkbook: () => void;
+  handleExportExcel: () => void;
+  handleExportProcore: () => void;
+  isExportingExcel: boolean;
+
   // Summary data
   takeoffSummary: TakeoffSummary;
   divisionBreakdown: DivisionAggregation[];
@@ -87,7 +92,6 @@ interface EstimateTableProps {
 
 export function EstimateTable({
   project,
-  projectDurationMonths,
   squareFootage,
   unitCount,
   rows,
@@ -112,6 +116,10 @@ export function EstimateTable({
   handleDrop,
   handleUndo,
   handleRedo,
+  handleExportExcelWorkbook,
+  handleExportExcel,
+  handleExportProcore,
+  isExportingExcel,
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
@@ -178,6 +186,48 @@ export function EstimateTable({
   // ---------------------------------------------------------------------------
   const [collapsedDivisions, setCollapsedDivisions] = React.useState<Record<string, boolean>>({});
   const tableRows = table.getRowModel().rows;
+
+  // Analytics drawer collapse — read-only block, remembered per browser so it stays
+  // out of the way once dismissed (single-company tool → one fixed key, no per-project state).
+  const [analyticsCollapsed, setAnalyticsCollapsed] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("tb.estimate.analyticsCollapsed") === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem("tb.estimate.analyticsCollapsed", analyticsCollapsed ? "1" : "0");
+  }, [analyticsCollapsed]);
+
+  // Data I/O bar collapse — remembered per browser, same pattern as the analytics drawer.
+  const [ioBarCollapsed, setIoBarCollapsed] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("tb.estimate.ioBarCollapsed") === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem("tb.estimate.ioBarCollapsed", ioBarCollapsed ? "1" : "0");
+  }, [ioBarCollapsed]);
+
+  // Unmapped rows block every export path; surfaced as a tooltip on the disabled controls.
+  const unmappedCount = useMemo(() => rows.filter((r) => !r.isMapped).length, [rows]);
+  const exportDisabledReason = unmappedCount > 0 ? `${unmappedCount} unmapped row(s) block export` : undefined;
+
+  // "Export ▾" dropdown — closes on outside click and Escape.
+  const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setExportMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [exportMenuOpen]);
 
   // Auto-expand division if user keyboard-navigates into a collapsed division
   useEffect(() => {
@@ -270,33 +320,46 @@ export function EstimateTable({
   return (
     <>
     <div className="space-y-6 animate-fade-in" {...(pendingImport ? { inert: "" } as Record<string, unknown> : {})}>
-      {/* Top Ingestion Module Tray */}
-      <div className="bg-card border border-grid-border text-card-foreground p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Left side: Compact Ingest / Drop Takeoff CSV box */}
-        <div
-          onDragEnter={handleDrag}
-          onDragOver={handleDrag}
-          onDragLeave={handleDrag}
-          onDrop={handleDrop}
-          className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
-            dragActive
-              ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]"
-              : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
-          }`}
+      {/* Workbook Data I/O Bar — collapsible: Import (in) left, Export (out) right */}
+      <div className="bg-card border border-grid-border text-card-foreground rounded-xl shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIoBarCollapsed((v) => !v)}
+          aria-expanded={!ioBarCollapsed}
+          className={`w-full flex items-center justify-between px-5 py-2.5 bg-background/80 dark:bg-background/50 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold hover:text-foreground transition-colors cursor-pointer select-none ${ioBarCollapsed ? "" : "border-b border-grid-border"}`}
         >
-          <label className="flex flex-col items-center justify-center cursor-pointer select-none">
-            <div className="flex items-center gap-2 text-foreground">
-              <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
-              <span className="text-xs font-bold uppercase tracking-wider">Import Takeoff Data</span>
-            </div>
-            <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
-            <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
-          </label>
-        </div>
+          <span className="flex items-center gap-2">
+            <span className="text-blue-600 dark:text-blue-400 w-3 text-center">{ioBarCollapsed ? "▶" : "▼"}</span>
+            [DATA I/O // IMPORT + EXPORT]
+          </span>
+          <span className="text-slate-400 dark:text-slate-500">{ioBarCollapsed ? "Show" : "Hide"}</span>
+        </button>
+        {!ioBarCollapsed && (
+        <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Left: Import — drop box + Append toggle (Append modifies the next import) */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
+          <div
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            className={`relative flex-1 max-w-md border border-dashed rounded-lg p-4 text-center transition-all ${
+              dragActive
+                ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 scale-[1.01]"
+                : "border-grid-border bg-background dark:bg-slate-900/40 hover:border-blue-500/50 dark:hover:border-blue-400/50"
+            }`}
+          >
+            <label className="flex flex-col items-center justify-center cursor-pointer select-none">
+              <div className="flex items-center gap-2 text-foreground">
+                <Upload size={16} className={dragActive ? "text-blue-500 animate-bounce" : "text-slate-600 dark:text-slate-400"} />
+                <span className="text-xs font-bold uppercase tracking-wider">Import Takeoff Data</span>
+              </div>
+              <span className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 uppercase tracking-wide">Drag here or click to browse</span>
+              <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+            </label>
+          </div>
 
-        {/* Right side: Append Data toggler, Undo Action, and Add Custom Column buttons */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none">
+          <div className="flex items-center gap-2 bg-background dark:bg-slate-900/40 border border-grid-border rounded-lg px-4 py-2.5 text-xs text-foreground transition-colors hover:border-blue-500/50 dark:hover:border-blue-400/50 select-none shrink-0">
             <input
               id="append-checkbox-step4"
               type="checkbox"
@@ -308,31 +371,56 @@ export function EstimateTable({
               Append Data
             </label>
           </div>
-
-          <button
-            onClick={handleAddCustomColumn}
-            type="button"
-            className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
-          >
-            + Add Custom Column
-          </button>
-
-          <button
-            onClick={handleUndo}
-            disabled={!canUndo}
-            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
-          >
-            <RotateCcw size={14} /> Undo ({undoStackSize})
-          </button>
-
-          <button
-            onClick={handleRedo}
-            disabled={!canRedo}
-            className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-4 py-2.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
-          >
-            <RotateCw size={14} /> Redo ({redoStackSize})
-          </button>
         </div>
+
+        {/* Right: Export — primary full-workbook download + secondary formats menu */}
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => handleExportExcelWorkbook()}
+              disabled={unmappedCount > 0 || isExportingExcel}
+              title={exportDisabledReason}
+              className="flex items-center gap-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white text-sm px-5 py-2.5 rounded-lg font-bold transition-all duration-300 shadow-lg shadow-blue-500/10 dark:shadow-blue-955/30 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <FileDown size={18} className={isExportingExcel ? "animate-spin" : ""} />
+              {isExportingExcel ? "Compiling Workbook..." : "Download Full Estimate Workbook (.xlsx)"}
+            </button>
+
+            <div className="relative" ref={exportMenuRef}>
+              <button
+                onClick={() => setExportMenuOpen((v) => !v)}
+                disabled={unmappedCount > 0}
+                title={exportDisabledReason}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+                className="flex items-center gap-1.5 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-4 py-2.5 rounded-lg font-bold transition-all duration-300 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer hover:shadow-md"
+              >
+                Export <ChevronDown size={16} className={`transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {exportMenuOpen && (
+                <div role="menu" className="absolute right-0 z-20 mt-2 w-56 bg-card border border-grid-border rounded-lg shadow-lg overflow-hidden animate-fade-in">
+                  <button
+                    role="menuitem"
+                    onClick={() => { setExportMenuOpen(false); handleExportExcel(); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-foreground text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+                  >
+                    <FileDown size={15} className="text-slate-500 dark:text-slate-400" /> Export Excel Payload
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => { setExportMenuOpen(false); handleExportProcore(); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 text-left hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20 border-t border-grid-border transition-colors cursor-pointer"
+                  >
+                    <FileDown size={15} /> Export Procore Budget
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </div>
+        )}
       </div>
 
       {/* Unmapped Classifications Warning */}
@@ -360,67 +448,6 @@ export function EstimateTable({
         </div>
       )}
 
-      {/* Spreadsheet Layout Matrix: Rows 2-4 Profile Header */}
-      <div className="bg-card border border-grid-border rounded-xl overflow-hidden shadow-sm font-sans text-xs text-card-foreground">
-        <div className="bg-background/80 dark:bg-background/50 border-b border-grid-border px-4 py-2.5 text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Grid size={16} className="text-blue-600 dark:text-blue-400" />
-            <span>STEP 4 - COMPANY ESTIMATE WORKBOOK</span>
-          </div>
-          <span className="text-[10px] bg-background dark:bg-slate-800 border border-grid-border px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 font-semibold">ROWS 2-4</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-grid-border">
-          {/* Row 2 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT NAME:</span>
-              <span className="text-foreground font-extrabold text-right truncate max-w-[200px]" title={project.name}>{project.name}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED START:</span>
-              <span className="text-foreground font-bold font-mono">{project.expectedStart || "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EXPECTED FINISH:</span>
-              <span className="text-foreground font-bold font-mono">{project.expectedFinish || "—"}</span>
-            </div>
-          </div>
-
-          {/* Row 3 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">LOCATION:</span>
-              <span className="text-foreground font-bold truncate max-w-[200px]" title={project.location}>{project.location}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">PROJECT SIZE (SF):</span>
-              <span className="text-foreground font-bold font-mono">{project.squareFootage.toLocaleString()} SF</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. DURATION:</span>
-              <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono">{projectDurationMonths} MONTHS</span>
-            </div>
-          </div>
-
-          {/* Row 4 info */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">BID DATE:</span>
-              <span className="text-foreground font-bold">{project.bidDate}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">TOTAL UNITS:</span>
-              <span className="text-foreground font-bold font-mono">{project.unitCount.toLocaleString()} UNITS</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">EST. COST / S.F.:</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-black font-mono">${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SF</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Stray dollars on linked division rows — excluded from all totals
           (gc-siteops Phase 5); surfaced here, never silently dropped. */}
       {strayLinkedRows && strayLinkedRows.length > 0 && (
@@ -441,9 +468,23 @@ export function EstimateTable({
         </div>
       )}
 
-      {/* Division Summary Analytics Drawer */}
+      {/* Division Summary Analytics Drawer — collapsible read-only block */}
       {rows.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border border-grid-border bg-card rounded-xl p-5 shadow-sm font-sans text-xs">
+        <div className="border border-grid-border bg-card rounded-xl shadow-sm font-sans text-xs overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setAnalyticsCollapsed((v) => !v)}
+            aria-expanded={!analyticsCollapsed}
+            className="w-full flex items-center justify-between px-5 py-2.5 bg-background/80 dark:bg-background/50 border-b border-grid-border text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold hover:text-foreground transition-colors cursor-pointer select-none"
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-blue-600 dark:text-blue-400 w-3 text-center">{analyticsCollapsed ? "▶" : "▼"}</span>
+              [SYS.ANALYTICS // DIVISIONAL + COST TYPE BREAKDOWN]
+            </span>
+            <span className="text-slate-400 dark:text-slate-500">{analyticsCollapsed ? "Show" : "Hide"}</span>
+          </button>
+          {!analyticsCollapsed && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-5">
           {/* Left Column: Divisional Breakdown */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-grid-border pb-2 text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-widest font-bold">
@@ -520,6 +561,8 @@ export function EstimateTable({
               })}
             </div>
           </div>
+          </div>
+          )}
         </div>
       )}
 
@@ -532,9 +575,37 @@ export function EstimateTable({
             </h3>
             <SearchBar globalFilter={globalFilter} setGlobalFilter={setGlobalFilter} />
           </div>
-          <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
-            Keyboard Engine Online | Use Arrow Keys ↑↓ to Navigate inputs
-          </span>
+
+          {/* Grid-manipulation controls — grouped with the table they act on */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans font-semibold uppercase tracking-wider hidden lg:inline">
+              ↑↓ navigate
+            </span>
+
+            <button
+              onClick={handleAddCustomColumn}
+              type="button"
+              className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+            >
+              + Add Custom Column
+            </button>
+
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+            >
+              <RotateCcw size={14} /> Undo ({undoStackSize})
+            </button>
+
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              className="inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/15 dark:hover:bg-amber-950/35 text-amber-600 dark:text-amber-500 disabled:text-slate-400 border border-grid-border disabled:border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer disabled:cursor-not-allowed select-none"
+            >
+              <RotateCw size={14} /> Redo ({redoStackSize})
+            </button>
+          </div>
         </div>
 
         <div ref={parentRef} tabIndex={-1} onKeyDown={handleGridKeyDown} className="overflow-x-auto overflow-y-auto border-t border-l border-grid-border grid-scroll outline-none" style={{ maxHeight: "70vh" }}>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computeSiteOperations, SiteOpsCalcResult } from "@/lib/calculations";
+import { computeSiteOperations, SiteOpsCalcResult, RateLookup } from "@/lib/calculations";
+import { resolveCompanyRate } from "@/lib/rateResolver";
 import { SITE_OPS_MANUAL_DEFAULTS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +70,10 @@ export function useInfrastructureCalculations(
   squareFootage: number,
   isLoaded: boolean,
   initialQuantities?: Record<string, number>,
-  initialRates?: Record<string, number>
+  initialRates?: Record<string, number>,
+  /** Frozen per-project rate snapshot (Phase B). Layered over the company card:
+   *  rate = projectSnapshot ?? companyCard ?? constants (qty/dynamic lines). */
+  rateCardSnapshot?: Record<string, number>
 ): UseInfrastructureCalculationsReturn {
   const [quantities, setQuantities] = useState<Record<string, number>>(() => quantitiesFromSnapshot(initialQuantities));
   const [rates, setRates] = useState<Record<string, number>>(() => ratesFromSnapshot(initialRates));
@@ -114,12 +118,18 @@ export function useInfrastructureCalculations(
 
   const quantitiesString = JSON.stringify(quantities);
   const ratesString = JSON.stringify(rates);
+  const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+
+  // Layered company-default lookup (Phase B): frozen project snapshot wins over
+  // the live company card; both fall through to the calc's constants fallback.
+  const rateLookup: RateLookup = (code, fallback) =>
+    rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
   // Compute via pure calculation layer
   const calcResult = useMemo(
-    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates),
+    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates, rateLookup),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, quantitiesString, ratesString]
+    [durationMonths, squareFootage, quantitiesString, ratesString, rateCardSnapshotString]
   );
 
   // Serializable persistence snapshots: legacy lines keep their original

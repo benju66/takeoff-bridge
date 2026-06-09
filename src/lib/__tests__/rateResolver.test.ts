@@ -3,6 +3,7 @@ import {
   primeRateCard,
   resolveCompanyRate,
   resetRateCard,
+  snapshotRateCard,
 } from "../rateResolver";
 import type { RateCardEntry } from "@/types/db";
 
@@ -59,5 +60,27 @@ describe("Rate-card slice 1 — resolveCompanyRate chokepoint", () => {
     primeRateCard([entry("01-0310.001", 250, "manual")]);
     resetRateCard();
     expect(resolveCompanyRate("01-0310.001", 175)).toBe(175);
+  });
+});
+
+describe("Rate-card slice 1 — snapshotRateCard (freeze-at-first-save, Phase B)", () => {
+  beforeEach(() => resetRateCard());
+  afterEach(() => resetRateCard());
+
+  it("returns null when the card is unprimed", () => {
+    expect(snapshotRateCard()).toBeNull();
+  });
+
+  it("returns a plain record of the primed card", () => {
+    primeRateCard([entry("01-0310.001", 175), entry("01-0320.001", 135)]);
+    expect(snapshotRateCard()).toEqual({ "01-0310.001": 175, "01-0320.001": 135 });
+  });
+
+  it("returns a COPY immune to a later re-prime (the frozen snapshot)", () => {
+    primeRateCard([entry("01-0310.001", 175)]);
+    const frozen = snapshotRateCard();
+    // Admin edits the card afterwards (Phase C) and the workspace re-primes.
+    primeRateCard([entry("01-0310.001", 999, "manual")]);
+    expect(frozen).toEqual({ "01-0310.001": 175 });
   });
 });

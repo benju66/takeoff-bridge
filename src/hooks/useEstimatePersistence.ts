@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ProcessedTakeoffRow } from "@/types";
-import { saveProjectEstimate, saveEstimateLineItems } from "@/lib/db";
+import { saveEstimate } from "@/lib/db";
 import { TakeoffSummary } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
@@ -15,10 +15,11 @@ export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
  * Central orchestration of the auto-persist pipeline.
  * Consumes outputs from all domain hooks and writes to Supabase:
  *
- * Operation A: UPSERT project_estimates (totals/markups — single row)
- * Operation B: RPC save_estimate_line_items (atomic DELETE + INSERT)
+ * Single atomic write: the save_estimate RPC upserts project_estimates
+ * (totals/markups) AND replaces estimate_line_items (DELETE + INSERT) inside
+ * one PostgreSQL transaction — they commit together or not at all.
  *
- * Both operations are debounced (1500ms) with overlap prevention via
+ * The write is debounced (1500ms) with overlap prevention via
  * isSavingRef and a dirtyRef re-queue mechanism.
  *
  * NOTE: columnDefs and lockedCells are persisted separately inside
@@ -35,7 +36,10 @@ export function useEstimatePersistence(
   gcEquipmentOverrides: Record<string, number>,
   siteOperationsTotal: number,
   siteOpsQuantities: Record<string, number>,
-  siteOpsRates: Record<string, number>
+  siteOpsRates: Record<string, number>,
+  /** Returns (and freezes-at-first-save) the per-project rate snapshot to persist
+   *  (Rate-card Phase B). Idempotent once frozen — see useRateCardSnapshot. */
+  freezeRateCardSnapshot: () => Record<string, number>
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -78,10 +82,12 @@ export function useEstimatePersistence(
     }
 
     try {
-      // Operation A: Upsert totals/markups (no items)
-      // Operation B: Atomic RPC line item save
-      await Promise.all([
-        saveProjectEstimate({
+      // Single atomic write: totals/markups AND line items commit together in
+      // one PostgreSQL transaction (save_estimate RPC). This replaces the prior
+      // two-call Promise.all, which could half-commit — leaving stored header
+      // totals diverged from their backing line items (audit #4).
+      await saveEstimate(
+        {
           projectId,
           subtotal: takeoffSummary.subtotal,
           constructionContingency: takeoffSummary.constructionContingency,
@@ -98,9 +104,12 @@ export function useEstimatePersistence(
           siteOperationsTotal,
           siteOpsQuantities,
           siteOpsRates,
-        }),
-        saveEstimateLineItems(projectId, rows),
-      ]);
+          // Freeze-at-first-save: captures the live card on a new project's first
+          // save, returns the existing frozen snapshot thereafter (idempotent).
+          rateCardSnapshot: freezeRateCardSnapshot(),
+        },
+        rows
+      );
 
       if (!mountedRef.current) return;
       setSaveStatus('saved');

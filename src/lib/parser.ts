@@ -1,6 +1,7 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
 import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
 import { resolveProcoreCode } from "./costCodeResolver";
+import { resolveCatalogPrice } from "./rateResolver";
 import { evaluateDataFidelity } from "./calculations";
 import { normalizeUom } from "./uom-aliases";
 
@@ -38,14 +39,77 @@ function normalizeRowKeys(
   return map;
 }
 
+/** Result of parsing a US-format number string. */
+export interface ParsedNumber {
+  /** Parsed numeric value. 0 when `ambiguous` (never a guessed positive). */
+  value: number;
+  /** True when the input could not be confidently parsed as a US-format number. */
+  ambiguous: boolean;
+}
+
 /**
- * Parses raw string numbers (handling formatting like commas, units, spaces) safely to floats.
+ * Sign-safe US-format number parser (Phase 3 / INV-8, silent-escape register #5).
+ *
+ * US format = comma thousands, dot decimal. Negatives may appear as accounting parentheses
+ * `"(1,234.50)"` or a leading/trailing minus (`"-1,234.50"`, `"1,234.50-"`) and are honored
+ * as negative — a credit must REDUCE the subtotal, never silently add to it.
+ *
+ * Anything that cannot be read confidently as US format (European decimal-comma `"1.234,50"`,
+ * multiple separators, malformed thousands grouping) is reported `ambiguous: true` with
+ * `value: 0` rather than coerced to a wrong positive number. The caller routes ambiguous rows
+ * to the override interface instead of guessing (AGENTS.md: No AI Autonomy Over Financials).
+ *
+ * A plain JS number passes through unchanged; empty / null / undefined → `{ 0, false }`.
  */
-function parseCleanFloat(val: unknown): number {
-  if (val === undefined || val === null || val === "") return 0;
-  const cleaned = String(val).replace(/[^0-9.-]/g, '');
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? 0 : parsed;
+export function parseUsNumber(val: unknown): ParsedNumber {
+  if (val === undefined || val === null || val === "") return { value: 0, ambiguous: false };
+  if (typeof val === "number") {
+    return Number.isFinite(val) ? { value: val, ambiguous: false } : { value: 0, ambiguous: true };
+  }
+
+  let s = String(val).trim();
+  if (s === "") return { value: 0, ambiguous: false };
+
+  // --- sign detection (strip at most one of each indicator) ----------------
+  let negative = false;
+  if (s.startsWith("(") && s.endsWith(")")) {            // accounting parentheses
+    negative = true;
+    s = s.slice(1, -1).trim();
+  }
+  if (s.startsWith("-")) {                               // leading minus
+    negative = true;
+    s = s.slice(1).trim();
+  }
+  if (s.endsWith("-")) {                                 // trailing minus (parseFloat drops this today)
+    negative = true;
+    s = s.slice(0, -1).trim();
+  }
+
+  if (s === "") return { value: 0, ambiguous: true };    // a lone sign/paren, no digits
+  if (/[()\-]/.test(s)) return { value: 0, ambiguous: true }; // leftover sign/paren ⇒ malformed
+
+  // --- magnitude validation (US format) ------------------------------------
+  const lastDot = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  // A comma AFTER the last dot is European decimal-comma ("1.234,50") ⇒ ambiguous.
+  if (lastDot !== -1 && lastComma !== -1 && lastComma > lastDot) return { value: 0, ambiguous: true };
+  // More than one dot ⇒ European thousands ("1.234.50") ⇒ ambiguous.
+  if ((s.match(/\./g) || []).length > 1) return { value: 0, ambiguous: true };
+
+  // Commas (if any) must form valid US thousands groups; otherwise plain digits + optional decimal.
+  const usGrouped = /^\d{1,3}(,\d{3})+(\.\d+)?$/;        // 1,234 | 1,234.50 | 1,234,567
+  const usPlain = /^(\d+(\.\d+)?|\.\d+)$/;               // 1234 | 1234.50 | .5
+  if (s.includes(",")) {
+    if (!usGrouped.test(s)) return { value: 0, ambiguous: true };
+  } else if (!usPlain.test(s)) {
+    return { value: 0, ambiguous: true };
+  }
+
+  const magnitude = parseFloat(s.replace(/,/g, ""));
+  if (Number.isNaN(magnitude)) return { value: 0, ambiguous: true };
+
+  // Guard against signed zero (-0) so a parenthesized/negated zero compares as plain 0.
+  return { value: negative && magnitude !== 0 ? -magnitude : magnitude, ambiguous: false };
 }
 
 // Module-level — built once at import time since INITIAL_MAPPING_REGISTRY is a static constant
@@ -99,20 +163,35 @@ export function parseTogalCSV(
 
     const masterItem = itemId ? ESTIMATE_ITEMS_MASTER[itemId] : null;
 
-    // Normalize Togal wide columns into accessible lookup blocks with clean float parsing
+    // Normalize Togal wide columns into accessible lookup blocks. parseUsNumber honors
+    // accounting/trailing-minus negatives and FLAGS ambiguous numbers instead of guessing
+    // (Phase 3 / INV-8 #5). An ambiguous value comes back as 0 so no wrong number flows
+    // into a total; we keep its ambiguity flag parallel to pick it up for the chosen column.
+    const m1 = parseUsNumber(normalizedRow.get("quantity 1"));
+    const m2 = parseUsNumber(normalizedRow.get("quantity 2"));
+    const m3 = parseUsNumber(normalizedRow.get("quantity 3"));
     const measurements = [
-      { qty: parseCleanFloat(normalizedRow.get("quantity 1")), uom: normalizeUom(String(normalizedRow.get("quantity1 uom") || "SF")) },
-      { qty: parseCleanFloat(normalizedRow.get("quantity 2")), uom: normalizeUom(String(normalizedRow.get("quantity2 uom") || "")) },
-      { qty: parseCleanFloat(normalizedRow.get("quantity 3")), uom: normalizeUom(String(normalizedRow.get("quantity3 uom") || "")) },
+      { qty: m1.value, uom: normalizeUom(String(normalizedRow.get("quantity1 uom") || "SF")) },
+      { qty: m2.value, uom: normalizeUom(String(normalizedRow.get("quantity2 uom") || "")) },
+      { qty: m3.value, uom: normalizeUom(String(normalizedRow.get("quantity3 uom") || "")) },
     ];
+    const ambiguousFlags = [m1.ambiguous, m2.ambiguous, m3.ambiguous];
 
     const targetUom = masterItem?.targetUom || "SF";
-    const matchedMeasurement = measurements.find(
+    const matchedIdx = measurements.findIndex(
       (m) => m.uom?.trim().toUpperCase() === targetUom.trim().toUpperCase()
-    ) || measurements[0];
+    );
+    const chosenIdx = matchedIdx !== -1 ? matchedIdx : 0;
+    const matchedMeasurement = measurements[chosenIdx];
 
+    // Fail loud, never guess: if the CHOSEN quantity was ambiguous, do not trust it — keep
+    // qty 0 (matchedMeasurement.qty is already 0) and flag the row for human review.
+    const needsReview = ambiguousFlags[chosenIdx];
     const qty = matchedMeasurement?.qty || 0;
-    const price = masterItem?.defaultUnitPrice || 0;
+    // Company-default layer (card rate or the catalog default). Keep the `|| 0`
+    // fallback so an unmapped/missing itemId still resolves to 0 exactly as before
+    // — the resolver returns the fallback on a card miss / when unprimed.
+    const price = resolveCatalogPrice(itemId, masterItem?.defaultUnitPrice || 0);
     const total = qty * price;
     const dataFidelity = evaluateDataFidelity(qty, targetUom, total, threshold, keywords);
 
@@ -136,6 +215,7 @@ export function parseTogalCSV(
       dataFidelity,
       embeddedCode: embeddedCode || undefined,
       source: 'csv_import' as const,
+      needsReview: needsReview || undefined,
     };
   }).filter((r): r is ProcessedTakeoffRow => r !== null);
 }

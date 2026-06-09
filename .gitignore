@@ -46,5 +46,11 @@ next-env.d.ts
 # scratch / forensic throwaway files (root-level only, not docs/)
 /scratch_*
 
+# golden reproduction fixtures — real bid files (confidential pricing).
+# The folder + its .gitkeep/README are tracked; every workbook in it is NOT.
+/fixtures/golden/*
+!/fixtures/golden/.gitkeep
+!/fixtures/golden/README.md
+
 # python recovery scripts
 /*.py

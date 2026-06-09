@@ -1,0 +1,60 @@
+-- ═════════════════════════════════════════════════════════════════════
+-- Migration record: schema-drift reconciliation — 2026-06-08
+-- ═════════════════════════════════════════════════════════════════════
+-- Reconciles supabase_schema.sql (the canonical source of truth, per AGENTS.md)
+-- with the deployed database (project nefvkrhbbkiqnpeabyqz).
+--
+-- THIS FILE APPLIES NO LIVE DDL. It is a FILE-ONLY reconciliation: the live DB
+-- was already correct; supabase_schema.sql had drifted and was rewritten to
+-- match deployed reality. Recorded here for the audit trail, mirroring the
+-- supabase_migration_*.sql convention.
+--
+-- ── The drift (found by a full read-only pg_catalog/information_schema diff) ──
+-- A complete diff of every category (tables, columns, types, defaults,
+-- nullability, PK/FK/UNIQUE/CHECK constraints, indexes, enums, RLS-enabled
+-- flags, RLS policies, functions, triggers, function grants, storage bucket +
+-- policy) found EXACTLY ONE logical divergence:
+--
+--   * supabase_schema.sql DEFINED a helper function public.get_auth_tenant_id()
+--     (SECURITY DEFINER) and REFERENCED it in 8 tenant-isolation policies.
+--   * The live DB has NO such function. Its 8 deployed tenant policies INLINE
+--     the lookup as (SELECT tenant_id FROM users WHERE id = auth.uid()).
+--
+-- This is the failure the 2026-06-08 security batch hit
+-- ("function public.get_auth_tenant_id() does not exist"). The two forms are
+-- functionally equivalent; the inline form is safe (no RLS recursion — the
+-- users table's own users_select_policy is USING(true)). NO security gap.
+--
+-- The 8 affected policies: tenants_isolation_policy, projects_tenant_policy,
+-- estimates_tenant_policy, line_items_tenant_policy, column_defs_tenant_policy,
+-- locked_cells_tenant_policy, registries_tenant_policy,
+-- global_registry_tenant_policy.
+--
+-- Everything else in the file already matched live (14 tables, all columns/
+-- types/defaults/nullability, all constraints + indexes, the data_fidelity_type
+-- enum, RLS on all tables, the on_auth_user_created trigger, handle_new_user's
+-- REVOKE grants, and the private 'templates' storage bucket + select policy).
+-- The 4 newest policies (classification_history + estimate_snapshots select/
+-- insert from commit ac6538e) were already in the inline form in both file and
+-- live. (Benign, NOT changed: live's physical column ORDER differs in projects /
+-- estimate_line_items / project_estimates from incremental ALTERs — the logical
+-- column set is identical and the app selects by name.)
+--
+-- ── Resolution (user-chosen direction: make the FILE match the DB) ──
+-- supabase_schema.sql was edited (no live write):
+--   1. Deleted the public.get_auth_tenant_id() definition block.
+--   2. Rewrote the 8 policies above to the deployed inline
+--      (SELECT tenant_id FROM users WHERE id = auth.uid()) form.
+--   3. Updated the header + inline comments to document the deployed form.
+--
+-- ── Reference only: idempotent SQL a FRESH rebuild from the file would run ──
+-- (Shown for review; NOT executed against the live DB, which already matches.)
+--
+--   -- No get_auth_tenant_id() function is created.
+--   DROP POLICY IF EXISTS "projects_tenant_policy" ON projects;
+--   CREATE POLICY "projects_tenant_policy" ON projects
+--     FOR ALL TO authenticated
+--     USING (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()))
+--     WITH CHECK (tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid()));
+--   -- ... and the analogous EXISTS-subquery rewrite for the other 7 policies.
+-- ═════════════════════════════════════════════════════════════════════

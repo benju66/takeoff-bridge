@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import Papa from "papaparse";
 import { ProcessedTakeoffRow, TogalRowPayload, WorkbookCommand } from "@/types";
 import { parseTogalCSV } from "@/lib/parser";
-import { evaluateDataFidelity } from "@/lib/calculations";
+import { computeMergeResult } from "@/lib/mergeTakeoff";
 import { parseTogalXLSX, XlsxParseResult } from "@/lib/xlsx-reader";
 import { detectArchParams, ArchParamSuggestion } from "@/lib/archParamDetector";
 import { saveProjectRegistry, recordClassificationResolution, createEstimateSnapshot } from "@/lib/db";
@@ -116,92 +116,17 @@ export function useFileIngestion(
       ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
       : ["LS", "SUM", "ALLW", "LUMP"];
 
-    const unmappedList: string[] = [];
-    parsed.forEach((parsedRow) => {
-      if (!parsedRow.itemId) {
-        if (!unmappedList.includes(parsedRow.classification)) {
-          unmappedList.push(parsedRow.classification);
-        }
-      }
-    });
-
-    // Capture prevRowStates before mutation
     const currentRows = rowsRef.current;
-    const prevRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }> = [];
-    for (const r of currentRows) {
-      prevRowStates.push({
-        rowId: r.id,
-        fields: {
-          matchedQty: r.matchedQty,
-          total: r.total,
-          classification: r.classification,
-          rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
-          isMapped: r.isMapped,
-          dataFidelity: r.dataFidelity,
-          source: r.source || 'template',
-        },
-      });
-    }
     const prevUnmapped = [...unmappedRef.current];
 
-    // Compute next state
-    const updatedRows = currentRows.map((r) => {
-      if (!appendData) {
-        return { 
-          ...r, 
-          matchedQty: 0, 
-          total: 0, 
-          classification: "", 
-          rawQuantities: [] as { qty: number; uom: string }[],
-          dataFidelity: 'discrete_unit' as const
-        };
-      }
-      return { ...r };
-    });
-
-    parsed.forEach((parsedRow) => {
-      if (!parsedRow.itemId) return;
-      const targetIdx = updatedRows.findIndex((r) => r.itemId === parsedRow.itemId);
-      if (targetIdx !== -1) {
-        updatedRows[targetIdx].matchedQty += parsedRow.matchedQty;
-        updatedRows[targetIdx].total = updatedRows[targetIdx].matchedQty * updatedRows[targetIdx].unitPrice;
-        updatedRows[targetIdx].classification = parsedRow.classification;
-        updatedRows[targetIdx].rawQuantities = parsedRow.rawQuantities;
-        updatedRows[targetIdx].dataFidelity = evaluateDataFidelity(
-          updatedRows[targetIdx].matchedQty,
-          updatedRows[targetIdx].uom,
-          updatedRows[targetIdx].total,
-          threshold,
-          keywords
-        );
-      }
-    });
-
-    // Capture nextRowStates after mutation
-    const nextRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }> = [];
-    for (const r of updatedRows) {
-      nextRowStates.push({
-        rowId: r.id,
-        fields: {
-          matchedQty: r.matchedQty,
-          total: r.total,
-          classification: r.classification,
-          rawQuantities: r.rawQuantities.map((rq) => ({ ...rq })),
-          isMapped: r.isMapped,
-          dataFidelity: r.dataFidelity,
-          source: r.source || 'csv_import',
-        },
-      });
-    }
+    // Pure merge: builds the forward grid + the single undoable command (incl. off-template
+    // appended rows). The hook owns the impure parts: command push, snapshot, training, setters.
+    const { updatedRows, command, unmappedList } = computeMergeResult(
+      currentRows, parsed, prevUnmapped, appendData, threshold, keywords
+    );
 
     // pushCommand BEFORE state setters (AGENTS.md guardrail)
-    commandHistory.pushCommand({
-      type: "MERGE_TAKEOFF_DATA",
-      prevRowStates,
-      nextRowStates,
-      prevUnmapped,
-      nextUnmapped: unmappedList,
-    });
+    commandHistory.pushCommand(command);
 
     // Fire-and-forget: create pre-import snapshot before applying merge
     createEstimateSnapshot(projectId, currentRows, 'pre_import', 'Before CSV import')
