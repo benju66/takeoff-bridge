@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -15,7 +15,8 @@ import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
-import type { ReconciliationModel, TrustTab } from "@/lib/trustInspector";
+import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
+import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
 import { FilterableColumnHeader } from "./FilterableColumnHeader";
@@ -28,11 +29,33 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 // Takeoff Workbook Spreadsheet Matrix + Summary Analytics
 // ---------------------------------------------------------------------------
 
+const fmtUSD = (n: number) =>
+  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** A locked summary total cell: the formatted value plus a 🔍 trace affordance
- *  that opens the Trust Inspector focused on this value (Phase 5). */
-function SummaryTraceCell({ valueStr, onTrace }: { valueStr: string; onTrace: () => void }) {
+ *  that opens the Trust Inspector focused on this value (Phase 5). When the field is
+ *  overridden, a ⚑ marker is shown with the computed→override pair on hover (5c.2). */
+function SummaryTraceCell({
+  valueStr,
+  onTrace,
+  overridden,
+}: {
+  valueStr: string;
+  onTrace: () => void;
+  overridden?: OverridePair;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5 justify-center">
+      {overridden && (
+        // Computed value is never hidden — surfaced on hover (the trace shows it inline too).
+        <span
+          className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
+          title={`Overridden — computed ${fmtUSD(overridden.computedValue)} → override ${fmtUSD(overridden.overrideValue)}`}
+          aria-label="Overridden value"
+        >
+          <Flag size={11} />
+        </span>
+      )}
       <span>{valueStr}</span>
       <button
         type="button"
@@ -129,6 +152,14 @@ interface EstimateTableProps {
    *  status-bar chip and the Reconcile tab. */
   reconciliation: ReconciliationModel;
 
+  /** True when a filter/search is active — the on-screen summary is then a partial
+   *  (visible-rows-only) view, so the override action is disabled (Amendment F). */
+  isFiltered: boolean;
+
+  /** Records an override set/revert (slice 4). Resolves after the DB write + refresh;
+   *  rejects on failure. Threaded into the Trust Inspector's override editor. */
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
+
   /** Linked division rows carrying stray typed dollars — excluded from all
    *  totals (gc-siteops Phase 5 trap closure); surfaced, never silently dropped. */
   strayLinkedRows?: { itemId: string; description: string; amount: number }[];
@@ -185,6 +216,8 @@ export function EstimateTable({
   costTypeBreakdown,
   linkedDivisionTotals,
   reconciliation,
+  isFiltered,
+  onSaveOverride,
   strayLinkedRows,
   selection,
   globalFilter,
@@ -947,7 +980,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
                     else if (column.id === "description") { content = "Estimate Subtotal (incl. GC + Site Ops)"; alignClass = "text-left font-sans"; }
-                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("subtotal")} />; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("subtotal")} overridden={takeoffSummary.overrides?.subtotal} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
@@ -974,7 +1007,7 @@ export function EstimateTable({
                         else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
                         else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
                         else if (column.id === "unitPrice") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                        else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} />; alignClass = "text-center text-foreground font-bold font-mono"; }
+                        else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} overridden={takeoffSummary.overrides?.[mod.key]} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                         else if (column.id === "costPerUnit") { content = `$${(modValue / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         else if (column.id === "costPerSf") { content = `$${(modValue / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
@@ -991,7 +1024,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold font-mono"; }
                     else if (column.id === "description") { content = "Total Estimated Cost"; alignClass = "text-left uppercase tracking-wider font-sans"; }
-                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("totalEstimatedCost")} />; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("totalEstimatedCost")} overridden={takeoffSummary.overrides?.totalEstimatedCost} />; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
@@ -1071,6 +1104,8 @@ export function EstimateTable({
         takeoffRowCount={takeoffRowCount}
         reconciliation={reconciliation}
         onViewTakeoffRows={handleViewTakeoffRows}
+        isFiltered={isFiltered}
+        onSaveOverride={onSaveOverride}
       />
     </>
   );

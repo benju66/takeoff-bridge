@@ -1,10 +1,17 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info } from "lucide-react";
+import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock } from "lucide-react";
 import type { Project } from "@/types/db";
 import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
-import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel } from "@/lib/trustInspector";
+import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair } from "@/lib/trustInspector";
+import {
+  selectPristineComputedValue,
+  validateOverrideInput,
+  buildSetPayload,
+  buildRevertPayload,
+  OverridePayload,
+} from "@/lib/overrideSetter";
 
 // ---------------------------------------------------------------------------
 // Trust Inspector — the glass-box surface (Phase 5).
@@ -39,6 +46,19 @@ interface TrustInspectorProps {
   reconciliation?: ReconciliationModel;
   /** [view rows] — reveal/scroll the grid to the contributing takeoff rows. */
   onViewTakeoffRows: () => void;
+  // --- Override setter (slice 4) ------------------------------------------
+  /**
+   * True when a filter/search is active. The on-screen `summary` then reflects only the
+   * visible rows (Amendment F), so the override action is DISABLED — recording against a
+   * filtered subtotal would capture a partial number. When false, `summary` is the full
+   * unfiltered summary and the pristine computed value is provably correct.
+   */
+  isFiltered: boolean;
+  /**
+   * Records a set/revert: resolves AFTER the DB write + `refresh()` is requested, rejects on
+   * failure (recordEstimateOverride THROWS). Absent → the editor renders no write path.
+   */
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
 }
 
 export function TrustInspector({
@@ -52,6 +72,8 @@ export function TrustInspector({
   takeoffRowCount,
   reconciliation,
   onViewTakeoffRows,
+  isFiltered,
+  onSaveOverride,
 }: TrustInspectorProps) {
   // Each (re)open remounts this component (parent bumps a `key` per open), so the
   // tab starts on the requested tab and the layout starts as the slide-over — a 🔍
@@ -137,7 +159,13 @@ export function TrustInspector({
   const body = (
     <div className="flex-1 overflow-y-auto grid-scroll">
       {tab === "trace" && (
-        <TraceTab model={traceModel} onViewTakeoffRows={onViewTakeoffRows} />
+        <TraceTab
+          model={traceModel}
+          summary={summary}
+          isFiltered={isFiltered}
+          onSaveOverride={onSaveOverride}
+          onViewTakeoffRows={onViewTakeoffRows}
+        />
       )}
       {tab === "reconcile" && (
         reconciliation ? (
@@ -188,7 +216,19 @@ export function TrustInspector({
 // Trace tab (5a) — decomposition tree
 // ---------------------------------------------------------------------------
 
-function TraceTab({ model, onViewTakeoffRows }: { model: TraceModel; onViewTakeoffRows: () => void }) {
+function TraceTab({
+  model,
+  summary,
+  isFiltered,
+  onSaveOverride,
+  onViewTakeoffRows,
+}: {
+  model: TraceModel;
+  summary: TakeoffSummary;
+  isFiltered: boolean;
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
+  onViewTakeoffRows: () => void;
+}) {
   const [linkedOpen, setLinkedOpen] = useState(false);
 
   return (
@@ -200,6 +240,10 @@ function TraceTab({ model, onViewTakeoffRows }: { model: TraceModel; onViewTakeo
         emphasis="total"
         focused={model.focusField === "totalEstimatedCost"}
         overridden={model.total.overridden}
+        field="totalEstimatedCost"
+        summary={summary}
+        isFiltered={isFiltered}
+        onSaveOverride={onSaveOverride}
       />
 
       <div className="border-l border-grid-border pl-3 space-y-2">
@@ -210,6 +254,10 @@ function TraceTab({ model, onViewTakeoffRows }: { model: TraceModel; onViewTakeo
           emphasis="subtotal"
           focused={model.focusField === "subtotal"}
           overridden={model.subtotal.overridden}
+          field="subtotal"
+          summary={summary}
+          isFiltered={isFiltered}
+          onSaveOverride={onSaveOverride}
         />
 
         {/* Subtotal decomposition */}
@@ -267,7 +315,14 @@ function TraceTab({ model, onViewTakeoffRows }: { model: TraceModel; onViewTakeo
 
         {/* Modifiers */}
         {model.modifiers.map((mod) => (
-          <ModifierRow key={mod.key} mod={mod} focused={model.focusField === mod.key} />
+          <ModifierRow
+            key={mod.key}
+            mod={mod}
+            focused={model.focusField === mod.key}
+            summary={summary}
+            isFiltered={isFiltered}
+            onSaveOverride={onSaveOverride}
+          />
         ))}
       </div>
 
@@ -438,7 +493,19 @@ function ReconLine({
   );
 }
 
-function ModifierRow({ mod, focused }: { mod: TraceModifierNode; focused: boolean }) {
+function ModifierRow({
+  mod,
+  focused,
+  summary,
+  isFiltered,
+  onSaveOverride,
+}: {
+  mod: TraceModifierNode;
+  focused: boolean;
+  summary: TakeoffSummary;
+  isFiltered: boolean;
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
+}) {
   return (
     <div
       className={`flex flex-col gap-0.5 rounded-md px-2 py-1 ${
@@ -465,6 +532,13 @@ function ModifierRow({ mod, focused }: { mod: TraceModifierNode; focused: boolea
           computed {fmtUSD(mod.overridden.computedValue)} → override {fmtUSD(mod.overridden.overrideValue)}
         </div>
       )}
+      <OverrideEditor
+        field={mod.key}
+        summary={summary}
+        overridden={mod.overridden}
+        isFiltered={isFiltered}
+        onSaveOverride={onSaveOverride}
+      />
     </div>
   );
 }
@@ -496,12 +570,21 @@ function Row({
   emphasis,
   focused,
   overridden,
+  field,
+  summary,
+  isFiltered,
+  onSaveOverride,
 }: {
   label: string;
   value: number;
   emphasis: "total" | "subtotal";
   focused: boolean;
-  overridden?: { computedValue: number; overrideValue: number };
+  overridden?: OverridePair;
+  /** Overridable field key — when set (with summary), the override editor is rendered. */
+  field?: string;
+  summary?: TakeoffSummary;
+  isFiltered?: boolean;
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
 }) {
   const valueClass =
     emphasis === "total"
@@ -529,6 +612,15 @@ function Row({
           computed {fmtUSD(overridden.computedValue)} → override {fmtUSD(overridden.overrideValue)}
         </div>
       )}
+      {field && summary && (
+        <OverrideEditor
+          field={field}
+          summary={summary}
+          overridden={overridden}
+          isFiltered={isFiltered ?? false}
+          onSaveOverride={onSaveOverride}
+        />
+      )}
     </div>
   );
 }
@@ -538,6 +630,190 @@ function Placeholder({ title, note }: { title: string; note: string }) {
     <div className="p-6 font-sans text-xs text-slate-500 dark:text-slate-400">
       <div className="text-sm font-bold text-foreground uppercase tracking-wider mb-2">{title}</div>
       <p className="leading-relaxed">{note}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Override setter (slice 4) — the first WRITE path onto the Phase 4 data layer.
+//
+// Override-from-trace (LOCKED decision #2): the computed value is NEVER hidden; the
+// estimator enters a value + a REQUIRED reason; Save records an immutable event and
+// the page refreshes. Revert is an explicit `overrideValue: null` tombstone button —
+// never "clear the input". An override of 0 is real (INV-3). The decision logic lives
+// in the pure `overrideSetter.ts` (unit-tested); this component is the I/O shell.
+//
+// Filtered-view trap (Amendment F): while a filter/search is active the on-screen summary
+// reflects only visible rows, so the action is DISABLED — an override must never be
+// recorded against a filtered (partial) subtotal.
+// ---------------------------------------------------------------------------
+
+type SaveState = "idle" | "saving" | "saved" | "failed";
+
+function OverrideEditor({
+  field,
+  summary,
+  overridden,
+  isFiltered,
+  onSaveOverride,
+}: {
+  field: string;
+  summary: TakeoffSummary;
+  overridden?: OverridePair;
+  isFiltered: boolean;
+  onSaveOverride?: (payload: OverridePayload) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [overrideRaw, setOverrideRaw] = useState("");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+
+  // No write path wired → no setter UI at all (pure read-only trace).
+  if (!onSaveOverride) return null;
+
+  // The honest computed value to record (never a prior override) — also the figure shown.
+  const pristine = selectPristineComputedValue(field, summary);
+
+  // Amendment F: recording against a filtered summary would capture a partial number.
+  if (isFiltered) {
+    return (
+      <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-500">
+        <Lock size={11} />
+        Clear the search/filter to override — the trace reflects only visible rows.
+      </div>
+    );
+  }
+
+  const openEditor = () => {
+    setOverrideRaw(overridden ? String(overridden.overrideValue) : "");
+    setReason("");
+    setError(null);
+    setSaveState("idle");
+    setOpen(true);
+  };
+
+  const run = async (payload: OverridePayload) => {
+    setError(null);
+    setSaveState("saving");
+    try {
+      await onSaveOverride(payload);
+      // Success: the refreshed summary's computed→override pair (rendered above) is the
+      // confirmation — collapse the editor. No optimistic local display.
+      setSaveState("saved");
+      setOpen(false);
+    } catch {
+      setSaveState("failed");
+    }
+  };
+
+  const handleSave = () => {
+    const v = validateOverrideInput(overrideRaw, reason);
+    if (!v.ok) {
+      setError(v.error);
+      return;
+    }
+    void run(buildSetPayload(field, pristine, v.value, reason.trim()));
+  };
+
+  const handleRevert = () => {
+    void run(buildRevertPayload(field, pristine));
+  };
+
+  const saving = saveState === "saving";
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={openEditor}
+        className="mt-1 self-start text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+      >
+        Override this value…
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="mt-1.5 rounded-md border border-grid-border bg-background/60 dark:bg-slate-900/40 p-2.5 space-y-2 text-[11px]"
+      // Escape cancels only the editor — stop it from reaching the inspector's document
+      // listener (which would close the whole slide-over and discard the typed override).
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !saving) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      {/* Computed value — always shown */}
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Computed value</span>
+        <span className="font-mono text-foreground">{fmtUSD(pristine)}</span>
+      </div>
+
+      <label className="block">
+        <span className="text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Override to</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          value={overrideRaw}
+          onChange={(e) => setOverrideRaw(e.target.value)}
+          disabled={saving}
+          placeholder="0.00"
+          className="mt-0.5 w-full rounded border border-grid-border bg-card px-2 py-1 font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+        />
+      </label>
+
+      <label className="block">
+        <span className="text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold">Reason (required)</span>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          disabled={saving}
+          placeholder="e.g. Negotiated fee per owner LOI 6/8"
+          className="mt-0.5 w-full rounded border border-grid-border bg-card px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
+        />
+      </label>
+
+      {error && <p className="text-amber-600 dark:text-amber-400">{error}</p>}
+      {saveState === "failed" && (
+        <p className="text-red-600 dark:text-red-400">Save failed — the override was not recorded. Try again.</p>
+      )}
+
+      <div className="flex items-center gap-2 pt-0.5">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded bg-blue-600 px-2.5 py-1 font-bold uppercase tracking-wider text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+        >
+          {saving ? "Saving…" : "Save override"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          disabled={saving}
+          className="rounded px-2.5 py-1 font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 hover:text-foreground disabled:opacity-50 cursor-pointer"
+        >
+          Cancel
+        </button>
+      </div>
+
+      {overridden && (
+        <div className="flex items-center justify-between gap-3 border-t border-grid-border pt-2">
+          <span className="text-slate-500 dark:text-slate-400">Currently overridden</span>
+          <button
+            type="button"
+            onClick={handleRevert}
+            disabled={saving}
+            className="rounded border border-grid-border px-2.5 py-1 font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:bg-card disabled:opacity-50 cursor-pointer"
+          >
+            Revert to computed
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,8 @@ import {
 import { isLinkedDivisionRow } from "@/lib/constants";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
+import { recordEstimateOverride } from "@/lib/db";
+import type { OverridePayload } from "@/lib/overrideSetter";
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace";
 import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
@@ -66,7 +68,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // Phase 4: active estimator overrides, layered over the computed summary below so a
   // persisted override applies on reload. The glass-box UI that sets/reverts an override
   // is Phase 5 (this is the read+apply wiring only).
-  const { activeOverrides } = useEstimateOverrides(projectId, isLoaded);
+  const { activeOverrides, refresh: refreshOverrides } = useEstimateOverrides(projectId, isLoaded);
 
   // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
@@ -187,6 +189,24 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       tolerance: RECONCILIATION_TOLERANCE,
     });
   }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates]);
+
+  // Phase 5 slice 4 — the override WRITE path. The Trust Inspector's editor builds the
+  // payload (pure overrideSetter.ts); this records the immutable event and re-syncs the
+  // active overrides. recordEstimateOverride THROWS on failure — we let it reject so the
+  // editor surfaces "save failed" and never shows an unpersisted override.
+  const handleSaveOverride = React.useCallback(
+    async (payload: OverridePayload) => {
+      await recordEstimateOverride(
+        projectId,
+        payload.field,
+        payload.computedValue,
+        payload.overrideValue,
+        payload.reason
+      );
+      refreshOverrides();
+    },
+    [projectId, refreshOverrides]
+  );
 
   // Divisional & Cost Type Budget Aggregations
   const subtotal = takeoffSummary.subtotal;
@@ -480,6 +500,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
             reconciliation={reconciliation}
+            isFiltered={isFiltered}
+            onSaveOverride={handleSaveOverride}
             strayLinkedRows={strayLinkedRows}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}

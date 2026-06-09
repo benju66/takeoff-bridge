@@ -85,12 +85,44 @@
     →blocked, direct override→override, rounding residual→ties, unexplained mismatch→blocked, rounding
     label). Golden McKenna ties $0.00. Suite **379 pass + 1 todo** (35 files); `tsc` clean; new code
     lint-clean; code-review clean.
-- **Slices 4–6: NOT STARTED.** Next session begins at **slice 4** (Override setter + ⚑ flags — the
-  first write path onto the Phase 4 data layer; ships logically with slice 1's export-applies-overrides,
-  already landed). Reminder: **slice 6 PAUSES for architect approval** of the 1-line
-  `projects.rounding_rule` migration (update `supabase_schema.sql` first; invoke the
-  `supabase:supabase` skill). The default stays `'dollar'` in code until then — slice 3 only DISPLAYS
-  the active mode.
+- **Slice 4 — Override setter (first write path) + ⚑ overridden flags: DONE (2026-06-09).**
+  - New pure helper `src/lib/overrideSetter.ts` — the setter's decision logic, unit-testable in node
+    (no DOM): `selectPristineComputedValue` (the honest-audit trap — first override = live
+    `summary[field]`, re-override = `summary.overrides[field].computedValue`, NEVER the prior
+    override), `validateOverrideInput` (reason required; numeric; empty rejected; **`0` is a valid
+    SET**, INV-3), `buildSetPayload` / `buildRevertPayload` (tombstone `overrideValue: null`, default
+    reason `"Reverted to computed value"`). All map 1:1 onto `recordEstimateOverride`'s 5-arg shape.
+  - `TrustInspector.tsx` — new shared `<OverrideEditor>` rendered under each overridable Trace node
+    (subtotal `Row`, total `Row`, every `ModifierRow`). Computed value always shown; override number
+    input + **required reason** + `[ Save override ]` `[ Cancel ]`; `[ Revert to computed ]` only when
+    already overridden. `saveState: idle→saving→saved/failed`; the override only reflects after the
+    page's `refresh()` reloads (no optimistic UI). **Escape inside the editor cancels only the editor**
+    (stops propagation so the inspector's document-level Escape-to-close doesn't discard typed input).
+    **Filtered-view trap (Amendment F): the action is DISABLED while `isFiltered`** (a 🔒 note replaces
+    it) — recording against a partial filtered subtotal is impossible; when unfiltered the inspector's
+    `summary` IS the full summary, so the recorded `computedValue` is provably correct.
+  - `EstimateTable.tsx` — new props `isFiltered` + `onSaveOverride`, threaded to the inspector; the
+    `SummaryTraceCell` (subtotal / 7 modifiers / total tfoot cells) now shows a **⚑** when
+    `takeoffSummary.overrides?.[field]` is present, with the computed→override pair on hover (5c.2
+    partial; computed value never hidden).
+  - `page.tsx` — destructures `refresh` from `useEstimateOverrides`; `handleSaveOverride` =
+    `await recordEstimateOverride(projectId, field, computedValue, overrideValue, reason)` then
+    `refresh()` (lets the THROW reject so the editor surfaces "save failed"); passes `isFiltered` +
+    `onSaveOverride`.
+  - **DB access only via `src/lib/db.ts`'s existing `recordEstimateOverride`** (append-only; reverts
+    are tombstone records; no schema change → `supabase:supabase` not needed). Tests: +13 in new
+    `overrideSetter.test.ts` (pristine selection incl. re-override, validation incl. empty-reason /
+    non-numeric / `0`-is-a-set, set/revert payload builders, and a **set→active / tombstone→fallback /
+    `0`→active round-trip through `reduceLatestActiveOverrides`** = the same reducer the engine
+    consumes). Golden McKenna ties $0.00 (no overrides → inert). Suite **392 pass + 1 todo** (36
+    files); `tsc` clean; no new lint (EstimateTable keeps its 2 pre-existing warnings); code-review
+    clean (1 UX finding fixed: Escape-loses-input).
+- **Slices 5–6: NOT STARTED.** Next session begins at **slice 5** (5c row provenance badges
+  ▦/⬚/✎/⚠ + Flags tab: needs-review worklist, B-4 inline-recover unmapped import rows, audit log from
+  `overrideRecords`; **flip the INV-7 `it.todo` → a real assertion** in `correctness-contract.test.ts`).
+  Reminder: **slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
+  (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill). The default stays
+  `'dollar'` in code until then — slice 3 only DISPLAYS the active mode.
 
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore
