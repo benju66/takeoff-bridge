@@ -11,6 +11,7 @@
 | B-1 | CI-safe synthetic template fixture | test infra | any time (independent of phases) |
 | B-2 | Born-in-app GC/Site-Ops golden | test coverage | after a real project is built in-app |
 | B-3 | Rounding default decision + visibility | product decision + Phase 5 | decision anytime; UI in Phase 5 |
+| B-4 | Inline-recoverable unmapped import rows | UX / trust completeness | Phase 5 (glass box) |
 
 ---
 
