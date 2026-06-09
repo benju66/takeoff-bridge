@@ -307,6 +307,28 @@ export function EstimateTable({
     [rows, overrideRecords]
   );
 
+  // B-4 (slice 5b) — assign a Procore code to an unmapped import row from inside the
+  // Flags tab, WITHOUT re-importing. Routes through the exact command pair the grid's
+  // fuzzy-suggestion buttons use (useTakeoffWorkbook.tsx:863/914): handleCellEdit applies
+  // the itemId cascade to the row, then commitCellEdit pushes the EDIT_CELL command with
+  // the full self-cascade + cross-division moveEffect (so one Ctrl+Z undoes the assignment
+  // AND the relocation atomically — AGENTS.md "Move Effect Atomicity"). No new command, no
+  // new write path. The index is resolved against the FULL `rows` array (handleCellEdit
+  // indexes rowsRef.current), and the unmapped worklist is built from those same full rows.
+  const handleAssignCode = useCallback(
+    (rowId: string, newItemId: string) => {
+      const meta = table.options.meta;
+      if (!meta) return;
+      const idx = rows.findIndex((r) => r.id === rowId);
+      if (idx < 0) return;
+      const currentItemId = rows[idx].itemId;
+      if (newItemId === currentItemId) return;
+      meta.handleCellEdit(idx, "itemId", newItemId);
+      meta.commitCellEdit(rowId, "itemId", currentItemId, newItemId);
+    },
+    [table, rows]
+  );
+
   // ---------------------------------------------------------------------------
   // Click-outside-to-deselect (E2)
   // ---------------------------------------------------------------------------
@@ -1133,6 +1155,7 @@ export function EstimateTable({
         reconciliation={reconciliation}
         flagsModel={flagsModel}
         onViewRow={handleViewRow}
+        onAssignCode={handleAssignCode}
         onViewTakeoffRows={handleViewTakeoffRows}
         isFiltered={isFiltered}
         onSaveOverride={onSaveOverride}

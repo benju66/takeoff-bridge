@@ -12,6 +12,7 @@ import {
   buildRevertPayload,
   OverridePayload,
 } from "@/lib/overrideSetter";
+import { validateAssignInput, suggestCodesForClassification } from "@/lib/assignCode";
 
 // ---------------------------------------------------------------------------
 // Trust Inspector — the glass-box surface (Phase 5).
@@ -48,6 +49,13 @@ interface TrustInspectorProps {
   flagsModel?: FlagsModel;
   /** Jump the grid to a flagged row (closes the inspector + scrolls). */
   onViewRow?: (rowId: string) => void;
+  /**
+   * B-4 (slice 5b) — assign a Procore code to an unmapped import row in place. Routes
+   * through the grid's command path (handleCellEdit + commitCellEdit) → pushCommand +
+   * itemId cascade + cross-division moveEffect (atomic undo). Absent → the unmapped
+   * worklist stays read-only (jump-to-grid only).
+   */
+  onAssignCode?: (rowId: string, newItemId: string) => void;
   /** [view rows] — reveal/scroll the grid to the contributing takeoff rows. */
   onViewTakeoffRows: () => void;
   // --- Override setter (slice 4) ------------------------------------------
@@ -77,6 +85,7 @@ export function TrustInspector({
   reconciliation,
   flagsModel,
   onViewRow,
+  onAssignCode,
   onViewTakeoffRows,
   isFiltered,
   onSaveOverride,
@@ -185,7 +194,7 @@ export function TrustInspector({
       )}
       {tab === "flags" && (
         flagsModel ? (
-          <FlagsTab model={flagsModel} onViewRow={onViewRow} />
+          <FlagsTab model={flagsModel} onViewRow={onViewRow} onAssignCode={onAssignCode} />
         ) : (
           <Placeholder
             title="Provenance & override flags"
@@ -647,9 +656,11 @@ function Row({
 function FlagsTab({
   model,
   onViewRow,
+  onAssignCode,
 }: {
   model: FlagsModel;
   onViewRow?: (rowId: string) => void;
+  onAssignCode?: (rowId: string, newItemId: string) => void;
 }) {
   const { needsReviewRows, unmappedRows, auditLog } = model;
   const empty =
@@ -678,17 +689,25 @@ function FlagsTab({
         </FlagsSection>
       )}
 
-      {/* Unmapped imports (B-4) */}
+      {/* Unmapped imports (B-4) — assign a code in place (slice 5b) or jump to the grid. */}
       {unmappedRows.length > 0 && (
         <FlagsSection
           title="Unmapped import rows"
           count={unmappedRows.length}
           icon={<AlertTriangle size={13} className="text-amber-600 dark:text-amber-400" />}
-          note="These rows carry a takeoff quantity but no Procore code yet. Open the row to assign a code (the grid's Code cell suggests matches) so the dollars reach the export."
+          note={
+            onAssignCode
+              ? "These rows carry a takeoff quantity but no Procore code yet. Pick a suggested code or type one to assign it here — the dollars then reach the export. (Ctrl+Z undoes an assignment.)"
+              : "These rows carry a takeoff quantity but no Procore code yet. Open the row to assign a code (the grid's Code cell suggests matches) so the dollars reach the export."
+          }
         >
-          {unmappedRows.map((r) => (
-            <WorklistRow key={r.rowId} row={r} onViewRow={onViewRow} showClassification />
-          ))}
+          {unmappedRows.map((r) =>
+            onAssignCode ? (
+              <UnmappedRow key={r.rowId} row={r} onAssignCode={onAssignCode} onViewRow={onViewRow} />
+            ) : (
+              <WorklistRow key={r.rowId} row={r} onViewRow={onViewRow} showClassification />
+            )
+          )}
         </FlagsSection>
       )}
 
@@ -770,6 +789,110 @@ function WorklistRow({
         )}
       </span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B-4 (slice 5b) — inline "assign code & place" for an unmapped import row.
+//
+// The decision/validation logic is the pure `assignCode.ts` (unit-tested in node);
+// this is the I/O shell. On assign it calls `onAssignCode(rowId, itemId)`, which the
+// grid implements with the SAME handleCellEdit + commitCellEdit pair its fuzzy chips
+// use → pushCommand + itemId cascade + cross-division moveEffect (atomic Ctrl+Z). After
+// a successful assign the row becomes mapped and drops off this worklist on re-render.
+// ---------------------------------------------------------------------------
+function UnmappedRow({
+  row,
+  onAssignCode,
+  onViewRow,
+}: {
+  row: FlagsRowRef;
+  onAssignCode: (rowId: string, newItemId: string) => void;
+  onViewRow?: (rowId: string) => void;
+}) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Pre-seed one-click chips from the SAME fuzzy source the grid's Code cell uses.
+  const suggestions = suggestCodesForClassification(row.classification);
+
+  const assignFreeEntry = () => {
+    const v = validateAssignInput(code);
+    if (!v.ok) {
+      setError(v.error);
+      return;
+    }
+    onAssignCode(row.rowId, v.itemId);
+  };
+
+  return (
+    <div className="rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-2 space-y-2">
+      {/* Row identity + carried quantity, with an optional jump-to-grid */}
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate text-foreground">{row.classification || "(unclassified row)"}</span>
+        <span className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-slate-500 dark:text-slate-400">
+            {row.matchedQty.toLocaleString()} {row.uom}
+          </span>
+          {onViewRow && (
+            <button
+              type="button"
+              onClick={() => onViewRow(row.rowId)}
+              className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+            >
+              view
+            </button>
+          )}
+        </span>
+      </div>
+
+      {/* Suggested codes — one-click assign (already-valid catalog itemIds) */}
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">Suggested</span>
+          {suggestions.map((s) => (
+            <button
+              key={s.itemId}
+              type="button"
+              onClick={() => onAssignCode(row.rowId, s.itemId)}
+              title={`${s.itemId}: ${s.description}`}
+              className="text-[10px] font-mono bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/60 transition-colors cursor-pointer"
+            >
+              {s.itemId}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Free-entry over the full master + Assign */}
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value);
+            if (error) setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              assignFreeEntry();
+            }
+          }}
+          list="estimate-items-options"
+          placeholder="Type a code, e.g. 09-9000.001"
+          className="flex-1 min-w-0 rounded border border-grid-border bg-card px-2 py-1 font-mono text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+        <button
+          type="button"
+          onClick={assignFreeEntry}
+          className="rounded bg-blue-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white hover:bg-blue-700 cursor-pointer"
+        >
+          Assign
+        </button>
+      </div>
+      {error && <p className="text-[11px] text-amber-600 dark:text-amber-400">{error}</p>}
+    </div>
   );
 }
 

@@ -149,13 +149,40 @@
     (37 files); `tsc` clean; EstimateTable keeps only its 2 pre-existing warnings; code-review clean
     (2 low findings: collapsed-division scroll dead-end = pre-existing scrollToRowRef limit, left as-is;
     redundant empty-state messaging = fixed).
-- **Slice 5b (carry-over) + Slice 6: NOT STARTED.**
-  - **Slice 5b — B-4 inline assign-and-place** in the Flags-tab unmapped worklist: an in-panel
-    "assign code & place" control (same UX as `ExportOverrideModal`) that mutates the row's code via
-    the command path (`pushCommand` per AGENTS.md "Compounding History Preservation" — undo/redo
-    fidelity), so the estimator maps without leaving the inspector. Add an assign-and-place command-
-    builder test (inverse data captured). Where the unmapped rows + qty live: directly in `rows`
-    (`!isMapped && classification`), already surfaced by `buildFlagsModel().unmappedRows`.
+- **Slice 5b — B-4 inline assign-and-place for unmapped import rows: DONE (2026-06-09).**
+  - New pure helper `src/lib/assignCode.ts` — `validateAssignInput(code)` → `{ ok, itemId }` |
+    `{ ok:false, error }` (empty/whitespace rejected; resolves a free-entry code to a known
+    `ESTIMATE_ITEMS_MASTER` itemId — catalog is keyed by itemId, with a value-`itemId` fallback for
+    key/itemId drift), and `suggestCodesForClassification(classification, limit?)` — a thin wrapper
+    over `getFuzzySuggestions(…, ESTIMATE_ITEMS_MASTER)`, the SAME fuzzy source the grid's Code cell
+    uses. No math, no DB, NO command construction. Unit-tested in node (`assignCode.test.ts`, **+7**:
+    empty/whitespace → err, unknown → err, known key → canonical itemId + whitespace-trim,
+    `09-9000.001` round-trip, suggestions for a classification capped at limit + each is assignable,
+    `[]` for empty classification).
+  - `TrustInspector.tsx` — new `onAssignCode?(rowId, newItemId)` threaded → `FlagsTab` → a new
+    **`UnmappedRow`** (replaces the read-only `WorklistRow` in the unmapped section **only when
+    `onAssignCode` is wired** — falls back to read-only jump-to-grid otherwise). The control:
+    one-click **suggestion chips** (`suggestCodesForClassification`, already-valid itemIds) + a
+    **free-entry input** (`list="estimate-items-options"` datalist, Enter-to-assign) validated by
+    `validateAssignInput` (inline amber error; cleared on edit). Carried qty + an optional **view**
+    jump preserved (consistent with slice 5's `onViewRow`). After a successful assign the row becomes
+    mapped and drops off `unmappedRows` on the next render.
+  - `EstimateTable.tsx` — new `handleAssignCode(rowId, newItemId)`: resolves the row's index in the
+    **full `rows`** array (not the filtered table model — correct under an active filter, since
+    `handleCellEdit` indexes `rowsRef.current === rows`) + its current itemId, then calls
+    `meta.handleCellEdit(idx,"itemId",newItemId)` + `meta.commitCellEdit(rowId,"itemId",cur,newItemId)`
+    — the **exact pair** the grid's fuzzy chips use (`useTakeoffWorkbook.tsx:863/914`). This inherits
+    `pushCommand` + the 10-field itemId self-cascade + the cross-division `moveEffect` (one Ctrl+Z
+    undoes the assignment AND the relocation atomically — AGENTS.md "Move Effect Atomicity") and the
+    fire-and-forget `recordClassificationResolution(...).catch(()=>{})` (Training Data Immutability) —
+    **no new `WorkbookCommand`, no new write path, no engine/math change**. Passed to `<TrustInspector>`.
+  - **No engine/math change** (a row mutation via the existing command path; the summary recomputes
+    naturally once the row is mapped). Golden McKenna ties $0.00 (no unmapped rows → the control is
+    inert). The command's undo/redo fidelity is already covered by `commandCapture.test.ts` — **not
+    re-tested here** (cited). Suite **411 pass / 0 todo** (38 files); `tsc` clean; new files lint-clean
+    (EstimateTable keeps only its 2 pre-existing warnings); self-review clean (the grid path is
+    replicated verbatim; reused, not reimplemented per the kickoff hard constraint).
+- **Slice 6: NOT STARTED.**
   - **Slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
     (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill). The default stays
     `'dollar'` in code until then — slice 3 only DISPLAYS the active mode.
