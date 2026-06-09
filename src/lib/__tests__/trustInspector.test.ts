@@ -13,8 +13,9 @@ import { describe, it, expect } from "vitest";
 import { computeTakeoffSummary } from "../calculations";
 import type { LinkedDivisionTotal } from "../calculations";
 import { ESTIMATE_MODIFIERS } from "../constants";
-import { buildTraceModel, roundingModeLabel, ROUNDING_MODE_LABELS } from "../trustInspector";
-import { ProcessedTakeoffRow } from "@/types";
+import { buildTraceModel, buildReconciliationModel, roundingModeLabel, ROUNDING_MODE_LABELS } from "../trustInspector";
+import type { TakeoffSummary } from "../calculations";
+import { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
 import type { Project } from "@/types/db";
 
 function makeRow(overrides: Partial<ProcessedTakeoffRow> = {}): ProcessedTakeoffRow {
@@ -211,5 +212,154 @@ describe("buildTraceModel — trace view-model (Phase 5 slice 2)", () => {
     expect(roundingModeLabel(undefined)).toBe(ROUNDING_MODE_LABELS.dollar);
     expect(roundingModeLabel("bogus")).toBe(ROUNDING_MODE_LABELS.dollar);
     expect(roundingModeLabel("ten")).toBe(ROUNDING_MODE_LABELS.ten);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5, slice 3 — Reconciliation view-model (`buildReconciliationModel`).
+// Pure arrangement + tie-classification over the engine + export-gate outputs.
+// ---------------------------------------------------------------------------
+
+/** Σ the 7 effective modifier values exactly as the Procore 60-xxxx rollup does. */
+const sumModifiers = (s: TakeoffSummary) =>
+  ESTIMATE_MODIFIERS.reduce((t, m) => t + ((s[m.key as keyof TakeoffSummary] as number) ?? 0), 0);
+
+const RATES_NONE = { ...RATES, roundingRule: "none" };
+const TOL = 0.01;
+
+describe("buildReconciliationModel — reconciliation view-model (Phase 5 slice 3)", () => {
+  it("ties scope AND grand-total to the cent (rounding none, no override)", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })]; // raw subtotal 10,000
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED);
+    const mods = sumModifiers(summary);
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: mods,
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.scope.ok).toBe(true);
+    expect(model.grandTotal.totalEstimatedCost).toBe(summary.totalEstimatedCost);
+    expect(model.grandTotal.fullProcoreBudgetTotal).toBeCloseTo(10000 + mods, 2);
+    expect(model.grandTotal.delta).toBeCloseTo(0, 2);
+    expect(model.grandTotal.ok).toBe(true);
+    expect(model.status).toBe("ties");
+  });
+
+  it("grand-total still ties with a modifier (Fee) override — INV-1, not a direct override", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED, { fee: 700 });
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: sumModifiers(summary), // includes the overridden fee
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.status).toBe("ties");
+    expect(model.grandTotal.delta).toBeCloseTo(0, 2);
+    expect(model.hasDirectOverride).toBe(false);
+  });
+
+  it("a broken scope tie → blocked (chip amber)", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED);
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 9500, delta: 500, ok: false },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: sumModifiers(summary),
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.scope.ok).toBe(false);
+    expect(model.status).toBe("blocked");
+    expect(model.scope.delta).toBe(500);
+  });
+
+  it("unmapped rows carrying dollars → blocked regardless of the grand-total tie", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED);
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+      blockerCount: 2,
+      summary,
+      modifierRollupTotal: sumModifiers(summary),
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.blockerCount).toBe(2);
+    expect(model.status).toBe("blocked");
+  });
+
+  it("a direct subtotal/total override → override (info), never blocked", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const directOverrides: EstimateOverrideMap[] = [{ subtotal: 50000 }, { totalEstimatedCost: 99999 }];
+    for (const ov of directOverrides) {
+      const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED, ov);
+      const model = buildReconciliationModel({
+        reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+        blockerCount: 0,
+        summary,
+        modifierRollupTotal: sumModifiers(summary),
+        roundingMode: "none",
+        tolerance: TOL,
+      });
+      expect(model.hasDirectOverride).toBe(true);
+      expect(model.grandTotal.ok).toBe(false); // far beyond any rounding band
+      expect(model.status).toBe("override");
+    }
+  });
+
+  it("folds a sub-rounding-unit residual into 'ties' (dollar rounding, no override)", () => {
+    const rows = [makeRow({ matchedQty: 100.37, unitPrice: 1 })]; // raw subtotal 100.37
+    const summary = computeTakeoffSummary(rows, 1000, 10, { ...RATES, roundingRule: "dollar" }, NO_LINKED);
+    expect(summary.subtotal).toBe(100); // rounded to the nearest $1
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 100.37, rollupTotal: 100.37, delta: 0, ok: true },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: sumModifiers(summary),
+      roundingMode: "dollar",
+      tolerance: TOL,
+    });
+    // screen total (rounded subtotal) − Procore (raw scope) = −0.37, within ½ a dollar.
+    expect(model.grandTotal.delta).toBeCloseTo(-0.37, 2);
+    expect(model.grandTotal.ok).toBe(true);
+    expect(model.status).toBe("ties");
+  });
+
+  it("an unexplained grand-total mismatch (no override, beyond rounding) → blocked, never hidden", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED);
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: 0, // inconsistent → large grand-total delta, no override to explain it
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.grandTotal.ok).toBe(false);
+    expect(model.hasDirectOverride).toBe(false);
+    expect(model.status).toBe("blocked");
+  });
+
+  it("exposes the active rounding mode + human label (B-3 visibility)", () => {
+    const rows = [makeRow({ matchedQty: 100, unitPrice: 100 })];
+    const summary = computeTakeoffSummary(rows, 1000, 10, RATES_NONE, NO_LINKED);
+    const model = buildReconciliationModel({
+      reconciliation: { lineItemTotal: 10000, rollupTotal: 10000, delta: 0, ok: true },
+      blockerCount: 0,
+      summary,
+      modifierRollupTotal: sumModifiers(summary),
+      roundingMode: "none",
+      tolerance: TOL,
+    });
+    expect(model.roundingMode).toBe("none");
+    expect(model.roundingLabel).toBe(ROUNDING_MODE_LABELS.none);
   });
 });

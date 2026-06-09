@@ -1,7 +1,7 @@
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, isLinkedDivisionRow } from "./constants";
-import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
+import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import JSZip from "jszip";
@@ -393,6 +393,25 @@ export function rollupGcSiteOps(lines: GcSiteOpsLine[]): Record<string, number> 
     rollup[code] = (rollup[code] || 0) + line.total;
   }
   return rollup;
+}
+
+/**
+ * Sums the 7 effective (override-applied) modifier values from a TakeoffSummary —
+ * exactly the dollars `generateProcoreBudget` writes onto the 60-xxxx Budget Line
+ * Items rows. Used by the Reconcile tab's grand-total tie (Phase 5 slice 3) so the
+ * panel ties `totalEstimatedCost` to the FULL Procore budget (scope rollup + this).
+ *
+ * Mirrors `generateProcoreBudget`'s `summary.subtotal > 0` guard: with no subtotal
+ * the export writes no modifier rows, so the rollup is 0. This is a ROLLUP of values
+ * `calculations.ts` already computed — NOT new estimate math (AGENTS.md). The engine
+ * stays the sole financial authority; this only re-sums what it produced.
+ */
+export function rollupEffectiveModifiers(summary: TakeoffSummary): number {
+  if (summary.subtotal <= 0) return 0;
+  return ESTIMATE_MODIFIERS.reduce(
+    (sum, mod) => sum + ((summary[mod.key as keyof TakeoffSummary] as number) ?? 0),
+    0,
+  );
 }
 
 /** A row whose dollars cannot be placed on any Procore Budget Line Items code. */

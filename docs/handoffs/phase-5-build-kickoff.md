@@ -55,11 +55,42 @@
   - **No engine change; no override setter** (that's slice 4); pure view. Golden McKenna ties $0.00
     (7/7). Suite **367 pass + 1 todo** (35 files); `tsc` clean; new files lint-clean (EstimateTable
     keeps only its 2 pre-existing warnings); code-review clean. Committed as the slice-2 feature commit.
-- **Slices 3–6: NOT STARTED.** Next session begins at **slice 3** (5b Reconciliation tab + status
-  chip — surface `validateExportReadiness().reconciliation` live + the modifier-rollup grand-total
-  tie + rounding mode). Reminder: **slice 6 PAUSES for architect approval** of the 1-line
+- **Slice 3 — 5b Reconciliation tab + status-bar chip (live, not export-gated): DONE (2026-06-09).**
+  - New pure helper `exporter.rollupEffectiveModifiers(summary)` — Σ the 7 effective modifier values,
+    mirroring `generateProcoreBudget`'s `subtotal > 0` guard (the exact 60-xxxx dollars it writes). A
+    rollup of engine-computed values, NOT new math (calculations.ts stays sole authority).
+  - New pure view-model `trustInspector.buildReconciliationModel({ reconciliation, blockerCount,
+    summary, modifierRollupTotal, roundingMode, tolerance })` → `ReconciliationModel`: **scope layer**
+    (lineItemTotal ↔ 217-code rollup, reuses the gate's result) + **grand-total layer**
+    (`totalEstimatedCost` ↔ full Procore budget = `rollupTotal + modifierRollupTotal`). Grand `ok`
+    uses a **rounding-aware tolerance** (½ the rounding unit + cent): under `none` ties to the cent;
+    under `dollar` the ≤$0.50 subtotal rounding residual still counts as tied. `status` ∈
+    `ties | blocked | override` (**architect decision 2026-06-09**: distinguish a deliberate
+    subtotal/total override the Procore CSV can't carry → blue ⓘ `override`, from real export blockers
+    → amber ⚠ `blocked`; modifier overrides always tie ✅). Type-only decoupled (no exporter runtime import).
+  - `TrustInspector.tsx`: filled the slice-2 Reconcile placeholder with `ReconcileTab` (both layers,
+    Δ ✅/ⓘ/⚠, active rounding mode inline + a "switch to none" hint when ≠ none, unmapped-blocker count).
+    New `reconciliation?` + `initialTab?` props; opens on the requested tab.
+  - `EstimateTable.tsx`: new required `reconciliation` prop; `openTrust(field, tab?)`; new **status-bar
+    `ReconChip`** (`Procore ✅ ties` green / `Procore ✅ scope ties · ⓘ override` blue / `Procore Δ $X ⚠`
+    | `Procore ⚠ N unmapped` amber) → opens the inspector on the Reconcile tab.
+  - `page.tsx`: extracted a shared `summaryRates` memo (used by both summaries — no drift); added
+    `fullTakeoffSummary` (FULL unfiltered rows — Amendment F: the recon must not reflect a filtered
+    partial) + a `reconciliation` memo calling the SAME `validateExportReadiness` the export gate runs
+    (single source) + `rollupEffectiveModifiers`. Passes `reconciliation` to `EstimateTable`.
+  - **No engine change; no override setter** (slice 4). Tests: +6 in `export-integrity.test.ts` (grand
+    total ties no-override; **still ties with a Fee override = live INV-1**; `rollupEffectiveModifiers`
+    == real CSV 60-xxxx; direct total override classified info-not-blocker) and +8 pure builder tests
+    in `trustInspector.test.ts` (scope+grand tie, modifier-override tie, broken scope→blocked, unmapped
+    →blocked, direct override→override, rounding residual→ties, unexplained mismatch→blocked, rounding
+    label). Golden McKenna ties $0.00. Suite **379 pass + 1 todo** (35 files); `tsc` clean; new code
+    lint-clean; code-review clean.
+- **Slices 4–6: NOT STARTED.** Next session begins at **slice 4** (Override setter + ⚑ flags — the
+  first write path onto the Phase 4 data layer; ships logically with slice 1's export-applies-overrides,
+  already landed). Reminder: **slice 6 PAUSES for architect approval** of the 1-line
   `projects.rounding_rule` migration (update `supabase_schema.sql` first; invoke the
-  `supabase:supabase` skill).
+  `supabase:supabase` skill). The default stays `'dollar'` in code until then — slice 3 only DISPLAYS
+  the active mode.
 
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore

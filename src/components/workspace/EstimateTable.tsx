@@ -15,6 +15,7 @@ import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
+import type { ReconciliationModel, TrustTab } from "@/lib/trustInspector";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
 import { FilterableColumnHeader } from "./FilterableColumnHeader";
@@ -43,6 +44,36 @@ function SummaryTraceCell({ valueStr, onTrace }: { valueStr: string; onTrace: ()
         <Search size={12} />
       </button>
     </span>
+  );
+}
+
+/** Always-on Procore reconciliation chip in the status bar (Phase 5 — 5b). Green
+ *  ✅ when screen == Procore to the cent; amber ⚠ for export blockers; blue ⓘ for a
+ *  deliberate subtotal/total override. Click → Trust Inspector on the Reconcile tab. */
+function ReconChip({ reconciliation, onOpen }: { reconciliation: ReconciliationModel; onOpen: () => void }) {
+  const { status, grandTotal, blockerCount } = reconciliation;
+  const deltaStr = `$${Math.abs(grandTotal.delta).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  let className: string;
+  let label: string;
+  if (status === "ties") {
+    className = "text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20";
+    label = "Procore ✅ ties";
+  } else if (status === "override") {
+    className = "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/20";
+    label = "Procore ✅ scope ties · ⓘ override";
+  } else {
+    className = "text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20";
+    label = blockerCount > 0 ? `Procore ⚠ ${blockerCount} unmapped` : `Procore Δ ${deltaStr} ⚠`;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Open the Procore reconciliation"
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono cursor-pointer transition-colors ${className}`}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -92,6 +123,11 @@ interface EstimateTableProps {
   /** Live linked GC + Site Ops division values (the 10 rows) — fed to the Trust
    *  Inspector trace; a pure view, no engine recompute. */
   linkedDivisionTotals: LinkedDivisionTotal[];
+
+  /** Live Procore reconciliation (5b) — built from the FULL unfiltered rows + the
+   *  same validateExportReadiness the export gate runs (single source). Drives the
+   *  status-bar chip and the Reconcile tab. */
+  reconciliation: ReconciliationModel;
 
   /** Linked division rows carrying stray typed dollars — excluded from all
    *  totals (gc-siteops Phase 5 trap closure); surfaced, never silently dropped. */
@@ -148,6 +184,7 @@ export function EstimateTable({
   divisionBreakdown,
   costTypeBreakdown,
   linkedDivisionTotals,
+  reconciliation,
   strayLinkedRows,
   selection,
   globalFilter,
@@ -190,11 +227,14 @@ export function EstimateTable({
   // ---------------------------------------------------------------------------
   const [trustOpen, setTrustOpen] = React.useState(false);
   const [trustField, setTrustField] = React.useState<string>("totalEstimatedCost");
-  // Bumped on every open so the inspector remounts fresh (starts on Trace, as a
-  // slide-over) when a new summary cell's 🔍 is clicked while it is already open.
+  const [trustTab, setTrustTab] = React.useState<TrustTab>("trace");
+  // Bumped on every open so the inspector remounts fresh (starts on the requested
+  // tab, as a slide-over) when a new summary cell's 🔍 / the chip is clicked while
+  // it is already open.
   const [trustSeq, setTrustSeq] = React.useState(0);
-  const openTrust = useCallback((field: string) => {
+  const openTrust = useCallback((field: string, tab: TrustTab = "trace") => {
     setTrustField(field);
+    setTrustTab(tab);
     setTrustOpen(true);
     setTrustSeq((s) => s + 1);
   }, []);
@@ -974,6 +1014,8 @@ export function EstimateTable({
               <span className="text-slate-300 dark:text-slate-700">|</span>
               <span className="text-slate-400 dark:text-slate-500">Subtotal: <span className="text-foreground dark:text-slate-300 font-mono">${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
               <span className="text-slate-400 dark:text-slate-500">Est. Total: <span className="text-emerald-600 dark:text-emerald-400 font-mono">${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+              <span className="text-slate-300 dark:text-slate-700">|</span>
+              <ReconChip reconciliation={reconciliation} onOpen={() => openTrust("totalEstimatedCost", "reconcile")} />
             </div>
             <div className="flex items-center gap-3">
               {selection.rowId && (
@@ -1022,10 +1064,12 @@ export function EstimateTable({
         open={trustOpen}
         onClose={() => setTrustOpen(false)}
         focusField={trustField}
+        initialTab={trustTab}
         summary={takeoffSummary}
         linkedTotals={linkedDivisionTotals}
         project={project}
         takeoffRowCount={takeoffRowCount}
+        reconciliation={reconciliation}
         onViewTakeoffRows={handleViewTakeoffRows}
       />
     </>

@@ -17,6 +17,8 @@ import {
   computeLinkedDivisionTotals,
 } from "@/lib/calculations";
 import { isLinkedDivisionRow } from "@/lib/constants";
+import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
+import { buildReconciliationModel } from "@/lib/trustInspector";
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace";
 import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
@@ -143,19 +145,48 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [rows]
   );
 
+  // Modifier rates + rounding (template defaults applied) — shared by the on-screen
+  // (filtered) summary and the full-row reconciliation summary so they can never drift.
+  const summaryRates = React.useMemo(() => ({
+    constructionContingencyRate: project?.constructionContingencyRate ?? 0,
+    designContingencyRate: project?.designContingencyRate ?? 0,
+    buildersRiskRate: project?.buildersRiskRate ?? 0,
+    specialInsuranceRate: project?.specialInsuranceRate ?? 0,
+    glInsuranceRate: project?.glInsuranceRate ?? 0.01,
+    bondRate: project?.bondRate ?? 0,
+    feeRate: project?.feeRate ?? 0.05,
+    roundingRule: project?.roundingRule ?? "dollar",
+  }), [project]);
+
   const takeoffSummary = React.useMemo(
-    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, {
-      constructionContingencyRate: project?.constructionContingencyRate ?? 0,
-      designContingencyRate: project?.designContingencyRate ?? 0,
-      buildersRiskRate: project?.buildersRiskRate ?? 0,
-      specialInsuranceRate: project?.specialInsuranceRate ?? 0,
-      glInsuranceRate: project?.glInsuranceRate ?? 0.01,
-      bondRate: project?.bondRate ?? 0,
-      feeRate: project?.feeRate ?? 0.05,
-      roundingRule: project?.roundingRule ?? "dollar"
-    }, linkedDivisionTotals, activeOverrides),
-    [filteredRows, squareFootage, unitCount, project, linkedDivisionTotals, activeOverrides]
+    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides),
+    [filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides]
   );
+
+  // Reconciliation (Phase 5 slice 3 — 5b): ALWAYS over the FULL unfiltered row set and
+  // the full summary. Export uses every row, so the chip/tab must never reflect a
+  // filtered partial (Amendment F). When unfiltered this is identical to takeoffSummary;
+  // only a search/filter forks a second full computation.
+  const fullTakeoffSummary = React.useMemo(
+    () => isFiltered
+      ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides)
+      : takeoffSummary,
+    [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, takeoffSummary]
+  );
+
+  // Single source with the export gate: the same validateExportReadiness, surfaced
+  // live instead of thrown away when it passes. Adds the modifier rollup → grand-total tie.
+  const reconciliation = React.useMemo(() => {
+    const readiness = validateExportReadiness(rows, personnel.calcResult, infrastructure.calcResult);
+    return buildReconciliationModel({
+      reconciliation: readiness.reconciliation,
+      blockerCount: readiness.blockers.length,
+      summary: fullTakeoffSummary,
+      modifierRollupTotal: rollupEffectiveModifiers(fullTakeoffSummary),
+      roundingMode: summaryRates.roundingRule,
+      tolerance: RECONCILIATION_TOLERANCE,
+    });
+  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates]);
 
   // Divisional & Cost Type Budget Aggregations
   const subtotal = takeoffSummary.subtotal;
@@ -448,6 +479,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
+            reconciliation={reconciliation}
             strayLinkedRows={strayLinkedRows}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}

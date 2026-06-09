@@ -8,7 +8,10 @@ import {
   rollupGcSiteOps,
   collectGcSiteOpsLines,
   buildStep23DetailLines,
+  rollupEffectiveModifiers,
+  RECONCILIATION_TOLERANCE,
 } from "../lib/exporter";
+import { buildReconciliationModel } from "../lib/trustInspector";
 import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals, computeTakeoffSummary } from "../lib/calculations";
 import { LINKED_DIVISION_ROWS } from "../lib/constants";
 import type { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
@@ -1314,5 +1317,66 @@ describe("Export applies overrides (Phase 5 — INV-1)", () => {
       computeLinkedDivisionTotals(zeroGcResult(), zeroSiteOpsResult()), {}))
       .toBe(generateExcelPayload(rows, mockColumns, mockProject,
         computeLinkedDivisionTotals(zeroGcResult(), zeroSiteOpsResult())));
+  });
+
+  // ── Phase 5 slice 3 — 5b grand-total reconciliation tie (live INV-1 proof) ──
+  // Sum every "Original Budget" cell of the Procore CSV (scope lines + 60-xxxx
+  // modifier lines) = the full Procore budget total.
+  function procoreBudgetTotal(ov?: EstimateOverrideMap): number {
+    const csv = generateProcoreBudget(rows, mockProject, zeroGcResult(), zeroSiteOpsResult(), ov);
+    return csv.split("\r\n").slice(1).reduce((sum, line) => {
+      if (!line.trim()) return sum;
+      const cols = line.split(",");
+      return sum + parseFloat(cols[cols.length - 1].replace(/^"|"$/g, ""));
+    }, 0);
+  }
+
+  function reconModel(ov?: EstimateOverrideMap) {
+    const readiness = validateExportReadiness(rows, zeroGcResult(), zeroSiteOpsResult());
+    const summary = onScreen(ov);
+    return buildReconciliationModel({
+      reconciliation: readiness.reconciliation,
+      blockerCount: readiness.blockers.length,
+      summary,
+      modifierRollupTotal: rollupEffectiveModifiers(summary),
+      roundingMode: "none",
+      tolerance: RECONCILIATION_TOLERANCE,
+    });
+  }
+
+  it("grand-total ties: on-screen Total == full Procore budget total (no override)", () => {
+    expect(procoreBudgetTotal()).toBeCloseTo(onScreen().totalEstimatedCost, 2);
+    const model = reconModel();
+    expect(model.status).toBe("ties");
+    expect(model.grandTotal.delta).toBeCloseTo(0, 2);
+    // The model's full-budget figure matches the actual summed CSV.
+    expect(model.grandTotal.fullProcoreBudgetTotal).toBeCloseTo(procoreBudgetTotal(), 2);
+  });
+
+  it("grand-total STILL ties with a Fee (modifier) override active — INV-1 live", () => {
+    const ov: EstimateOverrideMap = { fee: 5000 };
+    // The override reaches the Procore 60-xxxx line, so screen == exported to the cent.
+    expect(procoreBudgetTotal(ov)).toBeCloseTo(onScreen(ov).totalEstimatedCost, 2);
+    const model = reconModel(ov);
+    expect(model.status).toBe("ties");
+    expect(model.grandTotal.delta).toBeCloseTo(0, 2);
+    expect(model.hasDirectOverride).toBe(false); // a modifier override is not a direct total/subtotal override
+  });
+
+  it("rollupEffectiveModifiers sums exactly the 60-xxxx dollars the Procore CSV writes", () => {
+    const ov: EstimateOverrideMap = { fee: 5000 };
+    const summary = onScreen(ov);
+    // Σ modifiers (GL 324 + Fee 5000, others 0) == full budget − scope rollup.
+    const scopeRollup = validateExportReadiness(rows, zeroGcResult(), zeroSiteOpsResult()).reconciliation.rollupTotal;
+    expect(rollupEffectiveModifiers(summary)).toBeCloseTo(procoreBudgetTotal(ov) - scopeRollup, 2);
+  });
+
+  it("a direct total override is classified info (override), not an export blocker", () => {
+    const model = reconModel({ totalEstimatedCost: 99999 });
+    // The Procore CSV carries line items only, so the grand total diverges — but this
+    // is a deliberate override, not a broken scope: blue ⓘ, never amber ⚠.
+    expect(model.status).toBe("override");
+    expect(model.hasDirectOverride).toBe(true);
+    expect(model.scope.ok).toBe(true);
   });
 });

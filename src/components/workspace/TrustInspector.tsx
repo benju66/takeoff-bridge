@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings } from "lucide-react";
+import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info } from "lucide-react";
 import type { Project } from "@/types/db";
 import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
-import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel } from "@/lib/trustInspector";
+import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel } from "@/lib/trustInspector";
 
 // ---------------------------------------------------------------------------
 // Trust Inspector — the glass-box surface (Phase 5).
@@ -28,11 +28,15 @@ interface TrustInspectorProps {
   onClose: () => void;
   /** Summary field the inspector opened focused on (e.g. "fee", "subtotal"). */
   focusField: string;
+  /** Tab to open on (the status-bar chip opens on "reconcile"). Defaults to "trace". */
+  initialTab?: TrustTab;
   summary: TakeoffSummary;
   linkedTotals: LinkedDivisionTotal[];
   project: Project;
   /** Count of contributing (non-linked) takeoff rows, for the "· N rows" label. */
   takeoffRowCount: number;
+  /** Live Procore reconciliation (5b) — built from the FULL unfiltered rows (Amendment F). */
+  reconciliation?: ReconciliationModel;
   /** [view rows] — reveal/scroll the grid to the contributing takeoff rows. */
   onViewTakeoffRows: () => void;
 }
@@ -41,16 +45,18 @@ export function TrustInspector({
   open,
   onClose,
   focusField,
+  initialTab = "trace",
   summary,
   linkedTotals,
   project,
   takeoffRowCount,
+  reconciliation,
   onViewTakeoffRows,
 }: TrustInspectorProps) {
   // Each (re)open remounts this component (parent bumps a `key` per open), so the
-  // tab always starts on Trace and the layout starts as the slide-over — a 🔍
-  // affordance reliably lands on the focused trace without a setState-in-effect.
-  const [tab, setTab] = useState<TrustTab>("trace");
+  // tab starts on the requested tab and the layout starts as the slide-over — a 🔍
+  // affordance / chip reliably lands on its tab without a setState-in-effect.
+  const [tab, setTab] = useState<TrustTab>(initialTab);
   const [expanded, setExpanded] = useState(false);
 
   // Escape: collapse the full-screen modal back to the slide-over first, else close.
@@ -134,10 +140,14 @@ export function TrustInspector({
         <TraceTab model={traceModel} onViewTakeoffRows={onViewTakeoffRows} />
       )}
       {tab === "reconcile" && (
-        <Placeholder
-          title="Procore reconciliation"
-          note="The live scope + grand-total tie-out lands in slice 3."
-        />
+        reconciliation ? (
+          <ReconcileTab model={reconciliation} />
+        ) : (
+          <Placeholder
+            title="Procore reconciliation"
+            note="Reconciliation data is unavailable for this view."
+          />
+        )
       )}
       {tab === "flags" && (
         <Placeholder
@@ -268,6 +278,162 @@ function TraceTab({ model, onViewTakeoffRows }: { model: TraceModel; onViewTakeo
           <span className="font-mono text-foreground">{model.roundingMode}</span> — {model.roundingLabel}
         </span>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reconcile tab (5b) — live Procore tie-out + grand-total tie (INV-1)
+// ---------------------------------------------------------------------------
+
+function ReconcileTab({ model }: { model: ReconciliationModel }) {
+  const { scope, grandTotal, status } = model;
+  return (
+    <div className="p-4 font-sans text-xs text-foreground space-y-4">
+      <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+        Procore Export Reconciliation
+      </div>
+
+      {/* Layer 1 — scope tie: line items + GC/Site Ops ↔ the 217-code rollup */}
+      <div className="space-y-1.5">
+        <ReconLine label="Scope subtotal (line items + GC + Site Ops)" value={scope.lineItemTotal} />
+        <ReconLine label="rolls up to 217 budget codes" value={scope.rollupTotal} muted ok={scope.ok} />
+        <ReconLine label="+ 7 modifiers (60-xxxx codes)" value={model.modifierRollupTotal} muted />
+      </div>
+
+      {/* Layer 2 — grand-total tie: Total Estimated Cost ↔ full Procore budget */}
+      <div className="border-t border-grid-border pt-2 space-y-1.5">
+        <ReconLine
+          label="= TOTAL ESTIMATED COST"
+          value={grandTotal.totalEstimatedCost}
+          emphasis
+          flag={model.hasDirectOverride ? "overridden" : undefined}
+        />
+        <ReconLine label="full Procore budget total" value={grandTotal.fullProcoreBudgetTotal} muted />
+        <DifferenceLine model={model} />
+      </div>
+
+      {/* Rounding mode (B-3 visibility) */}
+      <div className="flex items-start gap-2 pt-2 border-t border-grid-border text-[11px] text-slate-600 dark:text-slate-400">
+        <span className="font-bold uppercase tracking-wider shrink-0">Rounding</span>
+        <span>
+          <span className="font-mono text-foreground">{model.roundingMode}</span> — {model.roundingLabel}
+          {model.roundingMode !== "none" && (
+            <span className="block text-slate-500 dark:text-slate-500 mt-0.5">
+              Per-line rounding can shift the total vs. the raw Procore lines by up to half a unit.
+              Switch this project to <span className="font-mono">none</span> to tie the source spreadsheet to the cent.
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* Unmapped blockers */}
+      <div className="flex items-center justify-between gap-3 pt-2 border-t border-grid-border">
+        <span className="font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+          Unmapped rows carrying dollars
+        </span>
+        <span
+          className={`flex items-center gap-1 font-mono shrink-0 ${
+            model.blockerCount > 0
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-emerald-600 dark:text-emerald-400"
+          }`}
+        >
+          {model.blockerCount}
+          {model.blockerCount > 0 ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+        </span>
+      </div>
+      {status === "blocked" && model.blockerCount > 0 && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+          These rows carry dollars that reach no Procore Budget Line Items code. Assign a code (the
+          override interface) before exporting — every scope dollar must land on a code.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The headline Difference row: ✅ ties / ⚠ blocked / ⓘ deliberate override. */
+function DifferenceLine({ model }: { model: ReconciliationModel }) {
+  const delta = model.status === "ties" ? 0 : Math.abs(model.grandTotal.delta);
+  if (model.status === "ties") {
+    return (
+      <div className="flex items-center justify-between gap-3 font-bold">
+        <span className="uppercase tracking-wider text-slate-600 dark:text-slate-400">Difference</span>
+        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-mono">
+          {fmtUSD(0)} <CheckCircle2 size={14} /> <span className="not-italic">TIES</span>
+        </span>
+      </div>
+    );
+  }
+  if (model.status === "override") {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-3 font-bold">
+          <span className="uppercase tracking-wider text-slate-600 dark:text-slate-400">Difference</span>
+          <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-mono">
+            {fmtUSD(delta)} <Info size={14} />
+          </span>
+        </div>
+        <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
+          A direct total/subtotal override is active. The Procore budget carries line items only, so
+          its total reflects the computed scope; the workbook export carries your override.
+        </p>
+      </div>
+    );
+  }
+  // blocked
+  return (
+    <div className="flex items-center justify-between gap-3 font-bold">
+      <span className="uppercase tracking-wider text-slate-600 dark:text-slate-400">Difference</span>
+      <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-mono">
+        {fmtUSD(delta)} <AlertTriangle size={14} />
+      </span>
+    </div>
+  );
+}
+
+function ReconLine({
+  label,
+  value,
+  muted,
+  emphasis,
+  ok,
+  flag,
+}: {
+  label: string;
+  value: number;
+  muted?: boolean;
+  emphasis?: boolean;
+  ok?: boolean;
+  flag?: "overridden";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span
+        className={`min-w-0 truncate flex items-center gap-1.5 ${
+          emphasis
+            ? "font-bold uppercase tracking-wider text-foreground"
+            : muted
+              ? "text-slate-500 dark:text-slate-400"
+              : "text-slate-600 dark:text-slate-300"
+        }`}
+      >
+        {label}
+        {flag === "overridden" && (
+          <span className="text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+            overridden
+          </span>
+        )}
+      </span>
+      <span
+        className={`font-mono shrink-0 flex items-center gap-1 ${
+          emphasis ? "text-emerald-600 dark:text-emerald-400 font-black text-sm" : "text-foreground"
+        }`}
+      >
+        {fmtUSD(value)}
+        {ok === true && <CheckCircle2 size={13} className="text-emerald-600 dark:text-emerald-400" />}
+      </span>
     </div>
   );
 }

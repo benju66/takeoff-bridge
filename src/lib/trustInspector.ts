@@ -159,3 +159,149 @@ export function buildTraceModel({
     roundingLabel: roundingModeLabel(roundingMode),
   };
 }
+
+// ---------------------------------------------------------------------------
+// 5b — Reconciliation view-model (Phase 5, slice 3)
+//
+// Surfaces the export gate's tie-out LIVE (it runs silently today and throws the
+// result away when it passes), and extends it to the grand total: TOTAL ESTIMATED
+// COST ↔ the full Procore budget (scope rollup + the 60-xxxx modifier rollup). With
+// a modifier override applied this is the live INV-1 proof (screen == exported).
+//
+// PURE: this only arranges values the engine + export gate already produced and
+// classifies the divergence; the modifier rollup is `exporter.rollupEffectiveModifiers`.
+// No estimate math here — `calculations.ts` stays the sole authority.
+// ---------------------------------------------------------------------------
+
+/**
+ * Overall reconciliation classification — drives the status-bar chip color and the
+ * Reconcile-tab message. Amber (`blocked`) is reserved for genuine export blockers;
+ * a deliberate subtotal/total override the Procore CSV can't carry is `override`
+ * (informational, not an alarm); a sub-rounding-unit residual folds into `ties`.
+ */
+export type ReconciliationStatus = "ties" | "blocked" | "override";
+
+/** One tie layer: a left figure that must equal a right figure within tolerance. */
+export interface ReconciliationLayer {
+  left: number;
+  right: number;
+  /** left − right. */
+  delta: number;
+  /** |delta| within the layer's tolerance. */
+  ok: boolean;
+}
+
+export interface ReconciliationModel {
+  /** Scope tie (the existing gate): line-item subtotal ↔ 217-code Procore rollup. */
+  scope: ReconciliationLayer & { lineItemTotal: number; rollupTotal: number };
+  /** Σ effective modifiers written to the 60-xxxx codes (exporter.rollupEffectiveModifiers). */
+  modifierRollupTotal: number;
+  /** Grand-total tie: Total Estimated Cost ↔ full Procore budget (scope rollup + modifiers). */
+  grandTotal: ReconciliationLayer & { totalEstimatedCost: number; fullProcoreBudgetTotal: number };
+  /** True only when a direct subtotal/total override (not a modifier) is active. */
+  hasDirectOverride: boolean;
+  /** Rows whose dollars can't be placed on a Procore code (export-blocking). */
+  blockerCount: number;
+  /** Overall classification (chip color + tab message). */
+  status: ReconciliationStatus;
+  /** Active rounding rule key + human label (B-3 visibility). */
+  roundingMode: string;
+  roundingLabel: string;
+}
+
+export interface BuildReconciliationArgs {
+  /** The export gate's scope reconciliation (`validateExportReadiness().reconciliation`). */
+  reconciliation: { lineItemTotal: number; rollupTotal: number; delta: number; ok: boolean };
+  /** Count of rows carrying unmapped dollars (`validateExportReadiness().blockers.length`). */
+  blockerCount: number;
+  /** Effective (override-applied, FULL unfiltered) summary — never a filtered one (Amendment F). */
+  summary: TakeoffSummary;
+  /** Σ effective modifiers (exporter.rollupEffectiveModifiers) — the 60-xxxx dollars. */
+  modifierRollupTotal: number;
+  /** Active rounding rule key (e.g. "dollar"). */
+  roundingMode: string;
+  /** Cent-level tie tolerance (exporter.RECONCILIATION_TOLERANCE). */
+  tolerance: number;
+}
+
+/** Half the rounding unit — the most the rounded on-screen subtotal can differ from the raw Procore scope total. */
+function roundingResidualBound(mode: string): number {
+  switch (mode) {
+    case "dollar":
+      return 0.5;
+    case "ten":
+      return 5;
+    case "hundred":
+      return 50;
+    default:
+      return 0; // "none" → ties to the cent
+  }
+}
+
+/**
+ * Build the Reconcile view-model. The grand-total tie uses a ROUNDING-AWARE tolerance
+ * (½ the rounding unit + the cent tolerance): under `none` it ties to the cent; under
+ * `dollar` the subtotal's ≤$0.50 rounding residual still counts as tied (the tab shows
+ * the exact delta). A deliberate subtotal/total override blows past that band and is
+ * classified `override` (info, not amber). Real export blockers (unmapped rows / a
+ * broken scope tie) are the only `blocked` (amber) state.
+ */
+export function buildReconciliationModel({
+  reconciliation,
+  blockerCount,
+  summary,
+  modifierRollupTotal,
+  roundingMode,
+  tolerance,
+}: BuildReconciliationArgs): ReconciliationModel {
+  const scope = {
+    lineItemTotal: reconciliation.lineItemTotal,
+    rollupTotal: reconciliation.rollupTotal,
+    left: reconciliation.lineItemTotal,
+    right: reconciliation.rollupTotal,
+    delta: reconciliation.delta,
+    ok: reconciliation.ok,
+  };
+
+  const totalEstimatedCost = summary.totalEstimatedCost;
+  const fullProcoreBudgetTotal = reconciliation.rollupTotal + modifierRollupTotal;
+  const grandDelta = totalEstimatedCost - fullProcoreBudgetTotal;
+  const grandTolerance = roundingResidualBound(roundingMode) + tolerance;
+  const grandOk = Math.abs(grandDelta) <= grandTolerance;
+
+  const overrides = summary.overrides ?? {};
+  const hasDirectOverride =
+    overrides.subtotal != null || overrides.totalEstimatedCost != null;
+
+  // Amber is reserved for real export blockers. A grand-total divergence beyond the
+  // rounding band is benign only when a direct override explains it; otherwise it is
+  // an unexpected mismatch we must NOT hide, so it also surfaces as `blocked`.
+  let status: ReconciliationStatus;
+  if (blockerCount > 0 || !scope.ok) {
+    status = "blocked";
+  } else if (grandOk) {
+    status = "ties";
+  } else if (hasDirectOverride) {
+    status = "override";
+  } else {
+    status = "blocked";
+  }
+
+  return {
+    scope,
+    modifierRollupTotal,
+    grandTotal: {
+      totalEstimatedCost,
+      fullProcoreBudgetTotal,
+      left: totalEstimatedCost,
+      right: fullProcoreBudgetTotal,
+      delta: grandDelta,
+      ok: grandOk,
+    },
+    hasDirectOverride,
+    blockerCount,
+    status,
+    roundingMode,
+    roundingLabel: roundingModeLabel(roundingMode),
+  };
+}
