@@ -321,8 +321,13 @@ setter.
    input, mandatory reason; explicit Revert). The only option that captures the audit "why."
 3. **Rounding default (B-3)** → **Switch the default to `none`** (template-faithful — the app ties the
    unrounded company spreadsheet to the cent out of the box). A per-project toggle remains (a bid can
-   opt into `dollar`), and the active mode is shown in 5b. Accepted side effect: existing projects with
-   an unset `roundingRule` shift by ≤~$0.50/modifier.
+   opt into `dollar`), and the active mode is shown in 5b. **Rollout (refined 2026-06-09):** the
+   effective default lives in ~8 code `?? "dollar"` sites, and `db.ts` writes `rounding_rule`
+   explicitly on every save into a `NOT NULL` column — so **existing saved projects keep `'dollar'`
+   and do NOT move**; only new/unsaved projects pick up `'none'`. (Earlier "existing projects shift
+   ≤~$0.50/modifier" was overstated — they shift only if a user toggles them.) Confirmed schema gate:
+   `projects.rounding_rule … DEFAULT 'dollar'` (supabase_schema.sql:73) → `'none'` + migration, with
+   approval.
 4. **5b reconciliation scope** → **Build the grand-total tie now** (subtotal **+ 7 modifiers** ↔ full
    Procore budget incl. `60-xxxx` codes), in addition to the existing scope-level tie. This doubles as
    the live INV-1 proof.
@@ -342,7 +347,7 @@ New branch (e.g. `phase-5-visual-trust`) cut only when this plan is approved.
 | **3** | **5b Reconciliation tab + status-bar chip** — expose `validateExportReadiness().reconciliation` live (small selector/hook, single source with the export gate); **add a modifier-rollup so the panel ties the grand total** (subtotal + 7 modifiers ↔ full Procore budget incl. `60-xxxx`) = live INV-1 proof; show the active rounding mode (B-3 visibility). | `exporter.ts` (modifier rollup helper), `page.tsx` (or new `useExportReadiness`), `TrustInspector`, status bar | Tests: scope **and grand-total** tie at the cent; chip reflects a forced Δ; **grand-total still ties with an override active** (INV-1). |
 | **4** | **Override setter + ⚑ flags** (ships **with task 1**) — override-from-trace editor (computed shown, override input, required reason, save/revert); wire `db.recordEstimateOverride` + `refresh()`; ⚑ on overridden summary cells with computed-vs-override on hover; saving/failed states (throws surfaced). | `TrustInspector`, `EstimateTable.tsx`, reuse `useEstimateOverrides` | Tests: set → reload persists + computed still shown; revert; override of `0` honored; save-failure surfaced. |
 | **5** | **5c row provenance badges + Flags tab** — ▦/⬚/✎/⚠ glyphs per row from `source`/`needsReview`; Flags tab worklist (needs-review rows, **B-4** inline-recoverable unmapped classifications with carried qty, audit log from `overrideRecords`). | grid cell renderer / `columns`, `EstimateTable.tsx`, `TrustInspector` | **Flip INV-7 `it.todo` → real assertion** in `correctness-contract.test.ts`. B-4 recovery test. |
-| **6** | **B-3 rounding default → `none`** — change the `?? "dollar"` fallback to `?? "none"` in `computeTakeoffSummary`, `page.tsx`, and `exporter.ts`; verify/align any DB column default for `rounding_rule` (schema-source-of-truth guardrail); keep the per-project toggle (surfaced in 5b). | `calculations.ts`, `page.tsx`, `exporter.ts`, project settings UI; possibly `supabase_schema.sql` | Audit tests that relied on the `dollar` default; update contract G-1 disposition note (`none` is now the default). Golden still ties (already runs `none`). |
+| **6** | **B-3 rounding default → `none`** — flip ALL `?? "dollar"` sites (`calculations.ts:384`, `exporter.ts:118/276/1676`, `db.ts:42` read + `db.ts:73` write, `page.tsx:155`, `ArchitecturalParametersStep.tsx:146`); **schema gate confirmed tripped** → `projects.rounding_rule … DEFAULT 'dollar'` (`supabase_schema.sql:73`) to `'none'` + migration, approval first; keep per-project toggle. Existing saved projects keep `'dollar'` (don't move). | `calculations.ts`, `exporter.ts`, `db.ts`, `page.tsx`, `ArchitecturalParametersStep.tsx`, **`supabase_schema.sql` + migration** | Audit tests that omit `roundingRule` expecting `dollar`; update contract G-1 note (`none` now default). Golden still ties (already runs `none`). |
 
 **Cross-cutting requirements for the build:**
 - No financial math leaves `calculations.ts`; every surface is a view over its outputs (AGENTS.md).

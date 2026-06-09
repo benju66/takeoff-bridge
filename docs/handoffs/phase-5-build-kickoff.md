@@ -48,10 +48,18 @@ Cut a branch (e.g. `phase-5-visual-trust`) first. One logical slice per commit; 
 5. **5c row provenance badges + Flags tab** — ▦/⬚/✎/⚠ from `source`/`needsReview`; B-4 inline recovery
    of unmapped import rows; audit log from `overrideRecords`. **Flip the INV-7 `it.todo` → a real
    assertion** in `correctness-contract.test.ts`.
-6. **Rounding default → `none`** — flip the `?? "dollar"` fallbacks (`calculations.ts`, `page.tsx`,
-   `exporter.ts`); check/align any DB column default for `rounding_rule` (schema-source-of-truth
-   guardrail → update `supabase_schema.sql` first + get approval if a DDL default changes); update the
-   contract G-1 disposition note.
+6. **Rounding default → `none`** — *the effective default lives in code, not the DB.* Flip ALL of
+   these `?? "dollar"` sites to `"none"`: `calculations.ts:384`, `exporter.ts:118/276/1676`,
+   `db.ts:42` (read) **and `db.ts:73` (write)**, `page.tsx:155`,
+   `ArchitecturalParametersStep.tsx:146-147` (the toggle's default display). **Schema gate IS tripped**
+   (confirmed 2026-06-09): `projects.rounding_rule TEXT NOT NULL DEFAULT 'dollar'` (supabase_schema.sql
+   line 73) → change to `DEFAULT 'none'` + a live migration; update `supabase_schema.sql` first and get
+   architect approval (invoke `supabase:supabase` skill). **Rollout nuance:** because `db.ts:73` writes
+   `rounding_rule` explicitly on every save and the column is NOT NULL, **existing saved projects
+   already have `'dollar'` persisted and will NOT move** — only new/unsaved projects pick up `'none'`.
+   Existing bids change only if a user toggles them (per-project toggle stays, surfaced in 5b). Keep
+   the contract G-1 note in sync (`none` is now the default). Audit any test that omits `roundingRule`
+   expecting `dollar` (most pass it explicitly).
 
 ## Hard constraints (don't regress these)
 - **Golden McKenna must keep tying to $0.00** throughout (it runs with no overrides → the override
