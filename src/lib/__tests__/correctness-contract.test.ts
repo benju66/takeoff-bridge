@@ -22,6 +22,8 @@ import {
 } from '../calculations';
 import { rollupByProcoreCode, validateExportReadiness } from '../exporter';
 import { LINKED_DIVISION_ROWS } from '../constants';
+import { parseUsNumber } from '../parser';
+import { computeMergeResult, applyMergeInverse } from '../mergeTakeoff';
 import { ProcessedTakeoffRow } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -311,6 +313,37 @@ describe('INV-7 provenance completeness', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('INV-8 loud failure on import', () => {
-  it.todo('INV-8 no silent sign flip: "(1,234.50)" and "1,234.50-" parse to -1234.50 — Phase 3 parser-numbers.test.ts');
-  it.todo('INV-8 no dropped rows: an off-template valid code is appended to the grid and is undoable in one Ctrl+Z — Phase 3 import-integrity test');
+  it('INV-8 no silent sign flip: "(1,234.50)" and "1,234.50-" parse to -1234.50 (full coverage in parser-numbers.test.ts)', () => {
+    // A credit must REDUCE the bid — never silently become a positive number.
+    expect(parseUsNumber('(1,234.50)')).toEqual({ value: -1234.5, ambiguous: false });
+    expect(parseUsNumber('1,234.50-')).toEqual({ value: -1234.5, ambiguous: false });
+    expect(parseUsNumber('1,234.50')).toEqual({ value: 1234.5, ambiguous: false });
+    // Genuinely ambiguous input fails loud (flagged, value not trusted) rather than guessed.
+    expect(parseUsNumber('1.234,50')).toEqual({ value: 0, ambiguous: true });
+  });
+
+  it('INV-8 no dropped rows: an off-template valid code is appended and reverses in one undo (full coverage in import-integrity.test.ts)', () => {
+    const currentRows = [makeRow({ id: 'row-03-1000', itemId: '03-1000', matchedQty: 0, total: 0 })];
+    // A parsed row with a VALID itemId absent from the template grid (targetIdx === -1).
+    const offTemplate = makeRow({
+      id: 'parsed-0', itemId: '09-9000.001', classification: 'Painting',
+      matchedQty: 42, unitPrice: 3, total: 126, source: 'csv_import',
+    });
+    const { updatedRows, command } = computeMergeResult(
+      currentRows, [offTemplate], [], true, 5000, ['LS', 'SUM', 'ALLW', 'LUMP'],
+    );
+
+    // Appended (not dropped), visible, with its quantity and provenance.
+    const appended = updatedRows.find((r) => r.itemId === '09-9000.001');
+    expect(appended).toBeDefined();
+    expect(appended!.matchedQty).toBe(42);
+    expect(appended!.source).toBe('csv_import');
+    expect(updatedRows).toHaveLength(currentRows.length + 1);
+    expect(command.appendedRows).toHaveLength(1);
+
+    // One Ctrl+Z reverses the whole merge.
+    const undone = applyMergeInverse(updatedRows, command);
+    expect(undone).toHaveLength(currentRows.length);
+    expect(undone.find((r) => r.itemId === '09-9000.001')).toBeUndefined();
+  });
 });

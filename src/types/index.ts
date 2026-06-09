@@ -40,6 +40,13 @@ export interface ProcessedTakeoffRow {
   embeddedCode?: string;
   /** Provenance tracking: where this row originated */
   source?: 'template' | 'csv_import' | 'manual' | 'ai_suggestion';
+  /**
+   * Fail-loud flag (Phase 3 / INV-8): set when an imported quantity was genuinely
+   * ambiguous (e.g. European format) and was therefore NOT trusted (forced to 0) rather
+   * than silently coerced to a wrong positive number. The import override surface
+   * (ImportPreviewModal) shows a "Review #" badge so a human resolves it before confirm.
+   */
+  needsReview?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +199,20 @@ export interface MergeTakeoffDataCommand {
   }>;
   prevUnmapped: string[];
   nextUnmapped: string[];
+  /**
+   * Phase 3 / INV-8 (#3 no silent row drop): full rows that were APPENDED to the grid by
+   * this merge because they carry a valid itemId absent from the template (targetIdx === -1).
+   * They ride on the SAME command so one undo removes them and one redo re-adds them
+   * (AGENTS.md compounding-history). Distinct from prev/nextRowStates, which only diff rows
+   * that already existed. Optional for back-compat with commands that appended nothing.
+   */
+  appendedRows?: ProcessedTakeoffRow[];
+  /**
+   * Phase 3 / INV-8 (#3): rows REMOVED by this merge — in replace mode, prior off-template
+   * imported rows (source 'csv_import') are discarded so they don't linger as phantom blank
+   * $0 rows. Symmetric to appendedRows: removed on redo, re-added on undo. Optional.
+   */
+  removedRows?: ProcessedTakeoffRow[];
 }
 
 export interface DeleteRowCommand {

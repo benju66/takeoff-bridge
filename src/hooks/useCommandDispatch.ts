@@ -5,6 +5,7 @@ import { ProcessedTakeoffRow, ColumnDefinition, WorkbookCommand } from "@/types"
 import { UseCommandHistoryReturn } from "./useCommandHistory";
 import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
+import { applyMergeForward, applyMergeInverse } from "@/lib/mergeTakeoff";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -183,19 +184,9 @@ export function useCommandDispatch(
         break;
       }
       case "MERGE_TAKEOFF_DATA": {
-        setRows((prev) => {
-          const updated = [...prev];
-          for (const ns of cmd.nextRowStates) {
-            const idx = updated.findIndex((r) => r.id === ns.rowId);
-            if (idx !== -1) {
-              updated[idx] = { ...updated[idx], ...ns.fields };
-              if (ns.fields.rawQuantities) {
-                updated[idx].rawQuantities = ns.fields.rawQuantities.map((rq) => ({ ...rq }));
-              }
-            }
-          }
-          return updated;
-        });
+        // Redo: re-apply existing-row field state AND re-append off-template rows
+        // (pure logic shared with the live merge — src/lib/mergeTakeoff.ts).
+        setRows((prev) => applyMergeForward(prev, cmd));
         setUnmappedTakeoffClassifications(cmd.nextUnmapped);
         break;
       }
@@ -376,19 +367,9 @@ export function useCommandDispatch(
         break;
       }
       case "MERGE_TAKEOFF_DATA": {
-        setRows((prev) => {
-          const updated = [...prev];
-          for (const ps of cmd.prevRowStates) {
-            const idx = updated.findIndex((r) => r.id === ps.rowId);
-            if (idx !== -1) {
-              updated[idx] = { ...updated[idx], ...ps.fields };
-              if (ps.fields.rawQuantities) {
-                updated[idx].rawQuantities = ps.fields.rawQuantities.map((rq) => ({ ...rq }));
-              }
-            }
-          }
-          return updated;
-        });
+        // Undo: restore existing-row prev field state AND remove appended off-template rows,
+        // so one Ctrl+Z reverses the whole merge (pure logic — src/lib/mergeTakeoff.ts).
+        setRows((prev) => applyMergeInverse(prev, cmd));
         setUnmappedTakeoffClassifications(cmd.prevUnmapped);
         break;
       }

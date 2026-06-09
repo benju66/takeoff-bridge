@@ -60,10 +60,13 @@ export function ImportPreviewModal({
     const total = effectiveRows.length;
     const matched = effectiveRows.filter((r) => r.isMapped).length;
     const unmapped = total - matched;
+    // Rows whose imported number was ambiguous and was NOT trusted (Phase 3 / INV-8 #5).
+    const review = effectiveRows.filter((r) => r.needsReview).length;
+    // A flagged-for-review row already shows qty 0; don't also count it as a UOM mismatch.
     const uomMismatches = effectiveRows.filter(
-      (r) => r.isMapped && r.matchedQty === 0,
+      (r) => r.isMapped && r.matchedQty === 0 && !r.needsReview,
     ).length;
-    return { total, matched, unmapped, uomMismatches };
+    return { total, matched, unmapped, uomMismatches, review };
   }, [effectiveRows]);
 
   const handleToggleArchParam = (index: number) => {
@@ -214,7 +217,7 @@ function PreviewStage({
   effectiveRows: ProcessedTakeoffRow[];
   uomOverrides: Record<number, string>;
   setUomOverrides: React.Dispatch<React.SetStateAction<Record<number, string>>>;
-  stats: { total: number; matched: number; unmapped: number; uomMismatches: number };
+  stats: { total: number; matched: number; unmapped: number; uomMismatches: number; review: number };
   archParams: ArchParamSuggestion[];
   onToggleArchParam: (index: number) => void;
   onSheetChange?: (sheetName: string) => void;
@@ -270,6 +273,14 @@ function PreviewStage({
           value={stats.uomMismatches}
           color="amber"
         />
+        {stats.review > 0 && (
+          <StatBadge
+            icon={<AlertTriangle className="w-4 h-4" />}
+            label="Review #"
+            value={stats.review}
+            color="amber"
+          />
+        )}
       </div>
 
       {/* Architectural Parameters */}
@@ -370,7 +381,15 @@ function PreviewStage({
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-center">
-                    {row.isMapped ? (
+                    {row.needsReview ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300"
+                        title="The imported quantity was ambiguous and was not trusted. Enter the correct value before importing."
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        Review #
+                      </span>
+                    ) : row.isMapped ? (
                       row.matchedQty === 0 ? (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                           <AlertTriangle className="w-3 h-3" />
@@ -408,7 +427,7 @@ function ConfirmStage({
   appendData,
   archParams,
 }: {
-  stats: { total: number; matched: number; unmapped: number; uomMismatches: number };
+  stats: { total: number; matched: number; unmapped: number; uomMismatches: number; review: number };
   appendData: boolean;
   archParams: ArchParamSuggestion[];
 }) {
