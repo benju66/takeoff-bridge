@@ -191,3 +191,140 @@ export async function buildSyntheticTemplateBuffer(): Promise<Buffer> {
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);
 }
+
+// ===========================================================================
+// Past-bid variant (Import past bids — Phase 1)
+// ===========================================================================
+//
+// The same company-template shape as above, PLUS the three cases the import
+// feature must handle without dropping a dollar:
+//   1. SAME CODE, DIFFERENT SCOPE — two 08-4000.002 storefront lines (interior
+//      vs exterior), distinguished only in the description; both keep their
+//      IMPORTED unit price (1000, NOT the catalog default 6500) and roll up to
+//      one Procore code.
+//   2. CONFORMING-BUT-UNCATALOGUED — code 50-1234.567 matches NN-NNNN.NNN but is
+//      not in ESTIMATE_ITEMS_MASTER → imports unmapped (Flags worklist).
+//   3. AD-HOC / NON-CONFORMING — a hand-typed "SPECIAL-CRANE" line with no valid
+//      code → imports as a needsReview row, dollars preserved.
+//
+// Kept fully separate from SYNTHETIC_* above so golden-synthetic.test.ts (which
+// asserts exact counts/totals) stays byte-identical.
+
+/** Two storefront lines sharing 08-4000.002 — kept-imported price, not catalog 6500. */
+const PAST_BID_SAME_CODE: { itemId: string; description: string; qty: number; unitPrice: number }[] = [
+  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Interior", qty: 3, unitPrice: 1_000 }, // 3,000
+  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000
+];
+
+/** Conforming code absent from the catalog → imports unmapped. */
+const PAST_BID_UNCATALOGUED = { itemId: "50-1234.567", description: "Custom Curtainwall Package", qty: 1, unitPrice: 1_500 }; // 1,500
+
+/** Non-conforming hand-typed line (no valid code) → imports as needsReview. */
+const PAST_BID_ADHOC = { code: "SPECIAL-CRANE", description: "Custom Crane Mobilization", qty: 1, unitPrice: 2_500 }; // 2,500
+
+const PAST_BID_TAKEOFF_SUBTOTAL =
+  TAKEOFF_SUBTOTAL + // the 5 catalogued non-linked items (50,000)
+  PAST_BID_SAME_CODE.reduce((s, r) => s + r.qty * r.unitPrice, 0) + // 8,000
+  PAST_BID_UNCATALOGUED.qty * PAST_BID_UNCATALOGUED.unitPrice + // 1,500
+  PAST_BID_ADHOC.qty * PAST_BID_ADHOC.unitPrice; // 2,500  → 62,000
+
+const PAST_BID_SUBTOTAL = PAST_BID_TAKEOFF_SUBTOTAL + LINKED_TOTAL; // 112,000
+
+const PAST_BID_MODIFIER_VALUES: Record<string, number> = Object.fromEntries(
+  ESTIMATE_MODIFIERS.map((m) => [m.key, PAST_BID_SUBTOTAL * (SYNTHETIC_INPUTS.rates[m.key] ?? 0)])
+);
+const PAST_BID_MODIFIER_SUM = Object.values(PAST_BID_MODIFIER_VALUES).reduce((s, v) => s + v, 0); // 8,960
+const PAST_BID_TOTAL = PAST_BID_SUBTOTAL + PAST_BID_MODIFIER_SUM; // 120,960
+
+export const PAST_BID_ORACLE = {
+  takeoffSubtotal: PAST_BID_TAKEOFF_SUBTOTAL, // 62,000
+  linkedDivisionsTotal: LINKED_TOTAL, // 50,000
+  subtotal: PAST_BID_SUBTOTAL, // 112,000
+  totalEstimatedCost: PAST_BID_TOTAL, // 120,960
+  costPerUnit: PAST_BID_TOTAL / SYNTHETIC_INPUTS.unitCount, // 1,209.60
+  costPerSf: PAST_BID_TOTAL / SYNTHETIC_INPUTS.squareFootage, // 2.4192
+  /** Conforming line-item count (5 catalogued + 2 storefront + 1 uncatalogued + 10 linked = 18). */
+  conformingLineItemCount: NON_LINKED_ITEMS.length + PAST_BID_SAME_CODE.length + 1 + LINKED_ROWS.length,
+  adHocLineItemCount: 1,
+  sameCodeItemId: PAST_BID_SAME_CODE[0].itemId, // "08-4000.002"
+  sameCodeProcoreCode: "8-84000.000",
+  sameCodeImportedUnitPrice: PAST_BID_SAME_CODE[0].unitPrice, // 1,000 (NOT catalog 6500)
+  sameCodeTotal: PAST_BID_SAME_CODE.reduce((s, r) => s + r.qty * r.unitPrice, 0), // 8,000
+  uncataloguedItemId: PAST_BID_UNCATALOGUED.itemId,
+  adHocDescription: PAST_BID_ADHOC.description,
+  adHocTotal: PAST_BID_ADHOC.qty * PAST_BID_ADHOC.unitPrice, // 2,500
+} as const;
+
+/** Builds the synthetic PAST-BID workbook (.xlsx bytes) for the import tests. */
+export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+
+  // STEP 1 — identical inputs to the base synthetic fixture.
+  const s1 = wb.addWorksheet(SHEET.step1);
+  s1.getCell("C1").value = "Project Name";
+  s1.getCell("D1").value = "Synthetic Past Bid";
+  s1.getCell("C2").value = "Gross SF";
+  s1.getCell("D2").value = SYNTHETIC_INPUTS.squareFootage;
+  s1.getCell("C3").value = "# of Units";
+  s1.getCell("D3").value = SYNTHETIC_INPUTS.unitCount;
+  s1.getCell("C4").value = "Expected Start";
+  s1.getCell("D4").value = SYNTHETIC_INPUTS.startDate;
+  s1.getCell("C5").value = "Expected Finish";
+  s1.getCell("D5").value = SYNTHETIC_INPUTS.finishDate;
+  ESTIMATE_MODIFIERS.forEach((m, i) => {
+    const r = 8 + i;
+    s1.getCell(`F${r}`).value = m.label;
+    s1.getCell(`G${r}`).value = SYNTHETIC_INPUTS.rates[m.key] ?? 0;
+  });
+
+  // STEP 2 / STEP 3 — section subtotals feeding the linked rows.
+  const s2 = wb.addWorksheet(SHEET.step2);
+  const s3 = wb.addWorksheet(SHEET.step3);
+  let s2Row = 1;
+  let s3Row = 1;
+  for (const link of LINKED_ROWS) {
+    const ws = link.sheet === "step2" ? s2 : s3;
+    const row = link.sheet === "step2" ? s2Row++ : s3Row++;
+    ws.getCell(`H${row}`).value = link.subtotalLabel;
+    ws.getCell(`I${row}`).value = link.value;
+  }
+
+  // STEP 4 — line items, then the SUBTOTAL / modifier / TOTAL oracle rows.
+  const s4 = wb.addWorksheet(SHEET.step4);
+  s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic past bid)";
+  let row = 2;
+  const writeItem = (itemId: string, description: string, qty: number, unitPrice: number) => {
+    s4.getCell(`C${row}`).value = itemId;
+    s4.getCell(`D${row}`).value = description;
+    s4.getCell(`F${row}`).value = qty;
+    s4.getCell(`H${row}`).value = unitPrice;
+    row++;
+  };
+  for (const it of NON_LINKED_ITEMS) writeItem(it.itemId, it.description, it.qty, it.unitPrice);
+  for (const it of PAST_BID_SAME_CODE) writeItem(it.itemId, it.description, it.qty, it.unitPrice);
+  writeItem(PAST_BID_UNCATALOGUED.itemId, PAST_BID_UNCATALOGUED.description, PAST_BID_UNCATALOGUED.qty, PAST_BID_UNCATALOGUED.unitPrice);
+  // Ad-hoc line — non-conforming code typed straight into col C.
+  writeItem(PAST_BID_ADHOC.code, PAST_BID_ADHOC.description, PAST_BID_ADHOC.qty, PAST_BID_ADHOC.unitPrice);
+  for (const link of LINKED_ROWS) writeItem(link.itemId, link.description, 1, link.value);
+
+  const subtotalRow = row;
+  s4.getCell(`H${subtotalRow}`).value = "SUBTOTAL";
+  s4.getCell(`I${subtotalRow}`).value = PAST_BID_SUBTOTAL;
+  row++;
+
+  for (const m of ESTIMATE_MODIFIERS) {
+    s4.getCell(`C${row}`).value = m.code;
+    s4.getCell(`D${row}`).value = m.label;
+    s4.getCell(`F${row}`).value = SYNTHETIC_INPUTS.rates[m.key] ?? 0;
+    s4.getCell(`I${row}`).value = PAST_BID_MODIFIER_VALUES[m.key];
+    row++;
+  }
+
+  const totalRow = row;
+  s4.getCell(`H${totalRow}`).value = "TOTAL";
+  s4.getCell(`I${totalRow}`).value = PAST_BID_TOTAL;
+  s4.getCell(`J${totalRow}`).value = PAST_BID_ORACLE.costPerUnit;
+
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out);
+}

@@ -37,6 +37,7 @@ const SOURCE_BADGES: Record<
 > = {
   template: { kind: "template", label: "Template", tooltip: "From the estimate template" },
   csv_import: { kind: "imported", label: "Imported (CSV)", tooltip: "Imported from CSV" },
+  imported: { kind: "imported", label: "Imported (past bid)", tooltip: "Imported from a past company-template estimate" },
   manual: { kind: "manual", label: "Manual", tooltip: "Hand-entered" },
   ai_suggestion: {
     kind: "ai_suggestion",

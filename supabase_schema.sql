@@ -78,7 +78,15 @@ CREATE TABLE projects (
   -- Phase 3a: per-project template selection (multifamily | ti | medical)
   project_type TEXT NOT NULL DEFAULT 'multifamily',
   -- Market sector classification (display label, e.g. 'Healthcare'; '' = unset legacy project)
-  market_sector TEXT NOT NULL DEFAULT ''
+  market_sector TEXT NOT NULL DEFAULT '',
+  -- Import past bids (Phase 1, 2026-06-09): true = this project was created by
+  -- importing a finished company-template estimate. A finished bid's GC/Site-Ops
+  -- division totals are hand-authored lump sums the app cannot reverse-engineer
+  -- into staffing inputs (finding G-2), so for imported projects the workspace
+  -- treats the 10 saved linked-division line items as authoritative statics
+  -- (their stored qty×unitPrice IS the linked total) rather than recomputing them
+  -- from STEP 2/3 — this is what lets a reopened import still tie to the cent.
+  is_imported BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ─────────────────────────────────────────────────

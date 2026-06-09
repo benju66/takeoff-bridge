@@ -568,6 +568,18 @@ export function useTakeoffWorkbook(
   /** null for normal rows; linked-row display state otherwise. */
   const getLinkedRowState = (row: ProcessedTakeoffRow) => {
     if (!isLinkedDivisionRow(row.itemId)) return null;
+    // IMPORTED projects (finding G-2): the saved linked row carries the bid's
+    // authoritative GC/Site-Ops lump sum (its stored qty×unitPrice), not a stray
+    // typed value — show that as the linked value and keep the row read-only so
+    // the displayed total ties the reopened import.
+    if (project?.isImported) {
+      const cfg = LINKED_DIVISION_ROWS.find((c) => c.itemId === (row.itemId || "").trim());
+      return {
+        value: row.matchedQty * row.unitPrice,
+        sourceLabel: cfg?.sourceLabel ?? "",
+        stray: false,
+      };
+    }
     const entry = linkedTotalByItemId.get((row.itemId || "").trim());
     return {
       value: entry?.total ?? 0,

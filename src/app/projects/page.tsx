@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2 } from "lucide-react";
+import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2, FileSpreadsheet } from "lucide-react";
 import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
 import { MARKET_SECTORS } from "@/lib/constants";
 import { Project } from "@/types/db";
@@ -112,6 +112,12 @@ export default function ProjectsDashboard() {
           </div>
           
           <div className="flex items-center gap-3">
+            <Link
+              href="/projects/import"
+              className="flex items-center gap-2 bg-card hover:bg-background dark:bg-card dark:hover:bg-background text-blue-600 dark:text-blue-400 border border-grid-border hover:border-blue-500/50 dark:hover:border-blue-400/50 text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300"
+            >
+              <FileSpreadsheet size={18} /> Import Past Estimate
+            </Link>
             <button
               onClick={() => setIsModalOpen(true)}
               className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300 shadow-lg shadow-blue-900/30 hover:shadow-indigo-900/40 transform hover:-translate-y-0.5"

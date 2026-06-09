@@ -79,6 +79,14 @@ export interface ExtractedLineItem {
   total: number;
   /** True for the 10 GC/Site-Ops linked division rows (their value comes from STEP 2/3). */
   isLinked: boolean;
+  /**
+   * True for a non-conforming STEP 4 line — a hand-typed row whose code cell does
+   * NOT match `NN-NNNN.NNN` but which carries real dollars. These travel in
+   * `ExtractedEstimate.adHocLineItems` (kept OUT of `lineItems` so the golden
+   * extraction path is byte-identical); the import flow brings them in as
+   * `needsReview` rows so no dollar is ever dropped.
+   */
+  isAdHoc: boolean;
   /** Source row number on STEP 4 (provenance / debugging). */
   rowNumber: number;
 }
@@ -138,6 +146,13 @@ export interface ExtractedOracleOutputs {
 export interface ExtractedEstimate {
   inputs: ExtractedProjectInputs;
   lineItems: ExtractedLineItem[];
+  /**
+   * Non-conforming STEP 4 lines that carry dollars (code cell not `NN-NNNN.NNN`).
+   * Kept SEPARATE from `lineItems` so the golden extraction/tie-out path is
+   * byte-identical; the import flow folds these in as `needsReview` rows so a
+   * finished bid's hand-typed lines are imported, never dropped.
+   */
+  adHocLineItems: ExtractedLineItem[];
   oracle: ExtractedOracleOutputs;
   /** STEP 2 line inputs (for future deep reconstruction / diagnostics). */
   step2Lines: ExtractedSheetLine[];
@@ -302,6 +317,7 @@ function extractInputs(wb: ExcelJS.Workbook): ExtractedProjectInputs {
 
 function extractStep4(wb: ExcelJS.Workbook): {
   lineItems: ExtractedLineItem[];
+  adHocLineItems: ExtractedLineItem[];
   oracle: Pick<
     ExtractedOracleOutputs,
     | "step4Subtotal"
@@ -324,17 +340,44 @@ function extractStep4(wb: ExcelJS.Workbook): {
   const modifierCodes = new Map(ESTIMATE_MODIFIERS.map((m) => [m.code, m]));
 
   const lineItems: ExtractedLineItem[] = [];
+  const adHocLineItems: ExtractedLineItem[] = [];
   const linkedDivisionValues: { itemId: string; total: number }[] = [];
 
   for (let r = 1; r < subtotalRow; r++) {
-    const itemId = text(s4, `C${r}`);
-    if (!COST_CODE_RE.test(itemId)) continue;
+    const rawCode = text(s4, `C${r}`);
     const qty = num(s4, `F${r}`);
     const unitPrice = num(s4, `H${r}`);
-    const total = qty * unitPrice;
-    const isLinked = isLinkedDivisionRow(itemId);
-    lineItems.push({ itemId, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, rowNumber: r });
-    if (isLinked) linkedDivisionValues.push({ itemId, total });
+
+    if (COST_CODE_RE.test(rawCode)) {
+      const total = qty * unitPrice;
+      const isLinked = isLinkedDivisionRow(rawCode);
+      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r });
+      if (isLinked) linkedDivisionValues.push({ itemId: rawCode, total });
+      continue;
+    }
+
+    // Non-conforming row. Capture it as ad-hoc ONLY when it carries real dollars,
+    // so a finished bid's hand-typed line (no NN-NNNN.NNN code) is imported and
+    // never dropped (plan: "never drop a dollar"). Title/header/blank rows carry
+    // no dollar and are skipped. Dollar source: F×H, else the cached extended-
+    // amount cell I (a lump line with the amount typed straight into col I).
+    const computed = qty * unitPrice;
+    const iCell = numOrNull(s4, `I${r}`);
+    const dollar = computed !== 0 ? computed : (iCell ?? 0);
+    if (dollar === 0) continue;
+    // Normalize so matchedQty × unitPrice reproduces the dollar through the engine.
+    const adQty = computed !== 0 ? qty : 1;
+    const adPrice = computed !== 0 ? unitPrice : dollar;
+    adHocLineItems.push({
+      itemId: "",
+      description: text(s4, `D${r}`) || rawCode,
+      qty: adQty,
+      unitPrice: adPrice,
+      total: adQty * adPrice,
+      isLinked: false,
+      isAdHoc: true,
+      rowNumber: r,
+    });
   }
 
   // Modifier dollar cells sit between SUBTOTAL and TOTAL, keyed by their 60-xxxx code.
@@ -358,6 +401,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
 
   return {
     lineItems,
+    adHocLineItems,
     oracle: {
       step4Subtotal: num(s4, `I${subtotalRow}`),
       step4SubtotalRow: subtotalRow,
@@ -479,13 +523,14 @@ export async function loadTemplateWorkbook(buffer: ArrayBuffer | Buffer): Promis
 /** Reads a template-format workbook into a typed ExtractedEstimate. */
 export function extractEstimate(wb: ExcelJS.Workbook): ExtractedEstimate {
   const inputs = extractInputs(wb);
-  const { lineItems, oracle: step4Oracle } = extractStep4(wb);
+  const { lineItems, adHocLineItems, oracle: step4Oracle } = extractStep4(wb);
   const step23 = extractStep23(wb);
   const bli = extractBli(wb);
 
   return {
     inputs,
     lineItems,
+    adHocLineItems,
     step2Lines: step23.step2Lines,
     step3Lines: step23.step3Lines,
     oracle: {

@@ -42,6 +42,7 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     roundingRule: (row.rounding_rule as string) || "none",
     projectType: (row.project_type as string) || "multifamily",
     marketSector: (row.market_sector as string) || "",
+    isImported: row.is_imported === true,
   };
 }
 
@@ -73,6 +74,7 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     rounding_rule: project.roundingRule ?? "none",
     project_type: project.projectType ?? "multifamily",
     market_sector: project.marketSector ?? "",
+    is_imported: project.isImported ?? false,
   };
 }
 

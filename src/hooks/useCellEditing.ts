@@ -9,6 +9,7 @@ import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
 import { captureRowFields, ITEM_ID_CASCADE_CAPTURE_FIELDS } from "@/lib/commandCapture";
+import { cascadeEligible, cascadesToSibling } from "@/lib/cascade";
 
 // ---------------------------------------------------------------------------
 // useCellEditing — Cell editing state, handlers, and cascade logic
@@ -131,10 +132,11 @@ export function useCellEditing(
         row.total = qty * resolvedUnitPrice;
         row.isMapped = true;
 
-        // Cascade duplicates
-        if (classification && classification !== "MANUAL ENTRY") {
+        // Cascade duplicates (imported rows are independently authored — they
+        // neither drive nor receive the cascade; see src/lib/cascade.ts)
+        if (cascadeEligible(row)) {
           for (let i = 0; i < updated.length; i++) {
-            if (i !== index && updated[i].classification === classification) {
+            if (i !== index && cascadesToSibling(row, updated[i])) {
               updated[i].itemId = newCode;
               updated[i].description = targetItem.description;
               updated[i].procoreParentCode = targetItem.procoreParentCode;
@@ -170,9 +172,9 @@ export function useCellEditing(
       }
     } else if (field === "description") {
       row.description = String(value);
-      if (classification && classification !== "MANUAL ENTRY") {
+      if (cascadeEligible(row)) {
         for (let i = 0; i < updated.length; i++) {
-          if (updated[i].classification === classification) {
+          if (cascadesToSibling(row, updated[i])) {
             updated[i].description = String(value);
           }
         }
@@ -186,9 +188,9 @@ export function useCellEditing(
       row.unitPrice = price;
       row.total = row.matchedQty * price;
 
-      if (classification && classification !== "MANUAL ENTRY") {
+      if (cascadeEligible(row)) {
         for (let i = 0; i < updated.length; i++) {
-          if (updated[i].classification === classification) {
+          if (cascadesToSibling(row, updated[i])) {
             updated[i].unitPrice = price;
             updated[i].total = updated[i].matchedQty * price;
             updated[i].dataFidelity = evaluateDataFidelity(updated[i].matchedQty, updated[i].uom, updated[i].total, threshold, keywords);
@@ -302,7 +304,7 @@ export function useCellEditing(
     // Fields whose edit derives side-effect fields (on the edited row and/or
     // siblings) — these need the before/after simulation. Simulated ONCE here
     // and shared by the sibling-cascade, primary self-capture, and UOM blocks.
-    const hasSiblingCascade = CASCADE_FIELDS.has(field) && classification && classification !== "MANUAL ENTRY";
+    const hasSiblingCascade = CASCADE_FIELDS.has(field) && cascadeEligible(row);
     const needsSimulation = field === "itemId" || field === "uom" || hasSiblingCascade;
 
     let simPrev: ProcessedTakeoffRow[] | null = null;
@@ -322,7 +324,7 @@ export function useCellEditing(
     if (hasSiblingCascade && simPrev && simNext) {
       cascadeEffects = [];
       for (let i = 0; i < currentRows.length; i++) {
-        if (i !== idx && currentRows[i].classification === classification) {
+        if (i !== idx && cascadesToSibling(row, currentRows[i])) {
           const prevSibling = simPrev[i];
           const nextSibling = simNext[i];
 

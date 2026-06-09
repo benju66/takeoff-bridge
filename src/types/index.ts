@@ -38,8 +38,14 @@ export interface ProcessedTakeoffRow {
   dataFidelity?: 'discrete_unit' | 'macro_lump_sum';
   /** Cost code extracted from classification string (e.g., "03-0000.002" from "03-0000.002 - Footings") */
   embeddedCode?: string;
-  /** Provenance tracking: where this row originated */
-  source?: 'template' | 'csv_import' | 'manual' | 'ai_suggestion';
+  /**
+   * Provenance tracking: where this row originated. `'imported'` = a line read
+   * from a finished company-template estimate via the "Import past bids" flow
+   * (importEstimate.ts). Imported lines are individually authored, so they are
+   * cascade-INDEPENDENT (see src/lib/cascade.ts) — editing one never rewrites a
+   * sibling sharing its code/classification.
+   */
+  source?: 'template' | 'csv_import' | 'manual' | 'ai_suggestion' | 'imported';
   /**
    * Fail-loud flag (Phase 3 / INV-8): set when an imported quantity was genuinely
    * ambiguous (e.g. European format) and was therefore NOT trusted (forced to 0) rather

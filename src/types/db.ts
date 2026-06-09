@@ -29,6 +29,15 @@ export interface Project {
   projectType?: string;
   /** Market sector classification (display label, e.g. 'Healthcare'; '' = unset legacy project) */
   marketSector?: string;
+  /**
+   * Import past bids (Phase 1): true = created by importing a finished
+   * company-template estimate. The 10 GC/Site-Ops linked-division line items
+   * carry hand-authored lump sums the app cannot re-derive from staffing inputs
+   * (finding G-2); for imported projects the workspace treats those saved rows'
+   * stored qty×unitPrice as the authoritative linked totals (linkedTotalsFromRows)
+   * so a reopened import still ties to the cent. Default false = a normal project.
+   */
+  isImported?: boolean;
 }
 
 export interface ProjectEstimate {

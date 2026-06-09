@@ -17,6 +17,7 @@ import {
   computeLinkedDivisionTotals,
 } from "@/lib/calculations";
 import { isLinkedDivisionRow } from "@/lib/constants";
+import { linkedTotalsFromRows } from "@/lib/importEstimate";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
@@ -132,19 +133,31 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // gc-siteops Phase 5: live linked values for the 10 STEP 4 division rows
   // (template rows 12–24). They join the subtotal/modifier basis whenever
   // their row is visible — exactly like the template's I331.
+  //
+  // IMPORTED projects (finding G-2): a finished bid's GC/Site-Ops lump sums are
+  // hand-authored and cannot be re-derived from staffing inputs, so the saved
+  // linked-division rows ARE the authority — derive the linked totals from those
+  // rows (linkedTotalsFromRows) instead of recomputing from STEP 2/3. This is
+  // what lets a reopened import still tie to the cent.
   const linkedDivisionTotals = React.useMemo(
-    () => computeLinkedDivisionTotals(personnel.calcResult, infrastructure.calcResult),
-    [personnel.calcResult, infrastructure.calcResult]
+    () => project?.isImported
+      ? linkedTotalsFromRows(rows)
+      : computeLinkedDivisionTotals(personnel.calcResult, infrastructure.calcResult),
+    [project?.isImported, rows, personnel.calcResult, infrastructure.calcResult]
   );
 
   // Stray typed dollars on linked rows count nowhere (trap closure) — surface
-  // them in the EstimateTable banner instead of silently dropping.
+  // them in the EstimateTable banner instead of silently dropping. For an
+  // imported project those typed dollars are the AUTHORITATIVE linked statics
+  // (counted via linkedTotalsFromRows above), not stray, so none are flagged.
   const strayLinkedRows = React.useMemo(
     () =>
-      rows
-        .filter((r) => isLinkedDivisionRow(r.itemId) && r.matchedQty * r.unitPrice !== 0)
-        .map((r) => ({ itemId: r.itemId, description: r.description, amount: r.matchedQty * r.unitPrice })),
-    [rows]
+      project?.isImported
+        ? []
+        : rows
+            .filter((r) => isLinkedDivisionRow(r.itemId) && r.matchedQty * r.unitPrice !== 0)
+            .map((r) => ({ itemId: r.itemId, description: r.description, amount: r.matchedQty * r.unitPrice })),
+    [rows, project?.isImported]
   );
 
   // Modifier rates + rounding (template defaults applied) — shared by the on-screen
