@@ -7,13 +7,14 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search } from "lucide-react";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
-import { DIVISION_LABELS, ESTIMATE_MODIFIERS } from "@/lib/constants";
+import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
-import { getTerminalProgressBar, TakeoffSummary } from "@/lib/calculations";
+import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
+import { TrustInspector } from "./TrustInspector";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
 import { FilterableColumnHeader } from "./FilterableColumnHeader";
@@ -25,6 +26,25 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 // EstimateTable — Step 4 Panel
 // Takeoff Workbook Spreadsheet Matrix + Summary Analytics
 // ---------------------------------------------------------------------------
+
+/** A locked summary total cell: the formatted value plus a 🔍 trace affordance
+ *  that opens the Trust Inspector focused on this value (Phase 5). */
+function SummaryTraceCell({ valueStr, onTrace }: { valueStr: string; onTrace: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 justify-center">
+      <span>{valueStr}</span>
+      <button
+        type="button"
+        onClick={onTrace}
+        title="Trace this number"
+        aria-label="Open Trust Inspector for this value"
+        className="text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+      >
+        <Search size={12} />
+      </button>
+    </span>
+  );
+}
 
 interface EstimateTableProps {
   project: Project;
@@ -68,6 +88,10 @@ interface EstimateTableProps {
   takeoffSummary: TakeoffSummary;
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
+
+  /** Live linked GC + Site Ops division values (the 10 rows) — fed to the Trust
+   *  Inspector trace; a pure view, no engine recompute. */
+  linkedDivisionTotals: LinkedDivisionTotal[];
 
   /** Linked division rows carrying stray typed dollars — excluded from all
    *  totals (gc-siteops Phase 5 trap closure); surfaced, never silently dropped. */
@@ -123,6 +147,7 @@ export function EstimateTable({
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
+  linkedDivisionTotals,
   strayLinkedRows,
   selection,
   globalFilter,
@@ -160,6 +185,28 @@ export function EstimateTable({
   };
 
   // ---------------------------------------------------------------------------
+  // Trust Inspector (Phase 5 — glass box). Opens focused on a clicked summary
+  // field; a persistent button reopens it. Pure view — no engine recompute.
+  // ---------------------------------------------------------------------------
+  const [trustOpen, setTrustOpen] = React.useState(false);
+  const [trustField, setTrustField] = React.useState<string>("totalEstimatedCost");
+  // Bumped on every open so the inspector remounts fresh (starts on Trace, as a
+  // slide-over) when a new summary cell's 🔍 is clicked while it is already open.
+  const [trustSeq, setTrustSeq] = React.useState(0);
+  const openTrust = useCallback((field: string) => {
+    setTrustField(field);
+    setTrustOpen(true);
+    setTrustSeq((s) => s + 1);
+  }, []);
+
+  // [view rows] — clear any active filter so all contributing takeoff rows are
+  // visible, then scroll the grid to the top. Reuses globalFilter + scrollToRowRef.
+  const handleViewTakeoffRows = useCallback(() => {
+    setGlobalFilter("");
+    requestAnimationFrame(() => scrollToRowRef?.current?.(0));
+  }, [setGlobalFilter, scrollToRowRef]);
+
+  // ---------------------------------------------------------------------------
   // Click-outside-to-deselect (E2)
   // ---------------------------------------------------------------------------
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -186,6 +233,14 @@ export function EstimateTable({
   // ---------------------------------------------------------------------------
   const [collapsedDivisions, setCollapsedDivisions] = React.useState<Record<string, boolean>>({});
   const tableRows = table.getRowModel().rows;
+
+  // Contributing (non-linked) takeoff rows — the count behind the trace's
+  // "Takeoff Σ(qty×price) · N rows". Counts the table's current (filtered) model
+  // so it matches the on-screen takeoffSubtotal under an active filter (Amendment F).
+  const takeoffRowCount = useMemo(
+    () => tableRows.filter((r) => !isLinkedDivisionRow(r.original.itemId)).length,
+    [tableRows]
+  );
 
   // Analytics drawer collapse — read-only block, remembered per browser so it stays
   // out of the way once dismissed (single-company tool → one fixed key, no per-project state).
@@ -583,6 +638,15 @@ export function EstimateTable({
             </span>
 
             <button
+              onClick={() => openTrust("totalEstimatedCost")}
+              type="button"
+              title="Open the Trust Inspector — trace how every number is built"
+              className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
+            >
+              <Search size={14} /> Trust
+            </button>
+
+            <button
               onClick={handleAddCustomColumn}
               type="button"
               className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/15 dark:hover:bg-blue-950/35 text-blue-600 dark:text-blue-400 border border-grid-border rounded-lg px-3 py-1.5 font-bold uppercase transition-all duration-300 text-xs cursor-pointer select-none"
@@ -843,7 +907,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
                     else if (column.id === "description") { content = "Estimate Subtotal (incl. GC + Site Ops)"; alignClass = "text-left font-sans"; }
-                    else if (column.id === "total") { content = `$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("subtotal")} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
@@ -870,7 +934,7 @@ export function EstimateTable({
                         else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
                         else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
                         else if (column.id === "unitPrice") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                        else if (column.id === "total") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-foreground font-bold font-mono"; }
+                        else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                         else if (column.id === "costPerUnit") { content = `$${(modValue / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         else if (column.id === "costPerSf") { content = `$${(modValue / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
@@ -887,7 +951,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold font-mono"; }
                     else if (column.id === "description") { content = "Total Estimated Cost"; alignClass = "text-left uppercase tracking-wider font-sans"; }
-                    else if (column.id === "total") { content = `$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("totalEstimatedCost")} />; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
@@ -951,6 +1015,19 @@ export function EstimateTable({
           onSheetChange={reParseWithSheet}
         />
       )}
+
+      {/* Trust Inspector — glass-box trace (Phase 5). Pure view over the summary. */}
+      <TrustInspector
+        key={trustSeq}
+        open={trustOpen}
+        onClose={() => setTrustOpen(false)}
+        focusField={trustField}
+        summary={takeoffSummary}
+        linkedTotals={linkedDivisionTotals}
+        project={project}
+        takeoffRowCount={takeoffRowCount}
+        onViewTakeoffRows={handleViewTakeoffRows}
+      />
     </>
   );
 }

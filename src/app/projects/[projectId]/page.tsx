@@ -447,6 +447,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
+            linkedDivisionTotals={linkedDivisionTotals}
             strayLinkedRows={strayLinkedRows}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}

@@ -28,9 +28,38 @@
   - *Why it could land alone (ahead of the slice-4 setter):* with no setter, `activeOverrides` is
     always `{}`, so the export path is provably inert — INV-1 is never transiently violated. The
     setter (slice 4) must not ship before this; it now can.
-- **Slices 2–6: NOT STARTED.** Next session begins at **slice 2** (Trust Inspector shell + 5a Trace).
-  Reminder: **slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
-  (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill).
+- **Slice 2 — Trust Inspector shell (slide-over + ⤢) + 5a Trace (read-only): DONE (2026-06-09).**
+  - New pure view-model `src/lib/trustInspector.ts` — `buildTraceModel()` *arranges* engine outputs
+    (`computeTakeoffSummary` + `computeLinkedDivisionTotals` + `project` rates) into the decomposition
+    tree; computes **zero dollars** (calculations.ts stays sole authority). Also `ROUNDING_MODE_LABELS`
+    / `roundingModeLabel()` for the inline rounding display (B-3 visibility). Unit-tested in node
+    (`src/lib/__tests__/trustInspector.test.ts`, **+10 tests**) — the repo has NO DOM-test harness
+    (no @testing-library/react / jsdom; default node env), so the trace's wiring is asserted on the
+    pure builder, not the DOM. Tests assert STRUCTURE/wiring (which engine value lands on which node,
+    rate origin ✎/⚙, row count, rounding label, override pairs) — **no engine-math assertions**.
+  - New component `src/components/workspace/TrustInspector.tsx` — ONE shared content tree in TWO
+    shells: docked right **slide-over** (no backdrop → clicked number stays visible) + **⤢ full-screen
+    modal** (`Maximize2`/`Minimize2`). **Escape** collapses full-screen→slide-over, else closes. Three
+    tabs **Trace · Reconcile · Flags**; **Trace filled**, Reconcile (slice 3) + Flags (slice 5) are
+    clearly-marked placeholders. Trace tree: Total → Subtotal → Takeoff Σ(qty×price) · N rows
+    `[view rows]` / Linked divisions (expand → the 10 `linkedDivisionTotals` rows) → 7 modifiers
+    (rate% × Subtotal, ✎ project-set / ⚙ default badge, override computed→override pair) → inline
+    rounding mode. Icons via lucide (no source emoji).
+  - `EstimateTable.tsx`: new required prop `linkedDivisionTotals`; persistent **🔍 Trust** button in
+    the grid controls; **🔍 affordance** (`SummaryTraceCell`) on the subtotal / 7 modifier / total
+    summary cells → opens focused on that `OVERRIDABLE_SUMMARY_FIELDS` field. A `trustSeq` counter
+    `key`s the inspector so each open remounts fresh (Trace tab, slide-over) — avoids a
+    setState-in-effect. `[view rows]` = clear `globalFilter` + `scrollToRowRef.current(0)`.
+    `takeoffRowCount` counts the **filtered** table model (matches the on-screen takeoffSubtotal under
+    a filter — Amendment F). `page.tsx`: passes `linkedDivisionTotals` (already a local).
+  - **No engine change; no override setter** (that's slice 4); pure view. Golden McKenna ties $0.00
+    (7/7). Suite **367 pass + 1 todo** (35 files); `tsc` clean; new files lint-clean (EstimateTable
+    keeps only its 2 pre-existing warnings); code-review clean. Committed as the slice-2 feature commit.
+- **Slices 3–6: NOT STARTED.** Next session begins at **slice 3** (5b Reconciliation tab + status
+  chip — surface `validateExportReadiness().reconciliation` live + the modifier-rollup grand-total
+  tie + rounding mode). Reminder: **slice 6 PAUSES for architect approval** of the 1-line
+  `projects.rounding_rule` migration (update `supabase_schema.sql` first; invoke the
+  `supabase:supabase` skill).
 
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore
