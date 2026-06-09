@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   generateExcelWorkbook,
   generateProcoreBudget,
+  generateExcelPayload,
   validateExportReadiness,
   rollupByProcoreCode,
   rollupGcSiteOps,
@@ -10,7 +11,7 @@ import {
 } from "../lib/exporter";
 import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals, computeTakeoffSummary } from "../lib/calculations";
 import { LINKED_DIVISION_ROWS } from "../lib/constants";
-import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import type { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
 import type { Project } from "@/types/db";
 import fs from "fs";
 import ExcelJS from "exceljs";
@@ -1165,4 +1166,153 @@ describe("STEP 2/3 sheet detail (Phase 6)", () => {
       expect(xml, `${sheetFile} shared formulas flattened`).not.toContain('t="shared"');
     }
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Export applies estimator overrides (INV-1: on-screen == exported)
+// ---------------------------------------------------------------------------
+
+describe("Export applies overrides (Phase 5 — INV-1)", () => {
+  const mockColumns: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProject: Project = {
+    id: "project-ov",
+    name: "Phase 5 Override Export Test",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-09",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const summaryRates = {
+    constructionContingencyRate: 0, designContingencyRate: 0, buildersRiskRate: 0,
+    specialInsuranceRate: 0, glInsuranceRate: 0.01, bondRate: 0, feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x", classification: "", itemId: "", procoreParentCode: "", procoreCode: "",
+    description: "", matchedQty: 0, uom: "LS", unitPrice: 0, total: 0,
+    isMapped: true, rawQuantities: [], costType: "S", customFields: {}, source: "template",
+    ...overrides,
+  });
+
+  // One mapped concrete row on a pre-existing template row (no insertions).
+  // Subtotal $32,400; GL 1% = $324; Fee 5% = $1,620; Total $34,344 (rounding none).
+  const rows = [
+    baseRow({
+      id: "row-03-0000.001", itemId: "03-0000.001",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Cast In-Place Concrete", matchedQty: 150, unitPrice: 216, uom: "CY", costType: "M",
+    }),
+  ];
+
+  // The engine's effective summary == what the estimator sees on screen.
+  const onScreen = (ov?: EstimateOverrideMap) =>
+    computeTakeoffSummary(rows, 10000, 100, summaryRates, [], ov);
+
+  // STEP 4 summary cells from the generated workbook: 60-xxxx modifier I-values
+  // keyed by their column-C code, plus the subtotal (I331) and total (I341).
+  async function step4Summary(ov?: EstimateOverrideMap) {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const blob = await generateExcelWorkbook(
+      rows, mockProject, mockColumns, mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer, zeroGcResult(), zeroSiteOpsResult(), ov,
+    );
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await blob.arrayBuffer()) as never);
+    const ws = workbook.getWorksheet("STEP 4 - ESTIMATE")!;
+    const byCode = new Map<string, ExcelJS.CellValue>();
+    ws.eachRow((row) => {
+      const code = String(row.getCell(3).value ?? "").trim(); // col C
+      if (code.startsWith("60-")) byCode.set(code, row.getCell(9).value); // col I
+    });
+    return { byCode, subtotal: ws.getCell("I331").value, total: ws.getCell("I341").value };
+  }
+
+  function procoreModifiers(ov?: EstimateOverrideMap): Map<string, number> {
+    const csv = generateProcoreBudget(rows, mockProject, zeroGcResult(), zeroSiteOpsResult(), ov);
+    const byCode = new Map<string, number>();
+    for (const line of csv.split("\r\n").slice(1)) {
+      const cols = line.split(",");
+      const code = cols[0].replace(/^"|"$/g, "");
+      byCode.set(code, parseFloat(cols[cols.length - 1].replace(/^"|"$/g, "")));
+    }
+    return byCode;
+  }
+
+  it("with NO override the summary block keeps its template formulas (byte-identical)", async () => {
+    const { byCode, subtotal, total } = await step4Summary();
+    // Formula objects, not value writes
+    expect((subtotal as { formula?: string }).formula).toBe("SUM(I10:I330)");
+    expect((total as { formula?: string }).formula).toBe("SUM(I331:I340)");
+    expect((byCode.get("60-4000.001") as { formula?: string }).formula).toBe("F339*$I$331");
+  }, 30000);
+
+  it("workbook: an overridden Fee writes the override VALUE; total ties the on-screen total", async () => {
+    const ov: EstimateOverrideMap = { fee: 5000 };
+    const { byCode, subtotal, total } = await step4Summary(ov);
+    // Fee modifier carries the override value, GL its computed value — both as numbers
+    expect(byCode.get("60-4000.001")).toBe(5000);   // Fee override
+    expect(byCode.get("60-2020.001")).toBe(324);    // GL unchanged (1% × 32,400)
+    expect(subtotal).toBe(32400);
+    // INV-1: exported total == on-screen total == 32,400 + 324 + 5,000
+    expect(total).toBe(37724);
+    expect(total).toBe(onScreen(ov).totalEstimatedCost);
+  }, 30000);
+
+  it("workbook: an overridden subtotal does NOT compound into the modifier formulas", async () => {
+    const ov: EstimateOverrideMap = { subtotal: 50000 };
+    const { byCode, subtotal, total } = await step4Summary(ov);
+    expect(subtotal).toBe(50000);
+    // Modifiers stay on the ORIGINAL $32,400 basis (no compounding — AGENTS.md)
+    expect(byCode.get("60-4000.001")).toBe(1620);   // NOT 50,000 × 5% = 2,500
+    expect(byCode.get("60-2020.001")).toBe(324);    // NOT 50,000 × 1% = 500
+    // Total = override subtotal + computed modifiers (engine identity)
+    expect(total).toBe(51944);
+    expect(total).toBe(onScreen(ov).totalEstimatedCost);
+  }, 30000);
+
+  it("workbook: a direct grand-total override is written as the value", async () => {
+    const ov: EstimateOverrideMap = { totalEstimatedCost: 99999 };
+    const { total } = await step4Summary(ov);
+    expect(total).toBe(99999);
+    expect(total).toBe(onScreen(ov).totalEstimatedCost);
+  }, 30000);
+
+  it("Procore CSV: 60-xxxx modifier rows carry the effective (override-applied) values", () => {
+    const computed = procoreModifiers();
+    expect(computed.get("60-4000.001")).toBeCloseTo(1620, 2);
+    expect(computed.get("60-2020.001")).toBeCloseTo(324, 2);
+
+    const overridden = procoreModifiers({ fee: 5000 });
+    expect(overridden.get("60-4000.001")).toBeCloseTo(5000, 2); // override applied
+    expect(overridden.get("60-2020.001")).toBeCloseTo(324, 2);  // GL unchanged
+  });
+
+  it("golden inertness: with overrides == {} every export is unchanged from the no-arg call", () => {
+    expect(generateProcoreBudget(rows, mockProject, zeroGcResult(), zeroSiteOpsResult(), {}))
+      .toBe(generateProcoreBudget(rows, mockProject, zeroGcResult(), zeroSiteOpsResult()));
+    expect(generateExcelPayload(rows, mockColumns, mockProject,
+      computeLinkedDivisionTotals(zeroGcResult(), zeroSiteOpsResult()), {}))
+      .toBe(generateExcelPayload(rows, mockColumns, mockProject,
+        computeLinkedDivisionTotals(zeroGcResult(), zeroSiteOpsResult())));
+  });
 });

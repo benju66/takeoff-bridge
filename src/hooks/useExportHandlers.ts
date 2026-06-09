@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
 import { Project } from "@/types/db";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
 import {
@@ -45,6 +45,10 @@ export function useExportHandlers(
   // gc-siteops Phase 3: GC + Site Ops computed results join every export path
   gcCalcResult: PersonnelCalcResult,
   siteOpsCalcResult: SiteOpsCalcResult,
+  // Phase 5 (INV-1): active estimator overrides threaded into all three
+  // generators so the exported numbers == the on-screen/saved numbers. `{}`
+  // (the default) keeps every export byte-identical to pre-override behavior.
+  activeOverrides: EstimateOverrideMap = {},
 ): UseExportHandlersReturn {
   // Export state
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -96,14 +100,14 @@ export function useExportHandlers(
     // Linked division values keep the payload's rows + modifier basis in
     // step with the estimate page (gc-siteops Phase 5).
     const linkedTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
-    const payload = generateExcelPayload(rows, columnDefs, project, linkedTotals);
+    const payload = generateExcelPayload(rows, columnDefs, project, linkedTotals, activeOverrides);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 
   const handleExportProcore = (overrideRows?: ProcessedTakeoffRow[]) => {
     const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
     if (!runExportGate(effectiveRows, "procore")) return;
-    const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult);
+    const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult, activeOverrides);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
 
     // Export milestone snapshot (Phase 4): the exact version sent to Procore. Fire-and-
@@ -132,7 +136,7 @@ export function useExportHandlers(
       }
 
       // 2. Generate Excel workbook using the relative shifting engine
-      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer, gcCalcResult, siteOpsCalcResult);
+      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer, gcCalcResult, siteOpsCalcResult, activeOverrides);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);

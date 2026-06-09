@@ -1,4 +1,4 @@
-import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, isLinkedDivisionRow } from "./constants";
 import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult } from "./calculations";
@@ -21,7 +21,10 @@ export function generateExcelPayload(
   project?: Project | null,
   // gc-siteops Phase 5: linked division values so the payload's rows and
   // modifier basis match the estimate page (omitted → takeoff-only legacy).
-  linkedTotals?: LinkedDivisionTotal[]
+  linkedTotals?: LinkedDivisionTotal[],
+  // Phase 5 (INV-1): active estimator overrides so the modifier rows carry the
+  // EFFECTIVE (override-applied) values — on-screen == saved == exported.
+  overrides?: EstimateOverrideMap
 ): string {
   const csvLines: string[] = [];
   const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
@@ -116,7 +119,7 @@ export function generateExcelPayload(
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
     roundingRule: project?.roundingRule ?? "dollar",
-  }, linkedTotals);
+  }, linkedTotals, overrides);
 
   if (summary.subtotal > 0) {
     const modifierValues: Record<string, number> = {
@@ -180,7 +183,10 @@ export function generateProcoreBudget(
   rows: ProcessedTakeoffRow[],
   project: Project | null | undefined,
   gcCalcResult: PersonnelCalcResult,
-  siteOpsCalcResult: SiteOpsCalcResult
+  siteOpsCalcResult: SiteOpsCalcResult,
+  // Phase 5 (INV-1): active estimator overrides so the 60-xxxx modifier rows
+  // carry the EFFECTIVE values — the Procore budget matches the on-screen total.
+  overrides?: EstimateOverrideMap
 ): string {
   const csvLines: string[] = [];
 
@@ -274,7 +280,7 @@ export function generateProcoreBudget(
     bondRate: project?.bondRate ?? 0,
     feeRate: project?.feeRate ?? 0.05,
     roundingRule: project?.roundingRule ?? "dollar",
-  }, linkedTotals);
+  }, linkedTotals, overrides);
 
   if (summary.subtotal > 0) {
     const modifierValues: Record<string, number> = {
@@ -1191,7 +1197,12 @@ export async function generateExcelWorkbook(
   // Required (gc-siteops Phase 3): an export path that omitted these would
   // silently re-create the $0 GC/Site Ops bug this phase closes.
   gcCalcResult: PersonnelCalcResult,
-  siteOpsCalcResult: SiteOpsCalcResult
+  siteOpsCalcResult: SiteOpsCalcResult,
+  // Phase 5 (INV-1): active estimator overrides. When any override is applied
+  // the STEP 4 summary block (subtotal / 7 modifiers / total) is written as
+  // VALUES equal to the engine's effective numbers — so the exported workbook
+  // total matches the on-screen/saved total to the cent. Inert when empty.
+  overrides?: EstimateOverrideMap
 ): Promise<Blob> {
   // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
 
@@ -1549,13 +1560,52 @@ export async function generateExcelWorkbook(
   // Row geometry comes from template_config.config_data anchors (Phase 3b);
   // all anchor values are ORIGINAL template rows, shifted by rowShift here.
 
+  // Phase 5 (INV-1): the effective STEP 4 summary, with estimator overrides
+  // applied (calculations.ts is the sole authority — this is a pure read of its
+  // output). When ≥1 override is active, the summary block below is written as
+  // VALUES equal to these effective numbers instead of in-sheet formulas, so an
+  // overridden subtotal cannot compound into the modifier formulas and the
+  // exported total ties the on-screen total exactly. With NO overrides this is
+  // inert: every cell keeps its template formula (byte-identical — golden ties).
+  const step4Summary = computeTakeoffSummary(
+    rows,
+    projectMetadata?.squareFootage ?? 0,
+    projectMetadata?.unitCount ?? 0,
+    {
+      constructionContingencyRate: projectMetadata?.constructionContingencyRate ?? 0,
+      designContingencyRate: projectMetadata?.designContingencyRate ?? 0,
+      buildersRiskRate: projectMetadata?.buildersRiskRate ?? 0,
+      specialInsuranceRate: projectMetadata?.specialInsuranceRate ?? 0,
+      glInsuranceRate: projectMetadata?.glInsuranceRate ?? 0.01,
+      bondRate: projectMetadata?.bondRate ?? 0,
+      feeRate: projectMetadata?.feeRate ?? 0.05,
+      roundingRule: projectMetadata?.roundingRule ?? "dollar",
+    },
+    linkedDivisionTotals,
+    overrides
+  );
+  const writeSummaryValues = Object.keys(step4Summary.overrides ?? {}).length > 0;
+  const modifierEffectiveValues: Record<string, number> = {
+    constructionContingency: step4Summary.constructionContingency,
+    designContingency: step4Summary.designContingency,
+    buildersRisk: step4Summary.buildersRisk,
+    specialInsurance: step4Summary.specialInsurance,
+    glInsurance: step4Summary.glInsurance,
+    bond: step4Summary.bond,
+    fee: step4Summary.fee,
+  };
+
   const subtotalRowIdx = anchors.subtotalRow + rowShift;
 
-  // Subtotal formula
+  // Subtotal: a value when overridden (so modifier formulas below cannot
+  // recompute off the overridden number — no compounding), else the SUM formula.
   const subtotalRowEl = findRowElement(sheetDataChildren, subtotalRowIdx);
   if (subtotalRowEl) {
     const iCell = findCellInRow(subtotalRowEl, "I");
-    if (iCell) setCellFormula(iCell, `SUM(I${dataStartRow}:I${subtotalRowIdx - 1})`);
+    if (iCell) {
+      if (writeSummaryValues) setCellValue(iCell, step4Summary.subtotal);
+      else setCellFormula(iCell, `SUM(I${dataStartRow}:I${subtotalRowIdx - 1})`);
+    }
   }
 
   // Modifier rows (subtotal + modifierStartOffset through subtotal + modifierEndOffset)
@@ -1577,9 +1627,14 @@ export async function generateExcelWorkbook(
       if (fCell) setCellValue(fCell, rateDecimal);
     }
 
-    // Always rewrite formulas
+    // Modifier total: the effective override VALUE when this field is
+    // overridden (or when the subtotal is overridden, so the rate×subtotal
+    // formula cannot compound), else the live F×subtotal formula.
     const iModCell = findCellInRow(modRowEl, "I");
-    if (iModCell) setCellFormula(iModCell, `F${r}*$I$${subtotalRowIdx}`);
+    if (iModCell) {
+      if (writeSummaryValues && mod) setCellValue(iModCell, modifierEffectiveValues[mod.key] ?? 0);
+      else setCellFormula(iModCell, `F${r}*$I$${subtotalRowIdx}`);
+    }
 
     const jModCell = findCellInRow(modRowEl, "J");
     if (jModCell) setCellFormula(jModCell, `IF($J$8=0, 0, I${r}/$J$8)`);
@@ -1595,8 +1650,15 @@ export async function generateExcelWorkbook(
   const totalRowIdx = subtotalRowIdx + anchors.grandTotalOffset;
   const totalRowEl = findRowElement(sheetDataChildren, totalRowIdx);
   if (totalRowEl) {
+    // Grand total: the effective value when overrides are active (a direct
+    // total override, or the exact sum of the value-written components above),
+    // else the SUM formula. The in-sheet SUM identity yields to the override,
+    // mirroring the engine (INV-1).
     const iTotal = findCellInRow(totalRowEl, "I");
-    if (iTotal) setCellFormula(iTotal, `SUM(I${subtotalRowIdx}:I${totalRowIdx - 1})`);
+    if (iTotal) {
+      if (writeSummaryValues) setCellValue(iTotal, step4Summary.totalEstimatedCost);
+      else setCellFormula(iTotal, `SUM(I${subtotalRowIdx}:I${totalRowIdx - 1})`);
+    }
 
     const jTotal = findCellInRow(totalRowEl, "J");
     if (jTotal) setCellFormula(jTotal, `IF($J$8=0, 0, I${totalRowIdx}/$J$8)`);
@@ -1660,23 +1722,8 @@ export async function generateExcelWorkbook(
   // cross-sheet fixup so any 'STEP 4 - ESTIMATE'! references that survive on
   // those sheets (e.g. the L-column % hints) are row-shifted on the updated
   // XML. The %-line basis is the same whole-job summary the estimate page and
-  // both CSV paths use (computeTakeoffSummary + linked totals — Phase 5 basis).
-  const step23Summary = computeTakeoffSummary(
-    rows,
-    projectMetadata?.squareFootage ?? 0,
-    projectMetadata?.unitCount ?? 0,
-    {
-      constructionContingencyRate: projectMetadata?.constructionContingencyRate ?? 0,
-      designContingencyRate: projectMetadata?.designContingencyRate ?? 0,
-      buildersRiskRate: projectMetadata?.buildersRiskRate ?? 0,
-      specialInsuranceRate: projectMetadata?.specialInsuranceRate ?? 0,
-      glInsuranceRate: projectMetadata?.glInsuranceRate ?? 0.01,
-      bondRate: projectMetadata?.bondRate ?? 0,
-      feeRate: projectMetadata?.feeRate ?? 0.05,
-      roundingRule: projectMetadata?.roundingRule ?? "dollar",
-    },
-    linkedDivisionTotals
-  );
+  // both CSV paths use — `step4Summary` (computed above with overrides applied),
+  // so an overridden total flows into the STEP 2/3 %-line basis too (INV-1).
   await writeStep23SheetDetail(
     zip,
     wbXml,
@@ -1684,7 +1731,7 @@ export async function generateExcelWorkbook(
     sharedStrings,
     gcCalcResult,
     siteOpsCalcResult,
-    step23Summary.totalEstimatedCost,
+    step4Summary.totalEstimatedCost,
     linkedDivisionTotals
   );
 

@@ -13,7 +13,7 @@ import {
   Table,
 } from "@tanstack/react-table";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
@@ -132,7 +132,10 @@ export function useTakeoffWorkbook(
   project: Project | null,
   // gc-siteops Phase 3: GC + Site Ops calc results, threaded to the export handlers
   gcCalcResult: PersonnelCalcResult,
-  siteOpsCalcResult: SiteOpsCalcResult
+  siteOpsCalcResult: SiteOpsCalcResult,
+  // Phase 5 (INV-1): active estimator overrides, forwarded to the export handlers
+  // so exported numbers match the on-screen/saved summary. `{}` = inert.
+  activeOverrides: EstimateOverrideMap = {}
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -243,7 +246,7 @@ export function useTakeoffWorkbook(
     isExportingExcel, exportError, setExportError,
     exportBlockers, pendingExportKind, clearExportBlockers,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
-  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult);
+  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult, activeOverrides);
 
   // ---------------------------------------------------------------------------
   // Export override — assign granular Procore codes to blocker rows.
