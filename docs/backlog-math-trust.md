@@ -8,7 +8,7 @@
 
 | # | Item | Type | Lands |
 |---|------|------|-------|
-| B-1 | CI-safe synthetic template fixture | test infra | any time (independent of phases) |
+| B-1 | CI-safe synthetic template fixture | test infra | **DONE 2026-06-09** |
 | B-2 | Born-in-app GC/Site-Ops golden | test coverage | after a real project is built in-app |
 | B-3 | Rounding default decision + visibility | product decision + Phase 5 | decision anytime; UI in Phase 5 |
 | B-4 | Inline-recoverable unmapped import rows | UX / trust completeness | Phase 5 (glass box) |
@@ -30,6 +30,16 @@ proves the *machinery* works everywhere.
 
 **Done when.** A committed synthetic template ties through `computeTakeoffSummary` (and the
 extractor) in CI, with the McKenna harness unchanged.
+
+**DONE 2026-06-09.** Instead of committing an opaque binary `.xlsx`, the fixture is built in-memory
+by a committed, reviewable builder (`src/__tests__/fixtures/syntheticTemplate.ts`) — round, fabricated
+numbers (subtotal $100,000 = $50k non-linked + $50k across the 10 linked rows; CC 2% / GL 1% / Fee 5%
+→ $8k modifiers → $108,000 total) authored independently of the engine. The builder writes a full
+template-shape workbook (STEP 1 inputs, STEP 2/3 section subtotals, STEP 4 line items + oracle cells),
+serializes it via ExcelJS, and `src/__tests__/golden-synthetic.test.ts` runs the SAME
+`loadTemplateWorkbook → extractEstimate → computeTakeoffSummary` path against it — **always on, no
+`skipIf`** — tying SUBTOTAL / 7 modifiers / TOTAL / cost-unit / the 10 STEP 2/3→STEP 4 linkages to the
+cent. The McKenna harness is unchanged (still the confidential real-bid proof). Suite 418 pass / 0 todo.
 
 ## B-2 — Born-in-app GC/Site-Ops golden
 
