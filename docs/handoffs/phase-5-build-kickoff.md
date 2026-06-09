@@ -11,6 +11,27 @@
 >    `docs/backlog-math-trust.md` (B-3, B-4).
 > 5. `CLAUDE.md`, `AGENTS.md`, `memory/` (start with `MEMORY.md` → `[[math-trust-plan]]`).
 
+## Build progress log (update as slices land)
+- **Branch:** `phase-5-visual-trust` (cut from main `8a09cfc`).
+- **Slice 1 — Export applies overrides (INV-1): DONE `8b35559` (2026-06-09).** Threaded
+  `activeOverrides` page.tsx → `useTakeoffWorkbook` → `useExportHandlers` → the 3 generators (every
+  new param optional / `={}` → inert by default). `generateExcelPayload`/`generateProcoreBudget`:
+  pass `overrides` into their `computeTakeoffSummary` call (modifier rows now carry effective values).
+  `generateExcelWorkbook`: computes the effective STEP 4 summary ONCE (`step4Summary`, with overrides)
+  and — when ≥1 override is applied (`step4Summary.overrides` non-empty) — writes the subtotal / 7
+  modifiers / grand total as **VALUES** instead of the template formulas, so an overridden subtotal
+  cannot compound into the `F*$I$subtotal` modifier formulas and the exported total ties the
+  on-screen total to the cent. The same `step4Summary` is reused for the STEP 2/3 %-line basis (the
+  old duplicate `computeTakeoffSummary` there was removed). With no overrides everything is
+  byte-identical (formulas kept) → golden McKenna still ties $0.00. Tests: +6 in
+  `export-integrity.test.ts`. Suite **357 pass + 1 todo**; `tsc` clean; code-review clean.
+  - *Why it could land alone (ahead of the slice-4 setter):* with no setter, `activeOverrides` is
+    always `{}`, so the export path is provably inert — INV-1 is never transiently violated. The
+    setter (slice 4) must not ship before this; it now can.
+- **Slices 2–6: NOT STARTED.** Next session begins at **slice 2** (Trust Inspector shell + 5a Trace).
+  Reminder: **slice 6 PAUSES for architect approval** of the 1-line `projects.rounding_rule` migration
+  (update `supabase_schema.sql` first; invoke the `supabase:supabase` skill).
+
 ## What this phase ships
 A "glass box" so an estimator trusts the math by **looking**: click-to-trace (5a), a live Procore
 reconciliation incl. grand-total tie (5b), per-row provenance + override flags (5c), and the
