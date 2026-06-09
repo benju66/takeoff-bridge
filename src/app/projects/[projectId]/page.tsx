@@ -23,6 +23,7 @@ import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculat
 import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
+import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
@@ -59,6 +60,15 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     isLoaded,
     projectEstimate?.rateCardSnapshot,
   );
+
+  // Phase 4: active estimator overrides, layered over the computed summary below so a
+  // persisted override applies on reload. The glass-box UI that sets/reverts an override
+  // is Phase 5 (this is the read+apply wiring only).
+  const { activeOverrides } = useEstimateOverrides(projectId, isLoaded);
+
+  // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
+  // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
+  const isNewEstimate = !projectEstimate;
 
   // Step 2: Division 01 General Conditions
   const personnel = usePersonnelCalculations(
@@ -143,8 +153,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       bondRate: project?.bondRate ?? 0,
       feeRate: project?.feeRate ?? 0.05,
       roundingRule: project?.roundingRule ?? "dollar"
-    }, linkedDivisionTotals),
-    [filteredRows, squareFootage, unitCount, project, linkedDivisionTotals]
+    }, linkedDivisionTotals, activeOverrides),
+    [filteredRows, squareFootage, unitCount, project, linkedDivisionTotals, activeOverrides]
   );
 
   // Divisional & Cost Type Budget Aggregations
@@ -173,7 +183,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     infrastructure.siteOperationsTotal,
     infrastructure.siteOpsQuantities,
     infrastructure.siteOpsRates,
-    freezeRateCardSnapshot
+    freezeRateCardSnapshot,
+    isNewEstimate
   );
 
   // ---------------------------------------------------------------------------

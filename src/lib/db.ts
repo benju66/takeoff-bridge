@@ -1,5 +1,5 @@
 import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry } from "@/types/db";
-import { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -739,6 +739,87 @@ export async function getSnapshotDetail(
       ? (data.summary as Record<string, number>)
       : {},
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Estimate Overrides (Phase 4 — append-only override audit trail)
+// ═══════════════════════════════════════════════════════════════════
+
+const ESTIMATE_OVERRIDE_COLUMNS =
+  "id, project_id, field, computed_value, override_value, reason, created_by, created_at";
+
+function mapOverrideFromRow(row: Record<string, unknown>): EstimateOverrideRecord {
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    field: row.field as string,
+    computedValue: row.computed_value != null ? Number(row.computed_value) : null,
+    overrideValue: row.override_value != null ? Number(row.override_value) : null,
+    reason: (row.reason as string) || "",
+    createdBy: (row.created_by as string) || null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+  };
+}
+
+/**
+ * Appends one immutable override event to estimate_overrides (Phase 4).
+ *
+ * Unlike training-data writes (classification_history / estimate_snapshots, which are
+ * fire-and-forget because their loss is non-critical), an override is the estimator's
+ * FINANCIAL INTENT and MUST persist — so this THROWS on failure and the caller awaits it.
+ * `overrideValue` null = a REVERT tombstone (the field falls back to computed); an
+ * `overrideValue` of 0 is a real, honored override (INV-3). `created_by` is stamped from
+ * the session ("who"); `created_at` defaults to now() ("when") server-side.
+ *
+ * Append-only by design: there is intentionally NO update/delete path here — a change of
+ * mind appends a new event, matching the table's RLS (no UPDATE/DELETE policy).
+ */
+export async function recordEstimateOverride(
+  projectId: string,
+  field: string,
+  computedValue: number | null,
+  overrideValue: number | null,
+  reason: string = ""
+): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const createdBy = session?.user?.id ?? null;
+
+  const { error } = await supabase.from("estimate_overrides").insert({
+    project_id: projectId,
+    field,
+    computed_value: computedValue,
+    override_value: overrideValue,
+    reason,
+    created_by: createdBy,
+  });
+
+  if (error) {
+    console.error("Failed to record estimate override:", error);
+    throw new Error(`Failed to record estimate override: ${error.message}`);
+  }
+}
+
+/**
+ * Reads the full append-only override audit trail for a project, newest first (the
+ * Phase 5 audit log reads this directly). Feed the result through
+ * reduceLatestActiveOverrides() (src/lib/overrides.ts) to get the active field→value map
+ * the calc engine (computeTakeoffSummary) consumes.
+ */
+export async function getEstimateOverrides(
+  projectId: string
+): Promise<EstimateOverrideRecord[]> {
+  const { data, error } = await supabase
+    .from("estimate_overrides")
+    .select(ESTIMATE_OVERRIDE_COLUMNS)
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch overrides for project ${projectId}`, error);
+    throw new Error(`Failed to fetch overrides: ${error.message}`);
+  }
+
+  return (data || []).map(mapOverrideFromRow);
 }
 
 // ═══════════════════════════════════════════════════════════════════

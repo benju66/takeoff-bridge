@@ -6,9 +6,9 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 14 (added rate_card — Rate-card slice 1, Phase A)
+-- Tables: 15 (added estimate_overrides — Phase 4 Override + Audit Model)
 -- RPC Functions: 2 (save_estimate_line_items, save_estimate)
--- RLS Policies: 20
+-- RLS Policies: 22
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -19,9 +19,9 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-08 (schema-drift reconciliation: dropped the phantom
--- get_auth_tenant_id() helper; tenant policies rewritten to the deployed inline
--- (SELECT tenant_id FROM users WHERE id = auth.uid()) form)
+-- Last updated: 2026-06-09 (Phase 4 Override + Audit Model: added the append-only
+-- estimate_overrides table + its tenant-scoped SELECT/INSERT RLS, mirroring the
+-- classification_history / estimate_snapshots immutable-audit pattern)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -840,4 +840,65 @@ CREATE POLICY "rate_card_update_policy" ON rate_card
   TO authenticated
   USING (true)
   WITH CHECK (true);
+
+-- ═════════════════════════════════════════════════════════════════════
+-- Table 13: estimate_overrides (Phase 4 — Override + Audit Model)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Append-only audit trail of estimator overrides of computed estimate values.
+-- One immutable row per override EVENT (a "set" or a "revert"). The engine uses
+-- override_value IN PLACE of the computed value but ALWAYS carries computed_value
+-- alongside (glass-box UI, Phase 5, shows both). Consistent with the append-only
+-- ethos of classification_history / estimate_snapshots: never UPDATE/DELETE —
+-- a change of mind appends a new row.
+--
+-- Active override per (project_id, field) = the LATEST row by created_at. A row
+-- with override_value IS NULL is a REVERT tombstone (the field falls back to the
+-- computed value). An override_value of 0 is a REAL override (INV-3: explicit zero
+-- is honored, never confused with "no override").
+--
+-- field: the computed value being overridden — a TakeoffSummary key (subtotal |
+--   constructionContingency | designContingency | buildersRisk | specialInsurance |
+--   glInsurance | bond | fee | totalEstimatedCost). Free TEXT (no CHECK) so Phase 5
+--   can extend the overridable set without a migration; the engine applies only the
+--   keys it knows (OVERRIDABLE_SUMMARY_FIELDS in src/lib/calculations.ts).
+
+CREATE TABLE estimate_overrides (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  field           TEXT NOT NULL,
+  computed_value  NUMERIC,            -- engine value at time of override (audit; NULL if unknown)
+  override_value  NUMERIC,            -- value used in place; NULL = revert to computed (tombstone)
+  reason          TEXT NOT NULL DEFAULT '',
+  created_by      UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_estimate_overrides_lookup
+  ON estimate_overrides (project_id, created_at DESC);
+
+ALTER TABLE estimate_overrides ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped + append-only (mirrors classification_history / estimate_snapshots).
+-- SELECT + INSERT gated by the projects tenant-join; NO UPDATE/DELETE policy →
+-- rows are immutable to clients. Tenant predicate inlined as (SELECT tenant_id FROM
+-- users WHERE id = auth.uid()) to match the form deployed by the live tenant policies
+-- (no get_auth_tenant_id() helper).
+CREATE POLICY "estimate_overrides_select_policy" ON estimate_overrides
+  FOR SELECT
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = estimate_overrides.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+CREATE POLICY "estimate_overrides_insert_policy" ON estimate_overrides
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = estimate_overrides.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
 

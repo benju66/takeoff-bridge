@@ -11,7 +11,7 @@ import {
   validateExportReadiness,
   ExportBlocker,
 } from "@/lib/exporter";
-import { getTemplateConfig, downloadTemplateFile } from "@/lib/db";
+import { getTemplateConfig, downloadTemplateFile, createEstimateSnapshot } from "@/lib/db";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
@@ -105,6 +105,11 @@ export function useExportHandlers(
     if (!runExportGate(effectiveRows, "procore")) return;
     const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
+
+    // Export milestone snapshot (Phase 4): the exact version sent to Procore. Fire-and-
+    // forget — snapshot loss must never block an export (audit immutability, AGENTS.md).
+    createEstimateSnapshot(projectId, effectiveRows, 'milestone', 'Exported Procore budget', {}, { kind: 'procore_export' })
+      .catch(() => { /* silent — milestone loss is non-critical */ });
   };
 
   const handleExportExcelWorkbook = async (overrideRows?: ProcessedTakeoffRow[]) => {
@@ -137,6 +142,11 @@ export function useExportHandlers(
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+
+      // Export milestone snapshot (Phase 4): the exact workbook version sent out.
+      // Fire-and-forget — snapshot loss must never block an export (AGENTS.md).
+      createEstimateSnapshot(projectId, effectiveRows, 'milestone', 'Exported workbook', {}, { kind: 'workbook_export' })
+        .catch(() => { /* silent — milestone loss is non-critical */ });
     } catch (err) {
       console.error("Workbook generation failed", err);
       const message = err instanceof Error ? err.message : "Failed to generate Excel Workbook.";

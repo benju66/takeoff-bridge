@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ProcessedTakeoffRow } from "@/types";
-import { saveEstimate } from "@/lib/db";
+import { saveEstimate, createEstimateSnapshot } from "@/lib/db";
 import { TakeoffSummary } from "@/lib/calculations";
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,10 @@ export function useEstimatePersistence(
   siteOpsRates: Record<string, number>,
   /** Returns (and freezes-at-first-save) the per-project rate snapshot to persist
    *  (Rate-card Phase B). Idempotent once frozen — see useRateCardSnapshot. */
-  freezeRateCardSnapshot: () => Record<string, number>
+  freezeRateCardSnapshot: () => Record<string, number>,
+  /** True for a brand-new estimate (no persisted project_estimates row at load). Drives
+   *  the one-time "Estimate created" milestone snapshot on first save (Phase 4). */
+  isNewEstimate: boolean = false
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -60,6 +63,9 @@ export function useEstimatePersistence(
   const savedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Unmount guard to prevent post-teardown state updates (database-guardrails §5)
   const mountedRef = useRef(true);
+  // Fires the one-time "Estimate created" milestone snapshot on the first successful
+  // save of a brand-new estimate, then never again this session (Phase 4 audit wiring).
+  const createdMilestoneDoneRef = useRef(false);
   // Stable ref to the latest executeSave closure, used by the deferred
   // re-queue in the finally block to avoid capturing a stale closure.
   const executeSaveRef = useRef<(() => Promise<void>) | null>(null);
@@ -114,6 +120,20 @@ export function useEstimatePersistence(
       if (!mountedRef.current) return;
       setSaveStatus('saved');
       setSaveError(null);
+
+      // First-save milestone snapshot (Phase 4): a one-time "Estimate created"
+      // checkpoint for a brand-new estimate. Fire-and-forget — snapshot loss must never
+      // block the save workflow (training/audit immutability rules, AGENTS.md).
+      if (isNewEstimate && !createdMilestoneDoneRef.current) {
+        createdMilestoneDoneRef.current = true;
+        createEstimateSnapshot(
+          projectId,
+          rows,
+          'milestone',
+          'Estimate created',
+          { subtotal: takeoffSummary.subtotal, totalCost: takeoffSummary.totalEstimatedCost },
+        ).catch(() => { /* silent — milestone loss is non-critical */ });
+      }
 
       // Auto-reset to 'idle' after 3 seconds
       savedResetTimerRef.current = setTimeout(() => {

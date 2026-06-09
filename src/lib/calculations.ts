@@ -3,7 +3,7 @@
  * Zero React dependencies — these are testable utility functions.
  */
 
-import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation } from "@/types";
+import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation, EstimateOverrideMap } from "@/types";
 import { getDivisionCode } from "./division";
 import {
   STAFF_ROLE_DEFAULTS,
@@ -291,7 +291,34 @@ export interface TakeoffSummary {
   totalEstimatedCost: number;
   costPerSf: number;
   costPerUnit: number;
+  /**
+   * Phase 4: present (and non-empty) ONLY when at least one override was applied.
+   * Maps each overridden field to its computed-vs-override pair so the glass-box UI
+   * (Phase 5) can show both. The numeric summary fields above are the EFFECTIVE
+   * (override-applied) values — display == saved == exported (INV-1).
+   */
+  overrides?: Record<string, { computedValue: number; overrideValue: number }>;
 }
+
+/**
+ * The computed TakeoffSummary fields an estimator may override (Phase 4). The engine
+ * applies an override only for these keys; the estimate_overrides table stores `field`
+ * as free text so Phase 5 can widen this set without a migration. `subtotal` and the 7
+ * modifiers substitute their own reported value; `totalEstimatedCost` overrides the grand
+ * total directly (otherwise the total = sum of the effective components).
+ */
+export const OVERRIDABLE_SUMMARY_FIELDS = [
+  "subtotal",
+  "constructionContingency",
+  "designContingency",
+  "buildersRisk",
+  "specialInsurance",
+  "glInsurance",
+  "bond",
+  "fee",
+  "totalEstimatedCost",
+] as const;
+export type OverridableSummaryField = (typeof OVERRIDABLE_SUMMARY_FIELDS)[number];
 
 /**
  * Computes Step 4 takeoff summary totals.
@@ -325,7 +352,8 @@ export function computeTakeoffSummary(
     feeRate: number;
     roundingRule: string;
   },
-  linkedTotals?: LinkedDivisionTotal[]
+  linkedTotals?: LinkedDivisionTotal[],
+  overrides?: EstimateOverrideMap
 ): TakeoffSummary {
   const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
   let takeoffSubtotal = 0;
@@ -376,24 +404,65 @@ export function computeTakeoffSummary(
     return val; // "none"
   };
 
-  // Apply rounding to each component for visual sum alignment (Zero Budget Leaks)
-  const roundedSubtotal = applyRounding(subtotal);
-  const constructionContingency = applyRounding(rawCC);
-  const designContingency = applyRounding(rawDC);
-  const buildersRisk = applyRounding(rawBR);
-  const specialInsurance = applyRounding(rawSI);
-  const glInsurance = applyRounding(rawGL);
-  const bond = applyRounding(rawBond);
-  const fee = applyRounding(rawFee);
+  // ── Computed component values (the engine's own math; always retained) ──
+  // Each is rounded independently for visual sum alignment (Zero Budget Leaks).
+  const computedSubtotal = applyRounding(subtotal);
+  const computedCC = applyRounding(rawCC);
+  const computedDC = applyRounding(rawDC);
+  const computedBR = applyRounding(rawBR);
+  const computedSI = applyRounding(rawSI);
+  const computedGL = applyRounding(rawGL);
+  const computedBond = applyRounding(rawBond);
+  const computedFee = applyRounding(rawFee);
+  // Computed Total = exact sum of the rounded computed components (the pre-override total).
+  const computedTotal = computedSubtotal + computedCC + computedDC + computedBR
+    + computedSI + computedGL + computedBond + computedFee;
 
-  // Total Estimated Cost is the exact sum of the rounded components
-  const totalEstimatedCost = roundedSubtotal + constructionContingency + designContingency
+  // ── Override layer (Phase 4 — Override + Audit Model) ───────────────────
+  // An override is an INPUT layered over the computed value (override ?? computed), never
+  // a destructive edit — the computed values above are always preserved. Presence is
+  // tested by hasOwnProperty so an explicit override of 0 is honored (INV-3); a field
+  // absent from `overrides` keeps its computed value, so with no overrides this block is
+  // fully INERT and every returned field is byte-identical to before. The arithmetic that
+  // turns inputs into dollars stays here — calculations.ts remains the sole authority.
+  const ov = overrides ?? {};
+  const overridden: Record<string, { computedValue: number; overrideValue: number }> = {};
+  const eff = (field: string, computedValue: number): number => {
+    if (Object.prototype.hasOwnProperty.call(ov, field) && typeof ov[field] === "number") {
+      overridden[field] = { computedValue, overrideValue: ov[field] };
+      return ov[field];
+    }
+    return computedValue;
+  };
+
+  const subtotalOut = eff("subtotal", computedSubtotal);
+  const constructionContingency = eff("constructionContingency", computedCC);
+  const designContingency = eff("designContingency", computedDC);
+  const buildersRisk = eff("buildersRisk", computedBR);
+  const specialInsurance = eff("specialInsurance", computedSI);
+  const glInsurance = eff("glInsurance", computedGL);
+  const bond = eff("bond", computedBond);
+  const fee = eff("fee", computedFee);
+
+  // Total: a DIRECT total override wins; otherwise the sum of the EFFECTIVE components, so
+  // overriding a component still reconciles into the total (INV-4 holds). A direct total
+  // override is the one deliberate exception (surfaced as "overridden" in Phase 5).
+  // Overriding the subtotal does NOT recompute the modifiers (no compounding — AGENTS.md).
+  const effectiveComponentTotal = subtotalOut + constructionContingency + designContingency
     + buildersRisk + specialInsurance + glInsurance + bond + fee;
+  let totalEstimatedCost: number;
+  if (Object.prototype.hasOwnProperty.call(ov, "totalEstimatedCost") && typeof ov["totalEstimatedCost"] === "number") {
+    overridden["totalEstimatedCost"] = { computedValue: computedTotal, overrideValue: ov["totalEstimatedCost"] };
+    totalEstimatedCost = ov["totalEstimatedCost"];
+  } else {
+    totalEstimatedCost = effectiveComponentTotal;
+  }
+
   const costPerSf = totalEstimatedCost / (squareFootage || 1);
   const costPerUnit = totalEstimatedCost / (unitCount || 1);
 
   return {
-    subtotal: roundedSubtotal,
+    subtotal: subtotalOut,
     takeoffSubtotal,
     linkedDivisionsTotal,
     constructionContingency,
@@ -406,6 +475,7 @@ export function computeTakeoffSummary(
     totalEstimatedCost,
     costPerSf,
     costPerUnit,
+    ...(Object.keys(overridden).length > 0 ? { overrides: overridden } : {}),
   };
 }
 

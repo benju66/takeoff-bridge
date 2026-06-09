@@ -50,6 +50,44 @@ export interface ProcessedTakeoffRow {
 }
 
 // ---------------------------------------------------------------------------
+// Estimate Overrides (Phase 4 — Override + Audit Model)
+// ---------------------------------------------------------------------------
+
+/**
+ * One immutable override-audit record (an `estimate_overrides` row). An estimator
+ * override layers `overrideValue` IN PLACE of the engine's `computedValue` while the
+ * computed value is always retained (the glass-box UI, Phase 5, shows both). The table
+ * is append-only: a "set" and a later "revert" are two rows; the LATEST row per
+ * (projectId, field) wins. `overrideValue: null` is a REVERT tombstone (the field falls
+ * back to computed). An `overrideValue` of `0` is a REAL override (INV-3: explicit zero
+ * is honored, never confused with "no override").
+ */
+export interface EstimateOverrideRecord {
+  /** Present on rows read back from the DB; omit when constructing a new event. */
+  id?: string;
+  projectId: string;
+  /** The overridden computed value — a TakeoffSummary key (see OVERRIDABLE_SUMMARY_FIELDS). */
+  field: string;
+  /** Engine value at the time of the override (audit trail; null if unknown). */
+  computedValue: number | null;
+  /** Value used in place of computed; null = revert tombstone (back to computed). */
+  overrideValue: number | null;
+  reason: string;
+  /** auth.uid() of who recorded it; null if that user was later removed. */
+  createdBy?: string | null;
+  /** ISO timestamp; the latest per (projectId, field) is the active override. */
+  createdAt: string;
+}
+
+/**
+ * Resolved ACTIVE overrides fed to the engine: field → effective override value.
+ * Only currently-active (non-reverted) overrides appear; produced by
+ * reduceLatestActiveOverrides() (src/lib/overrides.ts) and passed as the optional
+ * trailing argument of computeTakeoffSummary().
+ */
+export type EstimateOverrideMap = Record<string, number>;
+
+// ---------------------------------------------------------------------------
 // Shared Workspace Interfaces (canonicalized from page.tsx + exporter.ts)
 // ---------------------------------------------------------------------------
 
