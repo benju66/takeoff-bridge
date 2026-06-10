@@ -30,6 +30,27 @@
   staff codes (`01-0410.001`, STAFF_ROLE_DEFAULTS).
 - `rate_card` — the 6 manual catalog additions sit at $0 awaiting history-informed defaults.
 
+## SLICE 0 — MANDATORY FIRST, BEFORE ANY BACKLOG IMPORTING: as-bid UOM capture
+Architect requirement (2026-06-10): the import must capture **UOM from column G** on
+**STEP 2 - GCs, STEP 3 - SITE OPS, and STEP 4 - ESTIMATE** — critical to the pricing database
+(as-bid price and as-bid UOM must travel together; the template family uses col G for UOM, same
+column the harvest script reads). Today the importer NEVER reads col G: STEP 4 rows get the
+CATALOG's targetUom stamped on mapped codes (`enrichOne` + `applyImportMapping` in
+`importEstimate.ts`) — potentially MISLABELING an as-bid $/SF price as EA — and STEP 2/3 lines
+(`extractSheetLines`, `ImportedSheetLine`) carry no UOM at all.
+
+Build: read col G in `extractStep4` (→ `ExtractedLineItem.uom`) and `extractSheetLines`
+(→ `ExtractedSheetLine.uom` + `ImportedSheetLine.uom` in types/db.ts — additive JSONB field, old
+payloads degrade fine); imported rows KEEP the as-bid UOM (historical fidelity — same rule as
+unitPrice; decide with the architect whether a bid-vs-catalog UOM mismatch gets a visible flag);
+show UOM in the import review table + ImportedStep23Panel; extend the legacy fixture + CARE
+golden (assert real UOMs survive). Goldens must stay $0.00 (UOM is non-financial; modern path
+must stay byte-identical where it matters — check `toProcessedRows` consumers).
+
+**Sequencing rule: land Slice 0, then the architect re-imports CARE ONCE (collects BOTH the
+pending STEP 2/3 detail AND UOMs), and only then starts the backlog** — every bid imported
+before Slice 0 would need re-importing.
+
 ## Candidate scope (architect locks the order/cut — discuss to sharpen, then AskUserQuestion w/ (Recommended))
 1. **Learning consumer**: rank import-review suggestions from `classification_history` (a `history`
    tier in `suggestMapping`, between `bridge`/`linked` and `similar`; `getClassificationHistory`
@@ -60,8 +81,9 @@
   architect's say-so.
 
 ## Open architect actions carried in (not Phase-3 scope)
-- **Re-import CARE once** (its first save predates STEP 2/3 capture) — may already be done.
-- Backlog imports continue in parallel (each one feeds this phase's data).
+- **Re-import CARE once — AFTER Slice 0 lands** (its first save predates both STEP 2/3 capture
+  and UOM capture; one re-import collects both).
+- Backlog imports continue in parallel **only after Slice 0** (see sequencing rule above).
 - Master-template follow-up: add the 6 manual catalog codes as template STEP 4 rows, then
   `npm run sync-codes` (drift guard: catalogManualAdditions.test.ts).
 - Push main to origin (≈24 commits ahead) when the architect approves.
