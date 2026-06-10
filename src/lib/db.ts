@@ -1,4 +1,5 @@
 import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines } from "@/types/db";
+import type { PriceObservation } from "./priceHistory";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -733,6 +734,39 @@ export async function getClassificationHistoryBulk(
     );
   }
   return out;
+}
+
+/**
+ * Every AS-BID unit price on record (Phase 3 Slice 2): saved line items with
+ * `source='imported'` (prices kept verbatim at import) joined to their project
+ * context. READ-only fuel for the /rates price-history report — aggregation
+ * lives in the pure priceHistory.ts; nothing here or there writes a rate.
+ */
+export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .select("item_id, unit_price, uom, projects(name, bid_date, market_sector)")
+    .eq("source", "imported")
+    .neq("item_id", "");
+
+  if (error) {
+    console.error("Failed to fetch imported price history:", error);
+    throw new Error(`Failed to fetch imported price history: ${error.message}`);
+  }
+
+  return (data || []).map((row) => {
+    const project = (Array.isArray(row.projects) ? row.projects[0] : row.projects) as
+      | { name?: string; bid_date?: string; market_sector?: string }
+      | null;
+    return {
+      itemId: row.item_id as string,
+      unitPrice: Number(row.unit_price) || 0,
+      uom: ((row.uom as string) || "").trim().toUpperCase(),
+      projectName: project?.name ?? "",
+      bidDate: project?.bid_date ?? "",
+      marketSector: project?.market_sector ?? "",
+    };
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════

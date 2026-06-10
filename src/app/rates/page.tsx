@@ -11,15 +11,17 @@ import {
   PenLine,
   Layers,
   AlertTriangle,
+  History,
 } from "lucide-react";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getRateCard, updateRateCardEntry } from "@/lib/db";
+import { getRateCard, updateRateCardEntry, getImportedPriceHistory } from "@/lib/db";
 import { primeRateCard } from "@/lib/rateResolver";
 import {
   groupRateCardRows,
   parseRateInput,
   RATE_LINE_DEFS,
 } from "@/lib/rateCardEditor";
+import { aggregatePriceHistory, type PriceHistoryStat } from "@/lib/priceHistory";
 import { RateCardEntry } from "@/types/db";
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,12 @@ export default function RateCardDashboard() {
   // Suppresses the blur-save that the input's unmount fires after an Enter-save
   // or an Escape-cancel (the draft is already committed / discarded by then).
   const skipBlurRef = useRef(false);
+  /**
+   * As-bid price history per catalog itemId (Phase 3 Slice 2) — REPORT-only,
+   * aggregated per (itemId, uom) from imported bids. Fail-soft: a fetch error
+   * leaves the map empty and the page fully functional without the report.
+   */
+  const [priceHistory, setPriceHistory] = useState<Map<string, PriceHistoryStat[]>>(new Map());
 
   // Load + (re)prime the company card. Reused on mount and on visibilitychange
   // so a /rates edit in another tab — or the seed/backfill — is reflected here.
@@ -95,6 +103,16 @@ export default function RateCardDashboard() {
           setLoadError(true);
           setIsLoaded(true);
         }
+      }
+    })();
+    // As-bid price history (report-only, advisory) — loaded independently so a
+    // history outage can never block the rate card itself.
+    (async () => {
+      try {
+        const observations = await getImportedPriceHistory();
+        if (!cancelled) setPriceHistory(aggregatePriceHistory(observations));
+      } catch (err) {
+        console.error("Failed to load imported price history (report skipped):", err);
       }
     })();
     return () => { cancelled = true; };
@@ -159,6 +177,33 @@ export default function RateCardDashboard() {
     } finally {
       setSavingCode(null);
       cancelEdit();
+    }
+  };
+
+  /**
+   * One-click ADOPT (Phase 3 Slice 2): writes the as-bid MEDIAN through the
+   * SAME audited admin path as a manual edit (updateRateCardEntry → stamped
+   * MANUAL). Explicit human action with a confirm — never auto-applied.
+   */
+  const handleAdopt = async (entry: RateCardEntry, stat: PriceHistoryStat) => {
+    const allowNegative = RATE_LINE_DEFS.get(entry.lineCode)?.kind === "catalog";
+    const ok = window.confirm(
+      `Set the company default for ${entry.lineCode} to the as-bid median ${currency.format(stat.median)}?\n\n` +
+        `Backed by ${stat.count} imported bid${stat.count === 1 ? "" : "s"} (${stat.uom}). ` +
+        `Current default: ${currency.format(entry.rate)}. Applies to future projects only.`
+    );
+    if (!ok) return;
+    setSavingCode(entry.lineCode);
+    try {
+      await updateRateCardEntry(MASTER_TEMPLATE_NAME, entry.lineCode, stat.median, { allowNegative });
+      await loadCard();
+      setSaveSuccess(entry.lineCode);
+      setTimeout(() => setSaveSuccess((c) => (c === entry.lineCode ? null : c)), 3000);
+    } catch (err) {
+      console.error(`Failed to adopt the median rate for ${entry.lineCode}:`, err);
+      alert(`Failed to save the rate for ${entry.lineCode}. The previous rate is unchanged. Please try again.`);
+    } finally {
+      setSavingCode(null);
     }
   };
 
@@ -370,6 +415,38 @@ export default function RateCardDashboard() {
                                     <CheckCircle2 size={16} className="text-emerald-500 animate-pulse shrink-0" />
                                   )}
                                 </div>
+                                {/* As-bid price history (Phase 3 Slice 2) — report-only;
+                                    ADOPT only where the bids' UOM matches this line's unit. */}
+                                {(priceHistory.get(entry.lineCode) ?? []).map((stat) => {
+                                  const uomMatches =
+                                    stat.uom !== "" && stat.uom === (def?.unit ?? "").trim().toUpperCase();
+                                  const detail = stat.observations
+                                    .map((o) => `${o.projectName || "Unnamed"} (${o.bidDate || "no date"}${o.marketSector ? `, ${o.marketSector}` : ""}): ${currency.format(o.unitPrice)}`)
+                                    .join("\n");
+                                  return (
+                                    <div
+                                      key={stat.uom || "(none)"}
+                                      className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-violet-700 dark:text-violet-300"
+                                      title={`As-bid prices (${stat.uom || "no UOM"}):\n${detail}`}
+                                    >
+                                      <History size={10} className="shrink-0" />
+                                      <span className="font-mono">
+                                        {stat.count} bid{stat.count === 1 ? "" : "s"} ({stat.uom || "no UOM"}) · med {currency.format(stat.median)}
+                                        {stat.count > 1 && ` · ${currency.format(stat.min)}–${currency.format(stat.max)}`}
+                                      </span>
+                                      {uomMatches && (
+                                        <button
+                                          onClick={() => handleAdopt(entry, stat)}
+                                          disabled={isSaving}
+                                          className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-violet-300 dark:border-violet-800 hover:bg-violet-100 dark:hover:bg-violet-950/40 disabled:opacity-40 transition-colors cursor-pointer"
+                                          title={`Adopt ${currency.format(stat.median)} as the company default for ${entry.lineCode}`}
+                                        >
+                                          Adopt
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </td>
                               <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                                 <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${badge.classes}`}>
