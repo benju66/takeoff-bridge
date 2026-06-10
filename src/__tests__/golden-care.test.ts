@@ -34,9 +34,9 @@ import {
   lumpOverridesFromExtract,
   overrideMapFromIntents,
   checkImportTieOut,
+  catalogCostCodeEntries,
   type MappingSuggestion,
 } from "../lib/importEstimate";
-import { ESTIMATE_ITEMS_MASTER } from "../lib/mock-data";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "../lib/costCodeResolver";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -78,9 +78,7 @@ describe.skipIf(!FIXTURE)("Golden legacy import — CARE bid to the cent", () =>
     const wb = await loadTemplateWorkbook(fs.readFileSync(FIXTURE as string));
     extracted = extractEstimate(wb);
     rows = enrichImportedRows(extracted);
-    const reverse = buildReverseProcoreMap(
-      Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({ internalCode: i.itemId, procoreCode: i.procoreCode }))
-    );
+    const reverse = buildReverseProcoreMap(catalogCostCodeEntries());
     suggestions = suggestImportMappings(extracted, deriveLegacyBridge(wb), reverse);
     overrides = overrideMapFromIntents(lumpOverridesFromExtract(extracted, path.basename(FIXTURE as string)));
   });

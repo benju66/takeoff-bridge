@@ -53,15 +53,17 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** A single `'STEP 4 - ESTIMATE'!C<n>` reference (quotes/absolute-$ optional). */
+const STEP4_C_REF_RE = new RegExp(`^'?${escapeRegExp(SHEET.step4)}'?!\\$?C\\$?(\\d+)$`, "i");
+
 /**
  * Extracts the STEP 4 row number from a SUMIF criterion that is a single
- * `'STEP 4 - ESTIMATE'!C<n>` reference (quotes/absolute-$ optional). Returns
- * 0 when the criterion is anything else (a range, another sheet, a literal).
+ * STEP 4 col-C cell reference. Returns 0 when the criterion is anything else
+ * (a range, another sheet, a literal).
  */
 function step4CriterionRow(criterion: string): number {
   if (criterion.includes(":")) return 0; // a range is never a criterion cell
-  const re = new RegExp(`^'?${escapeRegExp(SHEET.step4)}'?!\\$?C\\$?(\\d+)$`, "i");
-  const m = re.exec(criterion);
+  const m = STEP4_C_REF_RE.exec(criterion);
   return m ? Number(m[1]) : 0;
 }
 

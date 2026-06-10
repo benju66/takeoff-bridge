@@ -21,9 +21,11 @@ import {
   importSummaryRates,
   linkedTotalsFromRows,
   checkImportTieOut,
+  catalogCostCodeEntries,
 } from "@/lib/importEstimate";
 import { computeTakeoffSummary } from "@/lib/calculations";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { LINKED_DIVISION_ROWS } from "@/lib/constants";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "@/lib/costCodeResolver";
 import {
   buildLegacyPastBidTemplateBuffer,
@@ -33,10 +35,7 @@ import {
 } from "./fixtures/syntheticTemplate";
 
 /** Reverse map built the same way the import page's catalog fallback primes. */
-const catalogReverse = () =>
-  buildReverseProcoreMap(
-    Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({ internalCode: i.itemId, procoreCode: i.procoreCode }))
-  );
+const catalogReverse = () => buildReverseProcoreMap(catalogCostCodeEntries());
 
 describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
   it("preserves bare base codes on ad-hoc lines via rawCode", async () => {
@@ -251,14 +250,7 @@ describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
     // AFTER mapping the 10 GC/Site-Ops rows to linked itemIds: the engine
     // excludes their typed qty×price and counts linkedTotalsFromRows instead —
     // the totals must NOT move (the slice-4 review flow rests on this).
-    const linkedByDesc = new Map(
-      ["General Conditions", "Supervision", "Site Operations", "Demolition", "Final Cleaning",
-        "SWPPP Permit", "Survey and Layout", "Building and Site Services", "Site Equipment",
-        "Special Inspections"].map((d, i) =>
-        [d, ["01-0000.001", "01-0400.002", "02-0000.001", "02-4100.002", "02-9005.003",
-          "02-9070.004", "02-9200.005", "02-9300.006", "02-9400.007", "02-9500.008"][i]]
-      )
-    );
+    const linkedByDesc = new Map(LINKED_DIVISION_ROWS.map((l) => [l.description, l.itemId]));
     const mappedRows = rows.map((r) =>
       linkedByDesc.has(r.description) ? applyImportMapping(r, linkedByDesc.get(r.description)!) : r
     );

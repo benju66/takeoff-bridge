@@ -132,6 +132,18 @@ export interface MappingSuggestion {
   candidates: SuggestionItem[];
 }
 
+/**
+ * The static catalog expressed as cost-code-map entries — the OFFLINE fallback
+ * for the reverse map, mirroring `primeCostCodeResolverFromCatalog` exactly so
+ * the bridge and the resolver can never disagree about a degraded session.
+ */
+export function catalogCostCodeEntries(): Pick<CostCodeMapEntry, "internalCode" | "procoreCode">[] {
+  return Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({
+    internalCode: i.itemId,
+    procoreCode: i.procoreCode,
+  }));
+}
+
 /** Reverses cost-code-map entries to `procoreCode → internalCode[]` (sorted, deterministic). */
 export function buildReverseProcoreMap(
   entries: readonly Pick<CostCodeMapEntry, "internalCode" | "procoreCode">[]

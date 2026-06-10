@@ -15,11 +15,10 @@ import { computeTakeoffSummary } from "@/lib/calculations";
 import {
   enrichImportedRows, importSummaryRates, projectFromExtract, estimateTotalsForImport,
   checkImportTieOut, linkedTotalsFromRows, buildReverseProcoreMap, suggestImportMappings,
-  applyImportMapping, lumpOverridesFromExtract, overrideMapFromIntents,
+  applyImportMapping, lumpOverridesFromExtract, overrideMapFromIntents, catalogCostCodeEntries,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import { validateAssignInput } from "@/lib/assignCode";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
@@ -106,10 +105,7 @@ export default function ImportPastEstimatePage() {
         primeCostCodeResolverFromCatalog();
       }
       if (mapEntries.length === 0) {
-        mapEntries = Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({
-          internalCode: i.itemId,
-          procoreCode: i.procoreCode,
-        }));
+        mapEntries = catalogCostCodeEntries();
       }
 
       // Legacy normalization inputs: the workbook's own BLI bridge + reverse map.
@@ -132,24 +128,40 @@ export default function ImportPastEstimatePage() {
     }
   };
 
+  /**
+   * A linked itemId may exist on ONE row only: the engine counts a linked
+   * value once per itemId but excludes EVERY row carrying it, so assigning the
+   * same linked code twice would drop the second row's dollars and break the
+   * tie with no way to un-map short of re-uploading. Refuse the duplicate.
+   */
+  const linkedAlreadyTaken = (prev: ProcessedTakeoffRow[], rowId: string, itemId: string) =>
+    isLinkedDivisionRow(itemId) && prev.some((r) => r.id !== rowId && r.itemId === itemId);
+
   /** Apply a HUMAN-CONFIRMED mapping to one row (qty/unitPrice never move). */
   const acceptMapping = (rowId: string, itemId: string) => {
+    if (linkedAlreadyTaken(rows, rowId, itemId)) {
+      setError(`"${itemId}" is a linked GC/Site-Ops code and is already assigned to another line.`);
+      return;
+    }
+    setError(null);
     setRows((prev) => prev.map((r) => (r.id === rowId ? applyImportMapping(r, itemId) : r)));
   };
 
   /** Accept every bridge/linked suggestion still pending — the high-confidence tiers only. */
   const acceptAllHighConfidence = () => {
     if (!parsed) return;
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.isMapped) return r;
+    setRows((prev) => {
+      const next = [...prev];
+      for (let i = 0; i < next.length; i++) {
+        const r = next[i];
+        if (r.isMapped) continue;
         const s = parsed.suggestions.get(r.id);
-        if (s && (s.confidence === "bridge" || s.confidence === "linked") && s.itemId) {
-          return applyImportMapping(r, s.itemId);
-        }
-        return r;
-      })
-    );
+        if (!s || (s.confidence !== "bridge" && s.confidence !== "linked") || !s.itemId) continue;
+        if (linkedAlreadyTaken(next, r.id, s.itemId)) continue; // first claim wins; rest stay pending
+        next[i] = applyImportMapping(r, s.itemId);
+      }
+      return next;
+    });
   };
 
   const handleSave = async () => {
