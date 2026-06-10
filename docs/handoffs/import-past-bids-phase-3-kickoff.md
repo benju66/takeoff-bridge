@@ -135,7 +135,17 @@ mismatch indicator, F3 history NOT in accept-all, F4 price history on /rates). *
   without the CSV reset; `needsReview` added to ITEM_ID_CASCADE_CAPTURE_FIELDS (undo restores
   the flag); round-trip test.
 
-Resting state: **suite 489 pass / 49 files**, goldens McKenna + synthetic + CARE tie $0.00,
+- `193d606` **Editable UOM at the review gate (architect follow-up, 2026-06-10)**: the review
+  table's UOM cell is a free-text input — correct a WRONG as-bid unit before it enters the
+  project/pricing DB. Untouched rows save exactly as bid; clearing the box restores the bid's
+  value; corrected cells render violet w/ the original in the tooltip. Pure layer:
+  `applyAcceptedMappings(originals, accepted, uomOverrides?)` — correction applied AFTER the
+  mapping (wins over catalog blank-fill), originals immutable, dollars can't move.
+  ALSO architect-verified behavior: `classification_history` survives project deletion by
+  design (FK → NULL; 398 rows live with 0 projects) — learning is team knowledge, not project
+  data; the /rates price report by contrast reads live line items and empties with deletion.
+
+Resting state: **suite 490 pass / 49 files**, goldens McKenna + synthetic + CARE tie $0.00,
 tsc + next build clean. Branch NOT merged to main; nothing pushed.
 
 ## Architect e2e (recommended before merging)
