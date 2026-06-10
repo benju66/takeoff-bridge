@@ -14,7 +14,13 @@ import {
   History,
 } from "lucide-react";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getRateCard, updateRateCardEntry, getImportedPriceHistory } from "@/lib/db";
+import {
+  getRateCard,
+  updateRateCardEntry,
+  getImportedPriceHistory,
+  getImportedStep23History,
+} from "@/lib/db";
+import { step23Observations } from "@/lib/step23Normalization";
 import { primeRateCard } from "@/lib/rateResolver";
 import {
   groupRateCardRows,
@@ -61,6 +67,55 @@ const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+/**
+ * One as-bid history line under a rate (shared by the catalog price report,
+ * Slice 2, and the STEP 2/3 staff-rate report, Slice 3). REPORT-only; the
+ * ADOPT button renders only when the bids' UOM matches this line's unit and
+ * writes through the caller's audited path.
+ */
+function HistoryStatLine({
+  stat,
+  unit,
+  sourceNote,
+  disabled,
+  onAdopt,
+}: {
+  stat: PriceHistoryStat;
+  /** The line def's unit — gates ADOPT (prices are only adoptable within a UOM). */
+  unit: string;
+  /** Tooltip lead-in naming the observation source. */
+  sourceNote: string;
+  disabled: boolean;
+  onAdopt: (stat: PriceHistoryStat) => void;
+}) {
+  const uomMatches = stat.uom !== "" && stat.uom === unit.trim().toUpperCase();
+  const detail = stat.observations
+    .map((o) => `${o.projectName || "Unnamed"} (${o.bidDate || "no date"}${o.marketSector ? `, ${o.marketSector}` : ""}): ${currency.format(o.unitPrice)}`)
+    .join("\n");
+  return (
+    <div
+      className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-violet-700 dark:text-violet-300"
+      title={`${sourceNote} (${stat.uom || "no UOM"}):\n${detail}`}
+    >
+      <History size={10} className="shrink-0" />
+      <span className="font-mono">
+        {stat.count} bid{stat.count === 1 ? "" : "s"} ({stat.uom || "no UOM"}) · med {currency.format(stat.median)}
+        {stat.count > 1 && ` · ${currency.format(stat.min)}–${currency.format(stat.max)}`}
+      </span>
+      {uomMatches && (
+        <button
+          onClick={() => onAdopt(stat)}
+          disabled={disabled}
+          className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-violet-300 dark:border-violet-800 hover:bg-violet-100 dark:hover:bg-violet-950/40 disabled:opacity-40 transition-colors cursor-pointer"
+          title={`Adopt ${currency.format(stat.median)} as the company default`}
+        >
+          Adopt
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function RateCardDashboard() {
   const [entries, setEntries] = useState<RateCardEntry[] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -80,6 +135,14 @@ export default function RateCardDashboard() {
    * leaves the map empty and the page fully functional without the report.
    */
   const [priceHistory, setPriceHistory] = useState<Map<string, PriceHistoryStat[]>>(new Map());
+  /**
+   * As-bid STEP 2/3 rate history per resolved GC/Site-Ops code (Phase 3
+   * Slice 3) — REPORT-only, mined from imported_step23_lines. Kept SEPARATE
+   * from the catalog map so STEP 4 unit-price observations and STEP 2/3 rate
+   * observations never mix (a code like 02-4100.002 exists in both worlds).
+   * Fail-soft, same as the catalog report.
+   */
+  const [step23History, setStep23History] = useState<Map<string, PriceHistoryStat[]>>(new Map());
 
   // Load + (re)prime the company card. Reused on mount and on visibilitychange
   // so a /rates edit in another tab — or the seed/backfill — is reflected here.
@@ -113,6 +176,15 @@ export default function RateCardDashboard() {
         if (!cancelled) setPriceHistory(aggregatePriceHistory(observations));
       } catch (err) {
         console.error("Failed to load imported price history (report skipped):", err);
+      }
+    })();
+    // As-bid STEP 2/3 rate history (Slice 3) — same fail-soft independence.
+    (async () => {
+      try {
+        const sources = await getImportedStep23History();
+        if (!cancelled) setStep23History(aggregatePriceHistory(step23Observations(sources)));
+      } catch (err) {
+        console.error("Failed to load imported STEP 2/3 rate history (report skipped):", err);
       }
     })();
     return () => { cancelled = true; };
@@ -417,36 +489,29 @@ export default function RateCardDashboard() {
                                 </div>
                                 {/* As-bid price history (Phase 3 Slice 2) — report-only;
                                     ADOPT only where the bids' UOM matches this line's unit. */}
-                                {(priceHistory.get(entry.lineCode) ?? []).map((stat) => {
-                                  const uomMatches =
-                                    stat.uom !== "" && stat.uom === (def?.unit ?? "").trim().toUpperCase();
-                                  const detail = stat.observations
-                                    .map((o) => `${o.projectName || "Unnamed"} (${o.bidDate || "no date"}${o.marketSector ? `, ${o.marketSector}` : ""}): ${currency.format(o.unitPrice)}`)
-                                    .join("\n");
-                                  return (
-                                    <div
-                                      key={stat.uom || "(none)"}
-                                      className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-violet-700 dark:text-violet-300"
-                                      title={`As-bid prices (${stat.uom || "no UOM"}):\n${detail}`}
-                                    >
-                                      <History size={10} className="shrink-0" />
-                                      <span className="font-mono">
-                                        {stat.count} bid{stat.count === 1 ? "" : "s"} ({stat.uom || "no UOM"}) · med {currency.format(stat.median)}
-                                        {stat.count > 1 && ` · ${currency.format(stat.min)}–${currency.format(stat.max)}`}
-                                      </span>
-                                      {uomMatches && (
-                                        <button
-                                          onClick={() => handleAdopt(entry, stat)}
-                                          disabled={isSaving}
-                                          className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-violet-300 dark:border-violet-800 hover:bg-violet-100 dark:hover:bg-violet-950/40 disabled:opacity-40 transition-colors cursor-pointer"
-                                          title={`Adopt ${currency.format(stat.median)} as the company default for ${entry.lineCode}`}
-                                        >
-                                          Adopt
-                                        </button>
-                                      )}
-                                    </div>
-                                  );
-                                })}
+                                {(priceHistory.get(entry.lineCode) ?? []).map((stat) => (
+                                  <HistoryStatLine
+                                    key={`catalog-${stat.uom || "(none)"}`}
+                                    stat={stat}
+                                    unit={def?.unit ?? ""}
+                                    sourceNote="As-bid prices"
+                                    disabled={isSaving}
+                                    onAdopt={(s) => handleAdopt(entry, s)}
+                                  />
+                                ))}
+                                {/* As-bid STEP 2/3 rate history (Phase 3 Slice 3) — the
+                                    same report + UOM-gated ADOPT over the bids' own
+                                    GC/Site-Ops line detail (resolved codes). */}
+                                {(step23History.get(entry.lineCode) ?? []).map((stat) => (
+                                  <HistoryStatLine
+                                    key={`step23-${stat.uom || "(none)"}`}
+                                    stat={stat}
+                                    unit={def?.unit ?? ""}
+                                    sourceNote="As-bid GC/Site-Ops rates"
+                                    disabled={isSaving}
+                                    onAdopt={(s) => handleAdopt(entry, s)}
+                                  />
+                                ))}
                               </td>
                               <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                                 <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${badge.classes}`}>

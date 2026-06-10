@@ -1,5 +1,6 @@
 import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
+import type { Step23HistorySource } from "./step23Normalization";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -767,6 +768,50 @@ export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
       marketSector: project?.market_sector ?? "",
     };
   });
+}
+
+/**
+ * Every imported bid's stored STEP 2/3 line detail with its project context
+ * (Phase 3 Slice 3): `project_estimates.imported_step23_lines` payloads joined
+ * to `projects`. READ-only fuel for the /rates staff-rate history report —
+ * resolution + filtering live in the pure step23Normalization.ts; nothing
+ * here or there writes a rate or touches the protected JSONB.
+ */
+export async function getImportedStep23History(): Promise<Step23HistorySource[]> {
+  const { data, error } = await supabase
+    .from("project_estimates")
+    .select("imported_step23_lines, projects(name, bid_date, market_sector)")
+    .not("imported_step23_lines", "is", null);
+
+  if (error) {
+    console.error("Failed to fetch imported STEP 2/3 history:", error);
+    throw new Error(`Failed to fetch imported STEP 2/3 history: ${error.message}`);
+  }
+
+  const out: Step23HistorySource[] = [];
+  for (const row of data || []) {
+    const payload = row.imported_step23_lines;
+    // Same shape gate as mapProjectFromRow: a malformed payload is skipped,
+    // never thrown over — the report is advisory.
+    if (
+      payload == null ||
+      typeof payload !== "object" ||
+      Array.isArray(payload) ||
+      !Array.isArray((payload as ImportedStep23Lines).step2Lines)
+    ) {
+      continue;
+    }
+    const project = (Array.isArray(row.projects) ? row.projects[0] : row.projects) as
+      | { name?: string; bid_date?: string; market_sector?: string }
+      | null;
+    out.push({
+      payload: payload as ImportedStep23Lines,
+      projectName: project?.name ?? "",
+      bidDate: project?.bid_date ?? "",
+      marketSector: project?.market_sector ?? "",
+    });
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════
