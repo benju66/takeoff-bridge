@@ -372,6 +372,16 @@ const LEGACY_RATES: Record<string, number> = {
 /** The hand-typed lump in the 60-1005 slot, relabeled the way real bids do. */
 const LEGACY_LUMP = { key: "designContingency", baseCode: "60-1005", sheetLabel: "Owner's Rep", value: 7_500 };
 
+/** Hand-authored STEP 2/3 detail lines (bare codes — the legacy idiom; the
+ *  zero row mirrors the many empty template rows real sheets carry). */
+const LEGACY_STEP2_DETAIL = [
+  { code: "01-0410", description: "Sr Superintendent", qty: 10, rate: 1_000, total: 10_000 },
+  { code: "01-1000", description: "Small Tools", qty: 0, rate: 0, total: 0 },
+];
+const LEGACY_STEP3_DETAIL = [
+  { code: "02-9010", description: "Progress Cleaning - Hired", qty: 2, rate: 1_000, total: 2_000 },
+];
+
 const LEGACY_TAKEOFF_SUBTOTAL = LEGACY_ITEMS.reduce((s, it) => s + it.qty * it.unitPrice, 0); // 15,000
 const LEGACY_SUBTOTAL = LEGACY_TAKEOFF_SUBTOTAL + LINKED_TOTAL; // 65,000
 const LEGACY_RATE_MODIFIER_SUM = Object.values(LEGACY_RATES).reduce((s, r) => s + r * LEGACY_SUBTOTAL, 0); // 5,200
@@ -396,6 +406,12 @@ export const LEGACY_PAST_BID_ORACLE = {
   noneCode: "99-9999",
   /** Linked-tier inputs: bare code + canonical description per linked row. */
   linkedDescriptions: LINKED_ROWS.map((l) => l.description),
+  /** STEP 2/3 hand-authored detail (dollar lines only — the zero row is filtered). */
+  step2Detail: LEGACY_STEP2_DETAIL.filter((l) => l.total !== 0),
+  step3Detail: LEGACY_STEP3_DETAIL.filter((l) => l.total !== 0),
+  /** Expected linked section totals once the 10 GC/Site-Ops rows are mapped. */
+  gcSectionTotal: LINKED_ROWS.filter((l) => l.sheet === "step2").reduce((s, l) => s + l.value, 0), // 20,000
+  siteOpsSectionTotal: LINKED_ROWS.filter((l) => l.sheet === "step3").reduce((s, l) => s + l.value, 0), // 30,000
 } as const;
 
 /** Builds the synthetic LEGACY past-bid workbook (.xlsx bytes). */
@@ -430,6 +446,24 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
     const r = link.sheet === "step2" ? s2Row++ : s3Row++;
     ws.getCell(`H${r}`).value = link.subtotalLabel;
     ws.getCell(`I${r}`).value = link.value;
+  }
+  // …plus hand-authored detail lines with BARE codes (C code / D desc / F qty /
+  // H rate / I total — the shape extractSheetLines scans).
+  for (const d of LEGACY_STEP2_DETAIL) {
+    s2.getCell(`C${s2Row}`).value = d.code;
+    s2.getCell(`D${s2Row}`).value = d.description;
+    s2.getCell(`F${s2Row}`).value = d.qty;
+    s2.getCell(`H${s2Row}`).value = d.rate;
+    s2.getCell(`I${s2Row}`).value = d.total;
+    s2Row++;
+  }
+  for (const d of LEGACY_STEP3_DETAIL) {
+    s3.getCell(`C${s3Row}`).value = d.code;
+    s3.getCell(`D${s3Row}`).value = d.description;
+    s3.getCell(`F${s3Row}`).value = d.qty;
+    s3.getCell(`H${s3Row}`).value = d.rate;
+    s3.getCell(`I${s3Row}`).value = d.total;
+    s3Row++;
   }
 
   // STEP 4 — every code is BARE; track row numbers for the BLI SUMIF formulas.

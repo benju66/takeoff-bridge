@@ -35,6 +35,7 @@ import {
   overrideMapFromIntents,
   checkImportTieOut,
   catalogCostCodeEntries,
+  step23LinesForImport,
   type MappingSuggestion,
 } from "../lib/importEstimate";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "../lib/costCodeResolver";
@@ -100,6 +101,20 @@ describe.skipIf(!FIXTURE)("Golden legacy import — CARE bid to the cent", () =>
     const labels = lumps.map((l) => l.reason).join(" ");
     expect(labels).toContain("Owner's Rep");
     expect(labels).toContain("Professional Service Fees");
+  });
+
+  it("captures the bid's hand-authored STEP 2/3 detail for the read-only panels", () => {
+    // The CARE probe (2026-06-10) found 19 STEP 2 and 16 STEP 3 dollar lines
+    // under bare codes — the payload must keep carrying a healthy share.
+    const payload = step23LinesForImport(extracted);
+    expect(payload.step2Lines.length).toBeGreaterThanOrEqual(15);
+    expect(payload.step3Lines.length).toBeGreaterThanOrEqual(10);
+    expect(payload.step2Lines.every((l) => l.total !== 0)).toBe(true);
+    // Known real lines from the probe.
+    const supt = payload.step2Lines.find((l) => l.description === "Sr Superintendent");
+    expect(Math.abs((supt?.total ?? 0) - 227_325)).toBeLessThanOrEqual(0.01);
+    expect(payload.step3Lines.filter((l) => l.code === "02-4100").length).toBe(3); // three demolition scopes
+    expect(payload.linkedSourceSubtotals.length).toBeGreaterThan(0);
   });
 
   it("derives a usable bridge + suggestions (not an empty best-effort)", () => {
