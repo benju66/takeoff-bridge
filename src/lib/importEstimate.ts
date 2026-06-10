@@ -24,12 +24,16 @@
  *    independent — see src/lib/cascade.ts). Procore rollup sums them into one code.
  */
 
-import { ProcessedTakeoffRow } from "@/types";
-import { Project, ProjectEstimate } from "@/types/db";
-import { ExtractedEstimate, ExtractedLineItem, ExtractedProjectInputs } from "./templateExtractor";
+import type { ProcessedTakeoffRow } from "@/types";
+import type { Project, ProjectEstimate } from "@/types/db";
+// TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
+// only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
+// otherwise the workspace page (which imports the pure linkedTotalsFromRows) would
+// drag ExcelJS into its static bundle and crash the Turbopack compile worker.
+import type { ExtractedEstimate, ExtractedLineItem, ExtractedProjectInputs } from "./templateExtractor";
+import type { LinkedDivisionTotal, TakeoffSummary } from "./calculations";
 import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
 import { resolveProcoreCode } from "./costCodeResolver";
-import { LinkedDivisionTotal, TakeoffSummary } from "./calculations";
 import { LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
 import { getDivisionCode } from "./division";
 import { RECONCILIATION_TOLERANCE } from "./exporter";
