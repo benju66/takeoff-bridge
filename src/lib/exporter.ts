@@ -4,6 +4,7 @@ import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC
 import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
+import { resolveProcoreCode } from "./costCodeResolver";
 import JSZip from "jszip";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
@@ -365,6 +366,31 @@ export interface GcSiteOpsLine {
   total: number;
 }
 
+/**
+ * The GC/Site-Ops line basis for an IMPORTED project: a finished bid's STEP 2/3
+ * are hand-authored, so the parametric calc results would be app DEFAULTS — the
+ * truthful dollars are the saved linked STEP 4 rows themselves (one per linked
+ * itemId, matching linkedTotalsFromRows' dedup). Their granular Procore codes
+ * resolve through the seeded cost_code_map like any other itemId; an unmapped
+ * one fails the reconciliation below loudly, never silently.
+ */
+export function importedLinkedGcSiteOpsLines(rows: ProcessedTakeoffRow[]): GcSiteOpsLine[] {
+  const seen = new Set<string>();
+  const out: GcSiteOpsLine[] = [];
+  for (const r of rows) {
+    if (!isLinkedDivisionRow(r.itemId) || seen.has(r.itemId)) continue;
+    seen.add(r.itemId);
+    out.push({
+      code: r.itemId,
+      procoreCode: resolveProcoreCode(r.itemId),
+      costType: r.costType,
+      desc: r.description,
+      total: r.matchedQty * r.unitPrice,
+    });
+  }
+  return out;
+}
+
 /** Flattens both calc results into one line list for rollup/gating/CSV. */
 export function collectGcSiteOpsLines(
   gcCalcResult: PersonnelCalcResult,
@@ -443,7 +469,15 @@ export interface ExportReadiness {
 export function validateExportReadiness(
   rows: ProcessedTakeoffRow[],
   gcCalcResult: PersonnelCalcResult,
-  siteOpsCalcResult: SiteOpsCalcResult
+  siteOpsCalcResult: SiteOpsCalcResult,
+  opts?: {
+    /**
+     * IMPORTED project (G-2): take the GC/Site-Ops side of the gate from the
+     * saved linked rows instead of the parametric calc results (which would
+     * be app defaults a finished bid never carried).
+     */
+    importedLinkedBasis?: boolean;
+  }
 ): ExportReadiness {
   const blockers: ExportBlocker[] = [];
   let lineItemTotal = 0;
@@ -470,7 +504,9 @@ export function validateExportReadiness(
   // lineItemTotal but not rollupTotal, which fails reconciliation below and
   // blocks the export with a delta; generateExcelWorkbook additionally throws
   // naming the offending line.
-  const gcSiteOpsLines = collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult);
+  const gcSiteOpsLines = opts?.importedLinkedBasis
+    ? importedLinkedGcSiteOpsLines(rows)
+    : collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult);
   for (const line of gcSiteOpsLines) {
     lineItemTotal += line.total;
   }

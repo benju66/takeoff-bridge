@@ -193,7 +193,14 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // Single source with the export gate: the same validateExportReadiness, surfaced
   // live instead of thrown away when it passes. Adds the modifier rollup → grand-total tie.
   const reconciliation = React.useMemo(() => {
-    const readiness = validateExportReadiness(rows, personnel.calcResult, infrastructure.calcResult);
+    // IMPORTED projects: gate on the saved linked rows, not the parametric
+    // calc results (which are app defaults for imports — G-2).
+    const readiness = validateExportReadiness(
+      rows,
+      personnel.calcResult,
+      infrastructure.calcResult,
+      project?.isImported ? { importedLinkedBasis: true } : undefined
+    );
     return buildReconciliationModel({
       reconciliation: readiness.reconciliation,
       blockerCount: readiness.blockers.length,
@@ -202,7 +209,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       roundingMode: summaryRates.roundingRule,
       tolerance: RECONCILIATION_TOLERANCE,
     });
-  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates]);
+  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates, project?.isImported]);
 
   // Phase 5 slice 4 — the override WRITE path. The Trust Inspector's editor builds the
   // payload (pure overrideSetter.ts); this records the immutable event and re-syncs the

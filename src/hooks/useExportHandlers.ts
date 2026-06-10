@@ -62,6 +62,22 @@ export function useExportHandlers(
   };
 
   /**
+   * IMPORTED bids cannot be exported yet (architect-locked 2026-06-10): the
+   * export pipeline writes STEP 2/3 from the parametric calculators, which for
+   * an import would fabricate default-derived sheets the bid never carried.
+   * Fail loud — no plausible-looking-but-wrong workbook may reach Procore.
+   */
+  const guardImported = (): boolean => {
+    if (project?.isImported) {
+      setExportError(
+        "Export of imported bids isn't supported yet — the original STEP 2/3 detail can't be reproduced in the export template. Imported projects are archive/reference baselines for now."
+      );
+      return true;
+    }
+    return false;
+  };
+
+  /**
    * Completeness + reconciliation gates. Returns true when the export may
    * proceed. Blockers open the override modal; reconciliation failures set
    * exportError. Remembers which export to retry after overrides are applied.
@@ -97,6 +113,7 @@ export function useExportHandlers(
   };
 
   const handleExportExcel = () => {
+    if (guardImported()) return;
     // Linked division values keep the payload's rows + modifier basis in
     // step with the estimate page (gc-siteops Phase 5).
     const linkedTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
@@ -105,6 +122,7 @@ export function useExportHandlers(
   };
 
   const handleExportProcore = (overrideRows?: ProcessedTakeoffRow[]) => {
+    if (guardImported()) return;
     const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
     if (!runExportGate(effectiveRows, "procore")) return;
     const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult, activeOverrides);
@@ -117,6 +135,7 @@ export function useExportHandlers(
   };
 
   const handleExportExcelWorkbook = async (overrideRows?: ProcessedTakeoffRow[]) => {
+    if (guardImported()) return;
     const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
     if (!runExportGate(effectiveRows, "workbook")) return;
     setIsExportingExcel(true);
