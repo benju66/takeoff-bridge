@@ -2,12 +2,13 @@
 -- cost_code_map seed — GENERATED FILE, do not edit by hand.
 -- Regenerate with: npm run generate-seed
 -- Source: src/lib/estimate-catalog.json + scripts/output/cost-code-gaps.json
--- Rows: 221 (template: 147, sibling: 67, manual: 7)
+-- Rows: 227 (template: 147, sibling: 67, manual: 13)
 -- ═════════════════════════════════════════════════════════════════════
 
 INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) VALUES
   ('Company_Estimate_Template.xlsx', '01-0000.001', '1-10000.000', 'template'),
   ('Company_Estimate_Template.xlsx', '01-0230.001', '1-10230.000', 'template'),
+  ('Company_Estimate_Template.xlsx', '01-0230.002', '1-10260.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '01-0250.001', '1-10250.000', 'template'),
   ('Company_Estimate_Template.xlsx', '01-0260.001', '1-10260.000', 'template'),
   ('Company_Estimate_Template.xlsx', '01-0400.002', '1-10000.000', 'template'),
@@ -32,6 +33,7 @@ INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) V
   ('Company_Estimate_Template.xlsx', '03-0000.011', '3-30000.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '03-0000.012', '3-30000.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '03-3543.001', '3-33543.000', 'template'),
+  ('Company_Estimate_Template.xlsx', '03-3543.002', '3-33543.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '03-4100.001', '3-34100.000', 'template'),
   ('Company_Estimate_Template.xlsx', '03-4500.001', '3-34500.000', 'template'),
   ('Company_Estimate_Template.xlsx', '03-5413.001', '3-35413.000', 'template'),
@@ -66,6 +68,7 @@ INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) V
   ('Company_Estimate_Template.xlsx', '06-8700.001', '6-68700.000', 'template'),
   ('Company_Estimate_Template.xlsx', '07-1000.001', '7-71000.000', 'template'),
   ('Company_Estimate_Template.xlsx', '07-1000.002', '7-71000.000', 'sibling'),
+  ('Company_Estimate_Template.xlsx', '07-1000.003', '7-71000.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '07-1413.001', '7-71413.000', 'template'),
   ('Company_Estimate_Template.xlsx', '07-1413.002', '7-71413.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '07-1413.003', '7-71413.000', 'sibling'),
@@ -114,6 +117,7 @@ INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) V
   ('Company_Estimate_Template.xlsx', '09-6800.001', '9-96800.000', 'template'),
   ('Company_Estimate_Template.xlsx', '09-7200.001', '9-97200.000', 'template'),
   ('Company_Estimate_Template.xlsx', '09-9000.001', '9-99000.000', 'template'),
+  ('Company_Estimate_Template.xlsx', '09-9000.002', '9-99000.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '09-9646.001', '9-99646.000', 'template'),
   ('Company_Estimate_Template.xlsx', '09-9656.001', '9-99656.000', 'template'),
   ('Company_Estimate_Template.xlsx', '10-0000.001', '10-100000.000', 'template'),
@@ -174,6 +178,7 @@ INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) V
   ('Company_Estimate_Template.xlsx', '26-0000.003', '26-260000.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '26-0000.004', '26-260000.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '26-0000.005', '26-260000.000', 'sibling'),
+  ('Company_Estimate_Template.xlsx', '26-0000.006', '26-260000.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '27-2000.001', '27-272000.000', 'template'),
   ('Company_Estimate_Template.xlsx', '27-4000.001', '27-274000.000', 'template'),
   ('Company_Estimate_Template.xlsx', '28-1300.001', '28-281300.000', 'template'),
@@ -198,6 +203,7 @@ INSERT INTO cost_code_map (template_name, internal_code, procore_code, source) V
   ('Company_Estimate_Template.xlsx', '32-1613.004', '32-321613.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '32-1613.005', '32-321613.000', 'sibling'),
   ('Company_Estimate_Template.xlsx', '32-1613.006', '32-321613.000', 'sibling'),
+  ('Company_Estimate_Template.xlsx', '32-1613.007', '32-321613.000', 'manual'),
   ('Company_Estimate_Template.xlsx', '32-1700.001', '32-321700.000', 'template'),
   ('Company_Estimate_Template.xlsx', '32-1813.001', '32-321813.000', 'template'),
   ('Company_Estimate_Template.xlsx', '32-3100.001', '32-323100.000', 'template'),

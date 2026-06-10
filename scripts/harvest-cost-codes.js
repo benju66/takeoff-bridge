@@ -33,6 +33,10 @@ const TYPO_NORMALIZATION = {
 // no Budget Line Items SUMIF criterion of their own. Never inferred by the agent.
 const USER_CONFIRMED_PROCORE_CODES = {
   "12-3570.001": "6-64100.000",   // Healthcare Casework & FFE -> Architectural Casework and Millwork
+  // SAC Determination (architect-confirmed 2026-06-10): rolls to City Licenses/
+  // Misc Permits, NOT its sibling 01-0230.001's Building Permit — sibling
+  // inference would resolve it wrong, so it must stay pinned here.
+  "01-0230.002": "1-10260.000",
   "22-4129.001": "22-220000.000", // Shower Pans -> Plumbing division base
   "80-8002.002": "80-800001.000", // TBD allowances all roll up to 80-800001.000
   "80-8003.003": "80-800001.000",

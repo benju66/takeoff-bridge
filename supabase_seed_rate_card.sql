@@ -3,7 +3,7 @@
 -- Regenerate with: npm run generate-rate-card-seed
 -- Source 1: src/lib/constants.ts (rate-bearing GC/Site Ops default lines)
 -- Source 2: src/lib/estimate-catalog.json (STEP 4 catalog unit prices)
--- Rows: 265 (44 GC/Site Ops + 221 catalog;
+-- Rows: 271 (44 GC/Site Ops + 227 catalog;
 --       all source='seed'; equals today's constants + catalog values)
 -- ═════════════════════════════════════════════════════════════════════
 
@@ -54,6 +54,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '02-9430.001', 300, 'seed'),
   ('Company_Estimate_Template.xlsx', '01-0000.001', 64698.85023333334, 'seed'),
   ('Company_Estimate_Template.xlsx', '01-0230.001', 2742.5310400000003, 'seed'),
+  ('Company_Estimate_Template.xlsx', '01-0230.002', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '01-0250.001', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '01-0260.001', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '01-0400.002', 43300, 'seed'),
@@ -78,6 +79,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '03-0000.011', 400, 'seed'),
   ('Company_Estimate_Template.xlsx', '03-0000.012', 7, 'seed'),
   ('Company_Estimate_Template.xlsx', '03-3543.001', 4, 'seed'),
+  ('Company_Estimate_Template.xlsx', '03-3543.002', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '03-4100.001', 32, 'seed'),
   ('Company_Estimate_Template.xlsx', '03-4500.001', 55, 'seed'),
   ('Company_Estimate_Template.xlsx', '03-5413.001', 2, 'seed'),
@@ -112,6 +114,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '06-8700.001', 15000, 'seed'),
   ('Company_Estimate_Template.xlsx', '07-1000.001', 7, 'seed'),
   ('Company_Estimate_Template.xlsx', '07-1000.002', 5500, 'seed'),
+  ('Company_Estimate_Template.xlsx', '07-1000.003', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '07-1413.001', 8, 'seed'),
   ('Company_Estimate_Template.xlsx', '07-1413.002', 2, 'seed'),
   ('Company_Estimate_Template.xlsx', '07-1413.003', 0, 'seed'),
@@ -160,6 +163,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '09-6800.001', 36, 'seed'),
   ('Company_Estimate_Template.xlsx', '09-7200.001', 55, 'seed'),
   ('Company_Estimate_Template.xlsx', '09-9000.001', 2, 'seed'),
+  ('Company_Estimate_Template.xlsx', '09-9000.002', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '09-9646.001', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '09-9656.001', 8, 'seed'),
   ('Company_Estimate_Template.xlsx', '10-0000.001', 0, 'seed'),
@@ -220,6 +224,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '26-0000.003', 850, 'seed'),
   ('Company_Estimate_Template.xlsx', '26-0000.004', 3500, 'seed'),
   ('Company_Estimate_Template.xlsx', '26-0000.005', 12000, 'seed'),
+  ('Company_Estimate_Template.xlsx', '26-0000.006', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '27-2000.001', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '27-4000.001', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '28-1300.001', 0, 'seed'),
@@ -244,6 +249,7 @@ INSERT INTO rate_card (template_name, line_code, rate, source) VALUES
   ('Company_Estimate_Template.xlsx', '32-1613.004', 48, 'seed'),
   ('Company_Estimate_Template.xlsx', '32-1613.005', 11.5, 'seed'),
   ('Company_Estimate_Template.xlsx', '32-1613.006', 14, 'seed'),
+  ('Company_Estimate_Template.xlsx', '32-1613.007', 0, 'seed'),
   ('Company_Estimate_Template.xlsx', '32-1700.001', 1500, 'seed'),
   ('Company_Estimate_Template.xlsx', '32-1813.001', 14, 'seed'),
   ('Company_Estimate_Template.xlsx', '32-3100.001', 55, 'seed'),

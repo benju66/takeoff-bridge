@@ -48,7 +48,8 @@ describe("Rate-card slice 2 Phase B — catalog price resolves byte-identical at
 
   it("template-init: resolved price == raw JSON default for every catalog item", () => {
     const items = Object.values(ESTIMATE_ITEMS_MASTER);
-    expect(items.length).toBe(221);
+    // 221 harvested + 6 architect-confirmed manual additions (2026-06-10).
+    expect(items.length).toBe(227);
     for (const item of items) {
       // mirrors useTakeoffWorkbook.tsx initializeDefaultEstimateRows
       expect(resolveCatalogPrice(item.itemId, item.defaultUnitPrice)).toBe(

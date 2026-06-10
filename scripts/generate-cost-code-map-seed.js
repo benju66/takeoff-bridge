@@ -25,6 +25,19 @@ const path = require('path');
 
 const TEMPLATE_NAME = 'Company_Estimate_Template.xlsx';
 
+// Architect-confirmed catalog additions that do NOT yet exist as template
+// STEP 4 rows (CARE legacy-import sweep, 2026-06-10) — provenance 'manual'.
+// When the codes are added to the master template and re-harvested, the gaps
+// report takes over and these entries become redundant (harmless) here.
+const MANUAL_CATALOG_ADDITIONS = [
+  '01-0230.002', // SAC Determination
+  '03-3543.002', // Sealed Concrete
+  '07-1000.003', // Tuckpointing
+  '09-9000.002', // Painting - Exterior
+  '26-0000.006', // Electrical - Generator
+  '32-1613.007', // Concrete Curb Stops
+];
+
 const CATALOG_PATH = path.join(__dirname, '..', 'src', 'lib', 'estimate-catalog.json');
 const GAPS_PATH = path.join(__dirname, 'output', 'cost-code-gaps.json');
 const OUT_PATH = path.join(__dirname, '..', 'supabase_seed_cost_code_map.sql');
@@ -39,6 +52,7 @@ function main() {
 
   const siblingCodes = new Set((gaps.siblingInferred || []).map((e) => e.internalCode));
   const manualCodes = new Set((gaps.userConfirmed || []).map((e) => e.internalCode));
+  for (const code of MANUAL_CATALOG_ADDITIONS) manualCodes.add(code);
 
   const itemIds = Object.keys(catalog).sort();
   const failures = [];

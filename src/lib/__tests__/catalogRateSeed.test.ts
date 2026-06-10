@@ -73,9 +73,10 @@ function parseSeed(): Map<string, number> {
 }
 
 describe("supabase_seed_rate_card.sql ↔ estimate-catalog.json unit prices", () => {
-  it("seeds all 221 catalog itemIds with the right defaultUnitPrice", () => {
+  it("seeds all 227 catalog itemIds with the right defaultUnitPrice", () => {
     const expected = expectedCatalog();
-    expect(expected.size).toBe(221);
+    // 221 harvested + 6 architect-confirmed manual additions (2026-06-10).
+    expect(expected.size).toBe(227);
 
     const seed = parseSeed();
     for (const [itemId, price] of expected) {
@@ -89,11 +90,12 @@ describe("supabase_seed_rate_card.sql ↔ estimate-catalog.json unit prices", ()
     expect(seed.get("03-5413.002")).toBe(-2);
     // A known $0 line is kept.
     expect(seed.get("02-4100.002")).toBe(0);
-    // There are 64 $0 rows and 5 placeholder (0.001) rows among the catalog.
+    // 64 harvested $0 rows + the 6 manual additions (seeded at $0 — defaults
+    // are set by humans on /rates, never invented) and 5 placeholder rows.
     const expected = expectedCatalog();
     const zeros = [...expected].filter(([, p]) => p === 0).length;
     const placeholders = [...expected].filter(([, p]) => p === 0.001).length;
-    expect(zeros).toBe(64);
+    expect(zeros).toBe(70);
     expect(placeholders).toBe(5);
     for (const [itemId, price] of expected) {
       if (price === 0 || price === 0.001) {
@@ -110,7 +112,7 @@ describe("supabase_seed_rate_card.sql ↔ estimate-catalog.json unit prices", ()
     expect(collisions, `unexpected collisions: ${collisions.join(", ")}`).toEqual([]);
   });
 
-  it("the combined seed has exactly 265 rows (44 GC/Site Ops + 221 catalog)", () => {
-    expect(parseSeed().size).toBe(265);
+  it("the combined seed has exactly 271 rows (44 GC/Site Ops + 227 catalog)", () => {
+    expect(parseSeed().size).toBe(271);
   });
 });

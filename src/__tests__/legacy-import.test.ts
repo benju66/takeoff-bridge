@@ -1,11 +1,11 @@
-/**
- * Legacy-bid import (Import past bids — Phase 2).
+﻿/**
+ * Legacy-bid import (Import past bids â€” Phase 2).
  *
  * Real pre-app bids (the CARE probe, 2026-06-09) differ from the modern
  * template in two load-bearing ways: STEP 4 codes are BARE base codes (no
  * deterministic suffix), and the modifier zone carries hand-typed LUMP SUMS in
  * relabeled slots ("Owner's Rep" in 60-1005). These tests prove the extractor
- * reads that shape — and that the modern suffixed path is byte-identical to
+ * reads that shape â€” and that the modern suffixed path is byte-identical to
  * before (the goldens stay the real proof of that).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -39,17 +39,17 @@ import {
 /** Reverse map built the same way the import page's catalog fallback primes. */
 const catalogReverse = () => buildReverseProcoreMap(catalogCostCodeEntries());
 
-describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
+describe("templateExtractor â€” legacy bare-code shape (Slice 1)", () => {
   it("preserves bare base codes on ad-hoc lines via rawCode", async () => {
     const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
 
-    // Nothing conforms (no suffixed codes anywhere) — every dollar line is ad-hoc.
+    // Nothing conforms (no suffixed codes anywhere) â€” every dollar line is ad-hoc.
     expect(extracted.lineItems).toHaveLength(LEGACY_PAST_BID_ORACLE.conformingLineItemCount);
     expect(extracted.adHocLineItems).toHaveLength(LEGACY_PAST_BID_ORACLE.adHocLineItemCount);
 
-    // The bare code travels on rawCode (itemId stays "" — not a guessed mapping).
-    const painting = extracted.adHocLineItems.find((i) => i.rawCode === "09-9000");
-    expect(painting?.description).toBe("Interior Painting");
+    // The bare code travels on rawCode (itemId stays "" â€” not a guessed mapping).
+    const painting = extracted.adHocLineItems.find((i) => i.rawCode === "06-1753");
+    expect(painting?.description).toBe("Shop-Fabricated Wood Trusses");
     expect(painting?.itemId).toBe("");
     expect(painting?.total).toBe(4_000);
 
@@ -58,10 +58,10 @@ describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
     expect(storefronts).toHaveLength(2);
     expect(new Set(storefronts.map((i) => i.rowNumber)).size).toBe(2);
 
-    // The unknown code is captured too — dollars are never dropped.
+    // The unknown code is captured too â€” dollars are never dropped.
     const mystery = extracted.adHocLineItems.find((i) => i.rawCode === LEGACY_PAST_BID_ORACLE.noneCode);
     expect(mystery?.total).toBe(3_000);
-    // …and the estimator's col-E note rides along (shown in review, persisted).
+    // â€¦and the estimator's col-E note rides along (shown in review, persisted).
     expect(mystery?.comment).toBe("Carried from SD pricing set");
     const mysteryRow = enrichImportedRows(extracted).find((r) => r.description === "Mystery Scope")!;
     expect(mysteryRow.customFields).toEqual({ Comment: "Carried from SD pricing set" });
@@ -103,7 +103,7 @@ describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
     expect(extracted.lineItems).toHaveLength(PAST_BID_ORACLE.conformingLineItemCount);
     for (const it of extracted.lineItems) expect(it.rawCode).toBe(it.itemId);
 
-    // The non-code ad-hoc line ("SPECIAL-CRANE") carries no rawCode — not a bare code.
+    // The non-code ad-hoc line ("SPECIAL-CRANE") carries no rawCode â€” not a bare code.
     const adHoc = extracted.adHocLineItems.find((i) => i.description === PAST_BID_ORACLE.adHocDescription);
     expect(adHoc?.rawCode).toBe("");
 
@@ -112,12 +112,12 @@ describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
   });
 });
 
-describe("legacyBridge — the workbook's own BLI mapping (Slice 2)", () => {
-  it("derives bareCode → procoreCode from SUMIF criteria, skipping non-STEP-4 and shared formulas", async () => {
+describe("legacyBridge â€” the workbook's own BLI mapping (Slice 2)", () => {
+  it("derives bareCode â†’ procoreCode from SUMIF criteria, skipping non-STEP-4 and shared formulas", async () => {
     const wb = await loadTemplateWorkbook(await buildLegacyPastBidTemplateBuffer());
     const bridge = deriveLegacyBridge(wb);
 
-    expect(bridge.get("09-9000")).toBe(LEGACY_PAST_BID_ORACLE.bridge["09-9000"]);
+    expect(bridge.get("06-1753")).toBe(LEGACY_PAST_BID_ORACLE.bridge["06-1753"]);
     expect(bridge.get("08-4000")).toBe(LEGACY_PAST_BID_ORACLE.bridge["08-4000"]);
     // The STEP-2 SUMIF row and the sharedFormula-only row contribute NOTHING.
     expect(bridge.size).toBe(2);
@@ -131,7 +131,7 @@ describe("legacyBridge — the workbook's own BLI mapping (Slice 2)", () => {
   });
 });
 
-describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
+describe("suggestImportMappings â€” confidence tiers (Slice 2)", () => {
   beforeEach(() => primeCostCodeResolverFromCatalog());
   afterEach(() => resetCostCodeResolver());
 
@@ -146,11 +146,11 @@ describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
 
   it("bridge tier: a uniquely reverse-mapped Procore code names ONE internal itemId", async () => {
     const { suggestions, rows } = await legacySetup();
-    const painting = rows.find((r) => r.description === "Interior Painting")!;
+    const painting = rows.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
     const s = suggestions.get(painting.id)!;
     expect(s.confidence).toBe("bridge");
     expect(s.itemId).toBe(LEGACY_PAST_BID_ORACLE.bridgeUniqueItemId);
-    expect(s.procoreCode).toBe(LEGACY_PAST_BID_ORACLE.bridge["09-9000"]);
+    expect(s.procoreCode).toBe(LEGACY_PAST_BID_ORACLE.bridge["06-1753"]);
   });
 
   it("linked tier: GC/Site-Ops descriptions map to the 10 linked itemIds", async () => {
@@ -179,17 +179,17 @@ describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
     const mystery = rows.find((r) => r.description === "Mystery Scope")!;
     const s = suggestions.get(mystery.id)!;
     expect(s.confidence).toBe("similar");
-    expect(s.procoreCode).toBe(""); // nothing bridge-derived — human picks or leaves flagged
+    expect(s.procoreCode).toBe(""); // nothing bridge-derived â€” human picks or leaves flagged
     expect(s.candidates.length).toBeGreaterThan(0);
   });
 
   it("applyImportMapping sets the deterministic code but never touches price, id, or source", async () => {
     const { suggestions, rows } = await legacySetup();
-    const painting = rows.find((r) => r.description === "Interior Painting")!;
+    const painting = rows.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
     const mapped = applyImportMapping(painting, suggestions.get(painting.id)!.itemId);
 
-    expect(mapped.itemId).toBe("09-9000.001");
-    expect(mapped.procoreCode).toBe(ESTIMATE_ITEMS_MASTER["09-9000.001"].procoreCode);
+    expect(mapped.itemId).toBe("06-1753.001");
+    expect(mapped.procoreCode).toBe(ESTIMATE_ITEMS_MASTER["06-1753.001"].procoreCode);
     expect(mapped.isMapped).toBe(true);
     expect(mapped.needsReview).toBe(false);
     // Historical fidelity + provenance: untouched.
@@ -206,21 +206,21 @@ describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
   });
 });
 
-describe("acceptance map — confirm, change, withdraw (architect escape hatch)", () => {
+describe("acceptance map â€” confirm, change, withdraw (architect escape hatch)", () => {
   beforeEach(() => primeCostCodeResolverFromCatalog());
   afterEach(() => resetCostCodeResolver());
 
   it("a confirmation can be changed or withdrawn without touching the originals", async () => {
     const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
     const originals = enrichImportedRows(extracted);
-    const painting = originals.find((r) => r.description === "Interior Painting")!;
+    const painting = originals.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
 
     // Accept the wrong code, then CHANGE it, then WITHDRAW it.
     const wrong = applyAcceptedMappings(originals, new Map([[painting.id, "08-4000.001"]]));
     expect(wrong.find((r) => r.id === painting.id)!.itemId).toBe("08-4000.001");
 
-    const fixed = applyAcceptedMappings(originals, new Map([[painting.id, "09-9000.001"]]));
-    expect(fixed.find((r) => r.id === painting.id)!.itemId).toBe("09-9000.001");
+    const fixed = applyAcceptedMappings(originals, new Map([[painting.id, "06-1753.001"]]));
+    expect(fixed.find((r) => r.id === painting.id)!.itemId).toBe("06-1753.001");
 
     const withdrawn = applyAcceptedMappings(originals, new Map());
     const back = withdrawn.find((r) => r.id === painting.id)!;
@@ -240,11 +240,11 @@ describe("acceptance map — confirm, change, withdraw (architect escape hatch)"
     const other = originals.find((r) => r.description === "Supervision")!;
 
     const accepted = new Map([[gc.id, "01-0000.001"]]);
-    // Another row asking for the same linked code → conflict.
+    // Another row asking for the same linked code â†’ conflict.
     expect(linkedMappingConflict(originals, accepted, other.id, "01-0000.001")).toBe(true);
     // Re-confirming the SAME row is not a conflict (that's a change).
     expect(linkedMappingConflict(originals, accepted, gc.id, "01-0000.001")).toBe(false);
-    // Granular (non-linked) codes may repeat freely — the storefront case.
+    // Granular (non-linked) codes may repeat freely â€” the storefront case.
     expect(linkedMappingConflict(originals, accepted, other.id, "08-4000.002")).toBe(false);
     // A MODERN bid's born-linked row also blocks an acceptance of its code.
     const modern = enrichImportedRows(await extractEstimateFromBuffer(await buildPastBidTemplateBuffer()));
@@ -265,7 +265,7 @@ describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
     const [intent] = intents;
     expect(intent.field).toBe(LEGACY_PAST_BID_ORACLE.lump.key);
     expect(intent.overrideValue).toBe(LEGACY_PAST_BID_ORACLE.lump.value);
-    expect(intent.computedValue).toBe(0); // rate cell is empty → engine computes 0
+    expect(intent.computedValue).toBe(0); // rate cell is empty â†’ engine computes 0
     expect(intent.reason).toContain(LEGACY_PAST_BID_ORACLE.lump.sheetLabel);
     expect(intent.reason).toContain("legacy-bid.xlsx");
     expect(intent.reason).toMatch(/STEP 4 r\d+/);
@@ -280,7 +280,7 @@ describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
     expect(lumpOverridesFromExtract(extracted, "modern.xlsx")).toHaveLength(0);
   });
 
-  it("ties the legacy GRAND TOTAL to the cent — before and after linked mappings", async () => {
+  it("ties the legacy GRAND TOTAL to the cent â€” before and after linked mappings", async () => {
     const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
     const rates = importSummaryRates(extracted.inputs);
     const overrides = overrideMapFromIntents(lumpOverridesFromExtract(extracted, "legacy-bid.xlsx"));
@@ -301,7 +301,7 @@ describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
     expect(tieBefore.ok).toBe(true);
 
     // AFTER mapping the 10 GC/Site-Ops rows to linked itemIds: the engine
-    // excludes their typed qty×price and counts linkedTotalsFromRows instead —
+    // excludes their typed qtyÃ—price and counts linkedTotalsFromRows instead â€”
     // the totals must NOT move (the slice-4 review flow rests on this).
     const linkedByDesc = new Map(LINKED_DIVISION_ROWS.map((l) => [l.description, l.itemId]));
     const mappedRows = rows.map((r) =>
@@ -320,7 +320,7 @@ describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
     expect(tieAfter.deltaTotal).toBe(0);
     expect(tieAfter.ok).toBe(true);
 
-    // Without the lump override the total must NOT tie — proving the override
+    // Without the lump override the total must NOT tie â€” proving the override
     // is what carries the as-bid dollars (not a coincidence of the fixture).
     const withoutLump = computeTakeoffSummary(
       rows,

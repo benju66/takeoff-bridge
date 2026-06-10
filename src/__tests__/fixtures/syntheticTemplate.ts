@@ -342,14 +342,16 @@ export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
 //      Procore codes via SUMIF formulas — the deterministic "bridge".
 //   4. The GC/Site-Ops rows are recognizable only by DESCRIPTION (linked tier).
 //
-// Catalog facts the cases rest on (estimate-catalog.json, checked 2026-06-09):
-//   9-99000.000 ← exactly ONE internal code (09-9000.001)   → bridge-unique
+// Catalog facts the cases rest on (estimate-catalog.json, checked 2026-06-10):
+//   6-61753.000 ← exactly ONE internal code (06-1753.001)   → bridge-unique
+//     (09-9000 was the original case until the architect's Painting - Exterior
+//      addition made that family ambiguous — the drift the suite caught.)
 //   8-84000.000 ← TWO internal codes (08-4000.001/.002)     → ambiguous
 //   99-9999     ← no catalog family, no BLI row             → none tier
 
 /** Bare-coded dollar lines. Two share 08-4000 (interior vs exterior storefront). */
 const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number; comment?: string }[] = [
-  { code: "09-9000", description: "Interior Painting", qty: 400, unitPrice: 10 }, // 4,000 → bridge-unique
+  { code: "06-1753", description: "Shop-Fabricated Wood Trusses", qty: 400, unitPrice: 10 }, // 4,000 → bridge-unique
   { code: "08-4000", description: "Aluminum Storefront - Interior", qty: 3, unitPrice: 1_000 }, // 3,000 ┐ ambiguous
   { code: "08-4000", description: "Aluminum Storefront - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000 ┘ bridge
   // Estimators annotate odd lines in col E — the import shows + preserves it.
@@ -387,10 +389,10 @@ export const LEGACY_PAST_BID_ORACLE = {
   lump: LEGACY_LUMP,
   /** What the BLI bridge must derive: bare code → today's Procore code. */
   bridge: {
-    "09-9000": "9-99000.000", // unique → internal 09-9000.001
+    "06-1753": "6-61753.000", // unique → internal 06-1753.001
     "08-4000": "8-84000.000", // ambiguous (2 internal candidates)
   } as Record<string, string>,
-  bridgeUniqueItemId: "09-9000.001",
+  bridgeUniqueItemId: "06-1753.001",
   noneCode: "99-9999",
   /** Linked-tier inputs: bare code + canonical description per linked row. */
   linkedDescriptions: LINKED_ROWS.map((l) => l.description),
@@ -483,8 +485,8 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
   const s4Name = SHEET.step4;
   const sumif = (criterionRow: number) =>
     `SUMIF('${s4Name}'!$C$2:$C$${subtotalRow - 1}, '${s4Name}'!C${criterionRow}, '${s4Name}'!$I$2:$I$${subtotalRow - 1})`;
-  bli.getCell("A2").value = "9-99000.000";
-  bli.getCell("H2").value = { formula: sumif(rowOfCode["09-9000"]), result: 4_000 } as ExcelJS.CellFormulaValue;
+  bli.getCell("A2").value = "6-61753.000";
+  bli.getCell("H2").value = { formula: sumif(rowOfCode["06-1753"]), result: 4_000 } as ExcelJS.CellFormulaValue;
   bli.getCell("A3").value = "8-84000.000";
   bli.getCell("H3").value = { formula: sumif(rowOfCode["08-4000"]), result: 8_000 } as ExcelJS.CellFormulaValue;
   // A STEP 2 (non-STEP 4) SUMIF — the bridge must ignore it.
