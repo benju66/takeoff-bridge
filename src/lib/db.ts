@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines } from "@/types/db";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -133,6 +133,14 @@ function mapEstimateFromRow(row: Record<string, unknown>): Omit<ProjectEstimate,
     rateCardSnapshot: (row.rate_card_snapshot != null && typeof row.rate_card_snapshot === "object" && !Array.isArray(row.rate_card_snapshot))
       ? (row.rate_card_snapshot as Record<string, number>)
       : {},
+    // Present only when the import captured it ('{}' default ↦ undefined).
+    importedStep23Lines: (() => {
+      const v = row.imported_step23_lines;
+      if (v != null && typeof v === "object" && !Array.isArray(v) && Array.isArray((v as ImportedStep23Lines).step2Lines)) {
+        return v as ImportedStep23Lines;
+      }
+      return undefined;
+    })(),
   };
 }
 
@@ -279,6 +287,33 @@ function buildEstimateRow(estimate: Omit<ProjectEstimate, "items">) {
     site_ops_rates: estimate.siteOpsRates ?? {},
     rate_card_snapshot: estimate.rateCardSnapshot ?? {},
   };
+}
+
+/**
+ * Writes an imported bid's STEP 2/3 line detail (architect-approved column,
+ * 2026-06-10). Called ONCE by the import flow, AFTER saveEstimate has created
+ * the project_estimates row; the column is read-only thereafter (it is outside
+ * the save_estimate RPC's upsert list, so auto-save never touches it).
+ * Like overrides, this is imported-data fidelity the user can SEE — it THROWS
+ * on failure (including a missing estimate row) rather than vanishing quietly.
+ */
+export async function saveImportedStep23Lines(
+  projectId: string,
+  payload: ImportedStep23Lines
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("project_estimates")
+    .update({ imported_step23_lines: payload })
+    .eq("project_id", projectId)
+    .select("project_id");
+
+  if (error) {
+    console.error("Failed to save imported STEP 2/3 lines:", error);
+    throw new Error(`Failed to save imported STEP 2/3 lines: ${error.message}`);
+  }
+  if (!data || data.length === 0) {
+    throw new Error(`Failed to save imported STEP 2/3 lines: no estimate row for project ${projectId}`);
+  }
 }
 
 /**

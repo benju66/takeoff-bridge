@@ -66,7 +66,37 @@ export interface ProjectEstimate {
    * card edits never move a saved estimate's totals.
    */
   rateCardSnapshot?: Record<string, number>;
+  /**
+   * IMPORTED bids only: the bid's own hand-authored STEP 2/3 line detail,
+   * captured once at import (db.ts saveImportedStep23Lines) and read-only
+   * thereafter. `undefined` for app-born projects and for imports saved before
+   * the column existed (the workspace shows "re-import to capture detail").
+   * Deliberately outside the save_estimate RPC's upsert column list, so
+   * workspace auto-save can never overwrite it.
+   */
+  importedStep23Lines?: ImportedStep23Lines;
   updatedAt?: string;
+}
+
+/** One hand-authored STEP 2/3 line from an imported bid (JSONB contract —
+ *  structurally identical to templateExtractor's ExtractedSheetLine). */
+export interface ImportedSheetLine {
+  code: string;
+  description: string;
+  utilization: number | null;
+  qty: number;
+  rate: number;
+  total: number;
+  rowNumber: number;
+}
+
+/** The `project_estimates.imported_step23_lines` JSONB payload. */
+export interface ImportedStep23Lines {
+  step2Lines: ImportedSheetLine[];
+  step3Lines: ImportedSheetLine[];
+  /** The bid's STEP 2/3 section subtotals keyed by the linked STEP 4 itemId
+   *  they feed (tie context for the read-only panels). */
+  linkedSourceSubtotals: { itemId: string; total: number | null }[];
 }
 
 // ---------------------------------------------------------------------------

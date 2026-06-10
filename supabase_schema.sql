@@ -115,6 +115,14 @@ CREATE TABLE project_estimates (
   -- '{}' until Phase B wires freeze-at-first-save + backfill; nothing reads it
   -- in Phase A, so day-one behavior is unchanged.
   rate_card_snapshot JSONB DEFAULT '{}',
+  -- Imported bids only (architect-approved 2026-06-10): the bid's own hand-
+  -- authored STEP 2/3 line detail, captured ONCE at import and read-only
+  -- thereafter ({ step2Lines: [...], step3Lines: [...] } — ExtractedSheetLine
+  -- shape). Deliberately NOT in the save_estimate RPC's upsert column list, so
+  -- workspace auto-save can never overwrite it; written only via
+  -- db.ts saveImportedStep23Lines. '{}' for app-born projects and for imports
+  -- saved before this column existed (UI shows "re-import to capture detail").
+  imported_step23_lines JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(project_id)
 );
