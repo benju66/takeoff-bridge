@@ -43,10 +43,11 @@ Procore rollup for export-of-imports (still out of scope here).
    probe counted ~73 — verify on the file) the same way it parses STEP 4; (b) a static
    base→deterministic table derived from the app's own GC/SO line defs. Never guess; an
    unmappable code stays bare and visible.
-2. **Backfill over already-imported bids.** Raw codes are stored, so normalization can be a
-   READ-TIME derivation (pure function over the stored lines — no migration, nothing
-   persisted, every import past and future benefits) or a persisted backfill. Lean
-   READ-TIME: zero schema work, zero write risk to the protected JSONB.
+2. **Derivation, not persistence.** ARCHITECT NOTE (2026-06-10): NOTHING is imported yet —
+   the test projects were deleted and the backlog starts AFTER this slice lands, so there is
+   no backfill problem to design for. Read-time derivation (a pure function over the stored
+   verbatim lines) is still the lean choice on its own merits: zero schema work, zero write
+   risk to the protected JSONB, and it would cover any future re-import drift for free.
 3. **Display**: ImportedStep23Panel shows the resolved deterministic code (+ name) alongside
    the as-bid bare code; unresolved lines clearly marked.
 4. **Staff-rate mining**: per deterministic GC/SO line, as-bid rate history (count/median/
@@ -62,7 +63,9 @@ Procore rollup for export-of-imports (still out of scope here).
   STEP 3 rows, do the referenced Procore codes reverse-map cleanly?
 - Compare CARE's bare STEP 2/3 codes against the app's GC/SO line defs: how 1:1 is the base
   match really (e.g. two `02-9010` Progress Cleaning lines — Payroll vs Hired — share a base)?
-- Live tables: how many imported bids exist now; `imported_step23_lines` row shapes.
+- Live tables: EXPECT ZERO imported bids at session start (architect deleted the test
+  projects and is holding the backlog until this slice lands) — the CARE FIXTURE FILE is the
+  evidence source, not the database. If imports exist anyway, just note it; nothing changes.
 
 ## Gates
 - Suite green per commit (490 pass / 49 files at handoff; goldens McKenna + synthetic + CARE
