@@ -110,6 +110,14 @@ export interface ExtractedLineItem {
    * and it rides into the project as a custom field — never dropped.
    */
   comment: string;
+  /**
+   * The AS-BID unit of measure from STEP 4 col G, trimmed and uppercased
+   * (`""` when blank — on real bids only the soft-cost 60-xxxx modifier rows
+   * are blank, and those never become line items). Historical fidelity, same
+   * rule as unitPrice: an as-bid $/SF price must never be relabeled EA by the
+   * catalog. Non-financial — never feeds a total.
+   */
+  uom: string;
 }
 
 /** One value the spreadsheet itself computes — the thing the engine is proven against. */
@@ -142,6 +150,9 @@ export interface ExtractedSheetLine {
   rate: number;
   total: number;
   rowNumber: number;
+  /** As-bid UOM from col G (trimmed, uppercased; `""` when blank) — staff lines
+   *  carry HR/MO, lump scopes LS; rides into `imported_step23_lines` verbatim. */
+  uom: string;
 }
 
 export interface ExtractedOracleOutputs {
@@ -379,11 +390,14 @@ function extractStep4(wb: ExcelJS.Workbook): {
     const rawCode = text(s4, `C${r}`);
     const qty = num(s4, `F${r}`);
     const unitPrice = num(s4, `H${r}`);
+    // As-bid UOM (col G). Bids write lowercase ("sf"); the catalog is uppercase —
+    // normalize so the two compare cleanly. Blank stays "".
+    const uom = text(s4, `G${r}`).toUpperCase();
 
     if (COST_CODE_RE.test(rawCode)) {
       const total = qty * unitPrice;
       const isLinked = isLinkedDivisionRow(rawCode);
-      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r, rawCode, comment: text(s4, `E${r}`) });
+      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r, rawCode, comment: text(s4, `E${r}`), uom });
       if (isLinked) linkedDivisionValues.push({ itemId: rawCode, total });
       continue;
     }
@@ -412,6 +426,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
       // Preserve a legacy bare base code (NN-NNNN) so normalization can bridge it.
       rawCode: BARE_CODE_RE.test(rawCode) ? rawCode : "",
       comment: text(s4, `E${r}`),
+      uom,
     });
   }
 
@@ -500,6 +515,7 @@ function extractSheetLines(ws: ExcelJS.Worksheet | undefined): ExtractedSheetLin
       rate,
       total: num(ws, `I${r}`) || qty * rate,
       rowNumber: r,
+      uom: text(ws, `G${r}`).toUpperCase(),
     });
   }
   return lines;

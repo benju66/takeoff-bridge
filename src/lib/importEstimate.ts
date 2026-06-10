@@ -65,11 +65,15 @@ function enrichOne(it: ExtractedLineItem): ProcessedTakeoffRow {
   const master = ESTIMATE_ITEMS_MASTER[it.itemId];
   const procoreCode = it.itemId ? resolveProcoreCode(it.itemId) : "";
 
-  // Catalogued code → take its Procore parent / costType / uom; otherwise carry
+  // Catalogued code → take its Procore parent / costType; otherwise carry
   // neutral defaults and leave the row unmapped (Flags worklist picks it up).
   const procoreParentCode = master?.procoreParentCode ?? "";
   const costType = master?.costType ?? "M";
-  const uom = master?.targetUom ?? "";
+  // AS-BID UOM WINS (Phase 3 Slice 0, architect-locked): the bid's col-G unit
+  // travels with the bid's price — a $/SF line must never be relabeled EA by
+  // the catalog. The catalog only fills a BLANK cell (on template-family bids
+  // only the soft-cost modifier rows are blank, and those never reach here).
+  const uom = it.uom || (master?.targetUom ?? "");
   // Mapped = a granular Procore code resolved. Linked division rows are always
   // structurally mapped (their dollars ride the linked value, not the rollup).
   const isMapped = it.isLinked || procoreCode !== "";
@@ -242,8 +246,9 @@ export function suggestImportMappings(
 /**
  * Applies a HUMAN-CONFIRMED mapping to an enriched import row, returning a new
  * row (React-state friendly). Sets the deterministic itemId + the catalog's
- * code/costType/uom; NEVER touches qty/unitPrice (historical fidelity) or the
- * row id/source (provenance). Clearing `needsReview` removes it from Flags.
+ * code/costType; NEVER touches qty/unitPrice or a non-blank as-bid uom
+ * (historical fidelity) or the row id/source (provenance). Clearing
+ * `needsReview` removes it from Flags.
  */
 export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): ProcessedTakeoffRow {
   const master = ESTIMATE_ITEMS_MASTER[itemId];
@@ -254,10 +259,24 @@ export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): Pr
     procoreCode,
     procoreParentCode: master?.procoreParentCode ?? row.procoreParentCode,
     costType: master?.costType ?? row.costType,
-    uom: master?.targetUom ?? row.uom,
+    // As-bid UOM survives the mapping; the catalog only fills a blank.
+    uom: row.uom || (master?.targetUom ?? ""),
     isMapped: isLinkedDivisionRow(itemId) || procoreCode !== "",
     needsReview: false,
   };
+}
+
+/**
+ * The bid's UOM vs the catalog's for the row's confirmed code — non-null when
+ * BOTH exist and disagree (e.g. bid priced SF, catalog says EA). Display-only
+ * (architect-locked F2): the import review shows a subtle indicator; nothing
+ * blocks, nothing enters Flags, and the as-bid UOM stays on the row (editable
+ * later in the grid like any cell).
+ */
+export function uomMismatch(row: ProcessedTakeoffRow): { bid: string; catalog: string } | null {
+  const catalog = ESTIMATE_ITEMS_MASTER[row.itemId]?.targetUom?.trim().toUpperCase() ?? "";
+  const bid = row.uom.trim().toUpperCase();
+  return bid && catalog && bid !== catalog ? { bid, catalog } : null;
 }
 
 // ---------------------------------------------------------------------------

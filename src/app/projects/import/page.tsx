@@ -16,7 +16,7 @@ import {
   enrichImportedRows, importSummaryRates, projectFromExtract, estimateTotalsForImport,
   checkImportTieOut, linkedTotalsFromRows, buildReverseProcoreMap, suggestImportMappings,
   applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
-  catalogCostCodeEntries, step23LinesForImport,
+  catalogCostCodeEntries, step23LinesForImport, uomMismatch,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import { validateAssignInput } from "@/lib/assignCode";
@@ -240,6 +240,8 @@ export default function ImportPastEstimatePage() {
   const lineCount = rows.length;
   const unmappedCount = rows.filter((r) => !r.isMapped && !r.needsReview && !isLinkedDivisionRow(r.itemId)).length;
   const reviewCount = rows.filter((r) => r.needsReview).length;
+  // Bid-vs-catalog UOM disagreements (display-only; the as-bid UOM is kept).
+  const uomMismatchCount = rows.filter((r) => uomMismatch(r) !== null).length;
 
   /** Rows the review table shows: every line a suggestion exists for. */
   const reviewRows = useMemo(
@@ -380,6 +382,7 @@ export default function ImportPastEstimatePage() {
                       <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
                         <th className="px-3 py-2 font-bold">Line</th>
                         <th className="px-3 py-2 font-bold text-right">Amount</th>
+                        <th className="px-3 py-2 font-bold text-center">UOM</th>
                         <th className="px-3 py-2 font-bold">Suggested code</th>
                         <th className="px-3 py-2 font-bold">Confirm</th>
                       </tr>
@@ -422,6 +425,11 @@ export default function ImportPastEstimatePage() {
                 <Field label="Line items" value={`${lineCount}`} />
                 <Field label="Unmapped (Flags)" value={`${unmappedCount}`} />
                 <Field label="Needs review (ad-hoc)" value={`${reviewCount}`} icon={reviewCount > 0 ? <Flag size={11} className="text-amber-500" /> : undefined} />
+                <Field
+                  label="UOM differs from catalog"
+                  value={`${uomMismatchCount}`}
+                  icon={uomMismatchCount > 0 ? <AlertTriangle size={11} className="text-amber-500" /> : undefined}
+                />
               </div>
             </div>
 
@@ -519,6 +527,22 @@ function ReviewRow({
   const style = chipFor(suggestion);
   const amount = row.matchedQty * row.unitPrice;
   const comment = row.customFields?.["Comment"];
+  // As-bid UOM + the display-only mismatch marker (bid vs catalog for the
+  // confirmed code). Never blocks; the UOM is editable later in the grid.
+  const mismatch = uomMismatch(row);
+  const uomCell = (
+    <td className="px-3 py-2 text-center font-mono text-foreground whitespace-nowrap">
+      {row.uom || "—"}
+      {mismatch && (
+        <span
+          title={`As bid: ${mismatch.bid} — catalog default for ${row.itemId}: ${mismatch.catalog}. The bid's UOM is kept (you can edit it in the grid after saving).`}
+          className="inline-flex align-middle ml-1 text-amber-500 cursor-help"
+        >
+          <AlertTriangle size={11} />
+        </span>
+      )}
+    </td>
+  );
   const descriptionCell = (
     <td className="px-3 py-2 text-foreground">
       {row.description}
@@ -546,6 +570,7 @@ function ReviewRow({
       <tr className="border-t border-grid-border bg-emerald-50/40 dark:bg-emerald-950/10">
         {descriptionCell}
         <td className="px-3 py-2 text-right font-mono text-foreground">{money(amount)}</td>
+        {uomCell}
         <td className="px-3 py-2 text-emerald-700 dark:text-emerald-300" colSpan={2}>
           <span className="inline-flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5">
@@ -570,6 +595,7 @@ function ReviewRow({
     <tr className="border-t border-grid-border">
       {descriptionCell}
       <td className="px-3 py-2 text-right font-mono text-foreground">{money(amount)}</td>
+      {uomCell}
       <td className="px-3 py-2">
         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${style.cls}`} title={style.label}>
           {style.icon} {style.label}

@@ -117,6 +117,34 @@ describe.skipIf(!FIXTURE)("Golden legacy import — CARE bid to the cent", () =>
     expect(payload.linkedSourceSubtotals.length).toBeGreaterThan(0);
   });
 
+  it("captures the bid's own col-G UOMs (Phase 3 Slice 0) and keeps them through mapping", () => {
+    // The CARE probe (2026-06-10): every STEP 2/3 code row and 268/275 STEP 4
+    // code rows carry a col-G UOM (the 7 blanks are the soft-cost modifier
+    // rows, which never become line items). Floor with margin.
+    const withUom = extracted.adHocLineItems.filter((i) => i.uom !== "").length;
+    expect(withUom / extracted.adHocLineItems.length).toBeGreaterThanOrEqual(0.9);
+
+    // Known real values from the probe (written lowercase, extracted UPPERCASE).
+    const gc = extracted.adHocLineItems.find((i) => i.rawCode === "01-0000")!;
+    expect(gc.uom).toBe("LS");
+    const supt = extracted.step2Lines.find((l) => l.description === "Sr Superintendent")!;
+    expect(supt.uom).toBe("HR");
+    const payload = step23LinesForImport(extracted);
+    expect(payload.step2Lines.find((l) => l.description === "Sr Superintendent")!.uom).toBe("HR");
+    expect(payload.step2Lines.every((l) => l.uom !== "")).toBe(true);
+    expect(payload.step3Lines.every((l) => l.uom !== "")).toBe(true);
+
+    // Accept-all (the page's exact flow) must keep every as-bid UOM — mapping
+    // a code never relabels the bid's unit with the catalog's.
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of rows) {
+      const s = suggestions.get(r.id);
+      if (!s || (s.confidence !== "bridge" && s.confidence !== "linked") || !s.itemId) continue;
+      const mapped = applyImportMapping(r, s.itemId);
+      if (byId.get(r.id)!.uom !== "") expect(mapped.uom).toBe(byId.get(r.id)!.uom);
+    }
+  });
+
   it("derives a usable bridge + suggestions (not an empty best-effort)", () => {
     const tally: Record<string, number> = { bridge: 0, linked: 0, similar: 0, none: 0 };
     for (const s of suggestions.values()) tally[s.confidence]++;

@@ -87,6 +87,7 @@ export function ImportedStep23Panel({
                 <th className="px-4 py-2.5 font-bold">Code</th>
                 <th className="px-4 py-2.5 font-bold">Description</th>
                 <th className="px-4 py-2.5 font-bold text-right">Qty</th>
+                <th className="px-4 py-2.5 font-bold text-center">UOM</th>
                 <th className="px-4 py-2.5 font-bold text-right">Rate</th>
                 <th className="px-4 py-2.5 font-bold text-right">Total</th>
               </tr>
@@ -97,6 +98,8 @@ export function ImportedStep23Panel({
                   <td className="px-4 py-2 font-mono text-slate-500">{l.code}</td>
                   <td className="px-4 py-2 text-foreground">{l.description}</td>
                   <td className="px-4 py-2 text-right font-mono text-foreground">{l.qty !== 0 ? l.qty.toLocaleString() : "—"}</td>
+                  {/* uom is absent on payloads saved before Slice 0 — show "—" */}
+                  <td className="px-4 py-2 text-center font-mono text-foreground">{l.uom || "—"}</td>
                   <td className="px-4 py-2 text-right font-mono text-foreground">{l.rate !== 0 ? money(l.rate) : "—"}</td>
                   <td className="px-4 py-2 text-right font-mono font-semibold text-foreground">{money(l.total)}</td>
                 </tr>
@@ -104,13 +107,13 @@ export function ImportedStep23Panel({
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-grid-border bg-background">
-                <td colSpan={4} className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                <td colSpan={5} className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   As-bid line total
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono font-bold text-foreground">{money(lineSum)}</td>
               </tr>
               <tr className="border-t border-grid-border">
-                <td colSpan={4} className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                <td colSpan={5} className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   Counted in the estimate (linked rows)
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono font-bold text-foreground">{money(sectionLinkedTotal)}</td>

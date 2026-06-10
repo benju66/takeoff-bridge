@@ -88,6 +88,9 @@ export interface ImportedSheetLine {
   rate: number;
   total: number;
   rowNumber: number;
+  /** As-bid UOM from col G (uppercased; "" when the bid's cell was blank).
+   *  OPTIONAL: payloads saved before Phase 3 Slice 0 lack it — render "—". */
+  uom?: string;
 }
 
 /** The `project_estimates.imported_step23_lines` JSONB payload. */

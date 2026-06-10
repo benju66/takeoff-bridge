@@ -24,6 +24,8 @@ import {
   linkedTotalsFromRows,
   checkImportTieOut,
   catalogCostCodeEntries,
+  uomMismatch,
+  step23LinesForImport,
 } from "@/lib/importEstimate";
 import { computeTakeoffSummary } from "@/lib/calculations";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
@@ -109,6 +111,62 @@ describe("templateExtractor â€” legacy bare-code shape (Slice 1)", () => {
 
     // Modern rate-driven modifiers are never lumps.
     for (const m of extracted.oracle.modifiers) expect(m.isLump).toBe(false);
+  });
+});
+
+describe("as-bid UOM capture (Phase 3 Slice 0)", () => {
+  beforeEach(() => primeCostCodeResolverFromCatalog());
+  afterEach(() => resetCostCodeResolver());
+
+  it("extracts col-G UOMs on STEP 4 (uppercased; blank stays blank)", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+
+    const trusses = extracted.adHocLineItems.find((i) => i.rawCode === "06-1753")!;
+    expect(trusses.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.bridgeUnique); // "sf" -> "SF"
+    for (const sf of extracted.adHocLineItems.filter((i) => i.rawCode === "08-4000")) {
+      expect(sf.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.storefront);
+    }
+    const mystery = extracted.adHocLineItems.find((i) => i.rawCode === LEGACY_PAST_BID_ORACLE.noneCode)!;
+    expect(mystery.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.blank); // no col-G value -> ""
+    const gc = extracted.adHocLineItems.find((i) => i.rawCode === "01-0000")!;
+    expect(gc.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.linked); // "ls" -> "LS"
+  });
+
+  it("extracts col-G UOMs on STEP 2/3 lines and carries them into the import payload", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+
+    const supt = extracted.step2Lines.find((l) => l.description === "Sr Superintendent")!;
+    expect(supt.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.step2First); // "hr" -> "HR"
+    const cleaning = extracted.step3Lines.find((l) => l.description === "Progress Cleaning - Hired")!;
+    expect(cleaning.uom).toBe(LEGACY_PAST_BID_ORACLE.uoms.step3First);
+
+    // The imported_step23_lines payload (what the read-only panels render).
+    const payload = step23LinesForImport(extracted);
+    expect(payload.step2Lines.find((l) => l.description === "Sr Superintendent")!.uom).toBe("HR");
+    expect(payload.step3Lines[0].uom).toBe("HR");
+  });
+
+  it("a confirmed mapping KEEPS the as-bid UOM and reports the catalog disagreement", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const rows = enrichImportedRows(extracted);
+
+    // Uncatalogued ad-hoc row: the as-bid UOM rides enrichment untouched.
+    const trusses = rows.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
+    expect(trusses.uom).toBe("SF");
+
+    // Mapping to 06-1753.001 (catalog targetUom LS) must NOT stamp LS over SF...
+    const mapped = applyImportMapping(trusses, "06-1753.001");
+    expect(mapped.uom).toBe("SF");
+    // ...but the disagreement is visible (display-only: never blocks, never Flags).
+    expect(uomMismatch(mapped)).toEqual({ bid: "SF", catalog: "LS" });
+    expect(mapped.needsReview).toBe(false);
+
+    // A blank as-bid UOM is the ONLY case the catalog fills.
+    const mystery = rows.find((r) => r.description === "Mystery Scope")!;
+    expect(mystery.uom).toBe("");
+    const mysteryMapped = applyImportMapping(mystery, "06-1753.001");
+    expect(mysteryMapped.uom).toBe("LS");
+    expect(uomMismatch(mysteryMapped)).toBeNull();
   });
 });
 

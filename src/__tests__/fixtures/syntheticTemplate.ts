@@ -210,10 +210,11 @@ export async function buildSyntheticTemplateBuffer(): Promise<Buffer> {
 // Kept fully separate from SYNTHETIC_* above so golden-synthetic.test.ts (which
 // asserts exact counts/totals) stays byte-identical.
 
-/** Two storefront lines sharing 08-4000.002 — kept-imported price, not catalog 6500. */
-const PAST_BID_SAME_CODE: { itemId: string; description: string; qty: number; unitPrice: number }[] = [
-  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Interior", qty: 3, unitPrice: 1_000 }, // 3,000
-  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000
+/** Two storefront lines sharing 08-4000.002 — kept-imported price, not catalog
+ *  6500; bid UOM "sf" ≠ catalog EA (kept-imported UOM, mismatch indicator). */
+const PAST_BID_SAME_CODE: { itemId: string; description: string; qty: number; unitPrice: number; uom: string }[] = [
+  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Interior", qty: 3, unitPrice: 1_000, uom: "sf" }, // 3,000
+  { itemId: "08-4000.002", description: "Aluminum Storefront Doors - Exterior", qty: 5, unitPrice: 1_000, uom: "sf" }, // 5,000
 ];
 
 /** Conforming code absent from the catalog → imports unmapped. */
@@ -253,6 +254,11 @@ export const PAST_BID_ORACLE = {
   uncataloguedItemId: PAST_BID_UNCATALOGUED.itemId,
   adHocDescription: PAST_BID_ADHOC.description,
   adHocTotal: PAST_BID_ADHOC.qty * PAST_BID_ADHOC.unitPrice, // 2,500
+  /** As-bid UOM cases (Phase 3 Slice 0). */
+  sameCodeBidUom: "SF", // written "sf", extracted uppercase — catalog says EA
+  sameCodeCatalogUom: "EA", // 08-4000.002 targetUom (the mismatch counterpart)
+  /** NON_LINKED_ITEMS carry NO col-G value → enrich falls back to catalog UOM. */
+  blankUomItemId: NON_LINKED_ITEMS[0].itemId, // "03-0000.001"
 } as const;
 
 /** Builds the synthetic PAST-BID workbook (.xlsx bytes) for the import tests. */
@@ -293,15 +299,16 @@ export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
   const s4 = wb.addWorksheet(SHEET.step4);
   s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic past bid)";
   let row = 2;
-  const writeItem = (itemId: string, description: string, qty: number, unitPrice: number) => {
+  const writeItem = (itemId: string, description: string, qty: number, unitPrice: number, uom?: string) => {
     s4.getCell(`C${row}`).value = itemId;
     s4.getCell(`D${row}`).value = description;
     s4.getCell(`F${row}`).value = qty;
+    if (uom) s4.getCell(`G${row}`).value = uom; // as-bid UOM; NON_LINKED_ITEMS stay blank
     s4.getCell(`H${row}`).value = unitPrice;
     row++;
   };
   for (const it of NON_LINKED_ITEMS) writeItem(it.itemId, it.description, it.qty, it.unitPrice);
-  for (const it of PAST_BID_SAME_CODE) writeItem(it.itemId, it.description, it.qty, it.unitPrice);
+  for (const it of PAST_BID_SAME_CODE) writeItem(it.itemId, it.description, it.qty, it.unitPrice, it.uom);
   writeItem(PAST_BID_UNCATALOGUED.itemId, PAST_BID_UNCATALOGUED.description, PAST_BID_UNCATALOGUED.qty, PAST_BID_UNCATALOGUED.unitPrice);
   // Ad-hoc line — non-conforming code typed straight into col C.
   writeItem(PAST_BID_ADHOC.code, PAST_BID_ADHOC.description, PAST_BID_ADHOC.qty, PAST_BID_ADHOC.unitPrice);
@@ -349,11 +356,14 @@ export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
 //   8-84000.000 ← TWO internal codes (08-4000.001/.002)     → ambiguous
 //   99-9999     ← no catalog family, no BLI row             → none tier
 
-/** Bare-coded dollar lines. Two share 08-4000 (interior vs exterior storefront). */
-const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number; comment?: string }[] = [
-  { code: "06-1753", description: "Shop-Fabricated Wood Trusses", qty: 400, unitPrice: 10 }, // 4,000 → bridge-unique
-  { code: "08-4000", description: "Aluminum Storefront - Interior", qty: 3, unitPrice: 1_000 }, // 3,000 ┐ ambiguous
-  { code: "08-4000", description: "Aluminum Storefront - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000 ┘ bridge
+/** Bare-coded dollar lines. Two share 08-4000 (interior vs exterior storefront).
+ *  `uom` = the as-bid col-G value, LOWERCASE like real legacy bids write it (the
+ *  CARE probe: `ls`/`hr`/`mo`) — extraction must uppercase it. Mystery Scope has
+ *  a BLANK uom (the only blank dollar line) to pin the blank→"" path. */
+const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number; uom?: string; comment?: string }[] = [
+  { code: "06-1753", description: "Shop-Fabricated Wood Trusses", qty: 400, unitPrice: 10, uom: "sf" }, // 4,000 → bridge-unique
+  { code: "08-4000", description: "Aluminum Storefront - Interior", qty: 3, unitPrice: 1_000, uom: "ea" }, // 3,000 ┐ ambiguous
+  { code: "08-4000", description: "Aluminum Storefront - Exterior", qty: 5, unitPrice: 1_000, uom: "ea" }, // 5,000 ┘ bridge
   // Estimators annotate odd lines in col E — the import shows + preserves it.
   { code: "99-9999", description: "Mystery Scope", qty: 1, unitPrice: 3_000, comment: "Carried from SD pricing set" }, // 3,000 → none
 ];
@@ -373,13 +383,14 @@ const LEGACY_RATES: Record<string, number> = {
 const LEGACY_LUMP = { key: "designContingency", baseCode: "60-1005", sheetLabel: "Owner's Rep", value: 7_500 };
 
 /** Hand-authored STEP 2/3 detail lines (bare codes — the legacy idiom; the
- *  zero row mirrors the many empty template rows real sheets carry). */
+ *  zero row mirrors the many empty template rows real sheets carry). Col-G
+ *  UOMs lowercase like real sheets (CARE: hr/mo/ls). */
 const LEGACY_STEP2_DETAIL = [
-  { code: "01-0410", description: "Sr Superintendent", qty: 10, rate: 1_000, total: 10_000 },
-  { code: "01-1000", description: "Small Tools", qty: 0, rate: 0, total: 0 },
+  { code: "01-0410", description: "Sr Superintendent", qty: 10, rate: 1_000, total: 10_000, uom: "hr" },
+  { code: "01-1000", description: "Small Tools", qty: 0, rate: 0, total: 0, uom: "mo" },
 ];
 const LEGACY_STEP3_DETAIL = [
-  { code: "02-9010", description: "Progress Cleaning - Hired", qty: 2, rate: 1_000, total: 2_000 },
+  { code: "02-9010", description: "Progress Cleaning - Hired", qty: 2, rate: 1_000, total: 2_000, uom: "hr" },
 ];
 
 const LEGACY_TAKEOFF_SUBTOTAL = LEGACY_ITEMS.reduce((s, it) => s + it.qty * it.unitPrice, 0); // 15,000
@@ -404,6 +415,16 @@ export const LEGACY_PAST_BID_ORACLE = {
   } as Record<string, string>,
   bridgeUniqueItemId: "06-1753.001",
   noneCode: "99-9999",
+  /** As-bid UOM expectations (Phase 3 Slice 0): written lowercase in col G,
+   *  extracted UPPERCASE, kept through enrich + mapping (never catalog-stamped). */
+  uoms: {
+    bridgeUnique: "SF", // 06-1753 written "sf"
+    storefront: "EA", // both 08-4000 lines written "ea"
+    blank: "", // Mystery Scope has no col-G value
+    linked: "LS", // all 10 GC/Site-Ops rows written "ls"
+    step2First: "HR", // 01-0410 Sr Superintendent written "hr"
+    step3First: "HR", // 02-9010 Progress Cleaning written "hr"
+  },
   /** Linked-tier inputs: bare code + canonical description per linked row. */
   linkedDescriptions: LINKED_ROWS.map((l) => l.description),
   /** STEP 2/3 hand-authored detail (dollar lines only — the zero row is filtered). */
@@ -453,6 +474,7 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
     s2.getCell(`C${s2Row}`).value = d.code;
     s2.getCell(`D${s2Row}`).value = d.description;
     s2.getCell(`F${s2Row}`).value = d.qty;
+    s2.getCell(`G${s2Row}`).value = d.uom; // as-bid UOM, lowercase
     s2.getCell(`H${s2Row}`).value = d.rate;
     s2.getCell(`I${s2Row}`).value = d.total;
     s2Row++;
@@ -461,6 +483,7 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
     s3.getCell(`C${s3Row}`).value = d.code;
     s3.getCell(`D${s3Row}`).value = d.description;
     s3.getCell(`F${s3Row}`).value = d.qty;
+    s3.getCell(`G${s3Row}`).value = d.uom; // as-bid UOM, lowercase
     s3.getCell(`H${s3Row}`).value = d.rate;
     s3.getCell(`I${s3Row}`).value = d.total;
     s3Row++;
@@ -471,18 +494,19 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
   s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic legacy bid)";
   let row = 2;
   const rowOfCode: Record<string, number> = {};
-  const writeItem = (code: string, description: string, qty: number, unitPrice: number, comment?: string) => {
+  const writeItem = (code: string, description: string, qty: number, unitPrice: number, comment?: string, uom?: string) => {
     s4.getCell(`C${row}`).value = code;
     s4.getCell(`D${row}`).value = description;
     if (comment) s4.getCell(`E${row}`).value = comment;
     s4.getCell(`F${row}`).value = qty;
+    if (uom) s4.getCell(`G${row}`).value = uom; // as-bid UOM (lowercase, like real bids)
     s4.getCell(`H${row}`).value = unitPrice;
     if (!(code in rowOfCode)) rowOfCode[code] = row; // first occurrence (SUMIF criterion)
     row++;
   };
-  for (const it of LEGACY_ITEMS) writeItem(it.code, it.description, it.qty, it.unitPrice, it.comment);
-  // GC/Site-Ops rows: BARE base code, canonical description, lump value.
-  for (const link of LINKED_ROWS) writeItem(link.itemId.split(".")[0], link.description, 1, link.value);
+  for (const it of LEGACY_ITEMS) writeItem(it.code, it.description, it.qty, it.unitPrice, it.comment, it.uom);
+  // GC/Site-Ops rows: BARE base code, canonical description, lump value, "ls".
+  for (const link of LINKED_ROWS) writeItem(link.itemId.split(".")[0], link.description, 1, link.value, undefined, "ls");
 
   const subtotalRow = row;
   s4.getCell(`H${subtotalRow}`).value = "SUBTOTAL";

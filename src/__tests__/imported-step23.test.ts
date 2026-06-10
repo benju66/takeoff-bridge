@@ -66,8 +66,9 @@ describe("imported STEP 2/3 detail — capture + payload", () => {
 
     // …and the payload keeps dollar lines only, plus the section-subtotal tie context.
     const payload = step23LinesForImport(extracted);
-    expect(payload.step2Lines.map((l) => ({ code: l.code, description: l.description, qty: l.qty, rate: l.rate, total: l.total })))
-      .toEqual(LEGACY_PAST_BID_ORACLE.step2Detail.map((d) => ({ ...d })));
+    expect(payload.step2Lines.map((l) => ({ code: l.code, description: l.description, qty: l.qty, rate: l.rate, total: l.total, uom: l.uom })))
+      // Col G is written lowercase (the legacy idiom); extraction uppercases it.
+      .toEqual(LEGACY_PAST_BID_ORACLE.step2Detail.map((d) => ({ ...d, uom: d.uom.toUpperCase() })));
     expect(payload.step3Lines).toHaveLength(LEGACY_PAST_BID_ORACLE.step3Detail.length);
     expect(payload.step2Lines.some((l) => l.total === 0)).toBe(false);
     expect(payload.linkedSourceSubtotals.length).toBe(LINKED_DIVISION_ROWS.length);

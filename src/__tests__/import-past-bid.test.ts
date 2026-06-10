@@ -29,7 +29,9 @@ import {
   projectFromExtract,
   estimateTotalsForImport,
   checkImportTieOut,
+  uomMismatch,
 } from "../lib/importEstimate";
+import { ESTIMATE_ITEMS_MASTER } from "../lib/mock-data";
 import {
   primeCostCodeResolverFromCatalog,
   resetCostCodeResolver,
@@ -102,6 +104,28 @@ describe("Import past bids — Phase 1 (enrich + tie-out, CI-safe)", () => {
     expect(adHoc!.source).toBe("imported");
     // Its dollars survive: matchedQty × unitPrice reproduces the line total.
     expect(adHoc!.matchedQty * adHoc!.unitPrice).toBe(PAST_BID_ORACLE.adHocTotal);
+  });
+
+  // ── As-bid UOM fidelity (Phase 3 Slice 0) ──
+  it("keeps the bid's UOM on enriched rows — the catalog never overwrites it", () => {
+    const storefront = rows.filter((r) => r.itemId === PAST_BID_ORACLE.sameCodeItemId);
+    expect(storefront).toHaveLength(2);
+    for (const r of storefront) {
+      // Written lowercase "sf" in col G; extracted uppercase; catalog says EA.
+      expect(r.uom).toBe(PAST_BID_ORACLE.sameCodeBidUom);
+      expect(r.uom).not.toBe(PAST_BID_ORACLE.sameCodeCatalogUom);
+      // The disagreement is REPORTED (display-only), never silently resolved.
+      expect(uomMismatch(r)).toEqual({
+        bid: PAST_BID_ORACLE.sameCodeBidUom,
+        catalog: PAST_BID_ORACLE.sameCodeCatalogUom,
+      });
+    }
+  });
+
+  it("falls back to the catalog UOM only when the bid's col-G cell is blank", () => {
+    const blank = rows.find((r) => r.itemId === PAST_BID_ORACLE.blankUomItemId)!;
+    expect(blank.uom).toBe(ESTIMATE_ITEMS_MASTER[PAST_BID_ORACLE.blankUomItemId].targetUom);
+    expect(uomMismatch(blank)).toBeNull(); // a fallback is not a mismatch
   });
 
   // ── Same code, different scope = presentation only → one Procore code ──

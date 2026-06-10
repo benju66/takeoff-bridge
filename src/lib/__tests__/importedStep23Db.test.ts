@@ -19,7 +19,8 @@ import { saveImportedStep23Lines } from "../db";
 import type { ImportedStep23Lines } from "@/types/db";
 
 const PAYLOAD: ImportedStep23Lines = {
-  step2Lines: [{ code: "01-0410", description: "Sr Superintendent", utilization: null, qty: 10, rate: 1_000, total: 10_000, rowNumber: 3 }],
+  // uom (Phase 3 Slice 0) rides the JSONB verbatim; older payloads lack it.
+  step2Lines: [{ code: "01-0410", description: "Sr Superintendent", utilization: null, qty: 10, rate: 1_000, total: 10_000, rowNumber: 3, uom: "HR" }],
   step3Lines: [],
   linkedSourceSubtotals: [{ itemId: "01-0400.002", total: 12_000 }],
 };
