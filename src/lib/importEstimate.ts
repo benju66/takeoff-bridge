@@ -88,7 +88,9 @@ function enrichOne(it: ExtractedLineItem): ProcessedTakeoffRow {
     isMapped,
     rawQuantities: [],
     costType,
-    customFields: {},
+    // The estimator's STEP 4 col-E note survives as a custom field (fidelity:
+    // shown in the import review, persisted with the row, never dropped).
+    customFields: it.comment ? { Comment: it.comment } : {},
     source: "imported",
   };
   if (it.isAdHoc) row.needsReview = true;

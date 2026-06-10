@@ -104,6 +104,12 @@ export interface ExtractedLineItem {
    * needs it to bridge legacy codes to today's catalog.
    */
   rawCode: string;
+  /**
+   * The estimator's note from STEP 4 col E (`""` when blank). Estimators
+   * annotate odd lines there; the import review shows it for mapping context
+   * and it rides into the project as a custom field — never dropped.
+   */
+  comment: string;
 }
 
 /** One value the spreadsheet itself computes — the thing the engine is proven against. */
@@ -377,7 +383,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
     if (COST_CODE_RE.test(rawCode)) {
       const total = qty * unitPrice;
       const isLinked = isLinkedDivisionRow(rawCode);
-      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r, rawCode });
+      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r, rawCode, comment: text(s4, `E${r}`) });
       if (isLinked) linkedDivisionValues.push({ itemId: rawCode, total });
       continue;
     }
@@ -405,6 +411,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
       rowNumber: r,
       // Preserve a legacy bare base code (NN-NNNN) so normalization can bridge it.
       rawCode: BARE_CODE_RE.test(rawCode) ? rawCode : "",
+      comment: text(s4, `E${r}`),
     });
   }
 

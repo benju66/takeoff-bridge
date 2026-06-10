@@ -20,6 +20,8 @@ import {
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import { validateAssignInput } from "@/lib/assignCode";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getDivisionCode } from "@/lib/division";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
@@ -392,6 +394,17 @@ export default function ImportPastEstimatePage() {
                     </tbody>
                   </table>
                 </div>
+                {/* One shared datalist backs every row's free-entry box: type a code
+                    OR part of a name and the browser narrows the choices. */}
+                <datalist id="import-code-options">
+                  {Object.values(ESTIMATE_ITEMS_MASTER)
+                    .sort((a, b) => a.itemId.localeCompare(b.itemId, undefined, { numeric: true }))
+                    .map((i) => (
+                      <option key={i.itemId} value={i.itemId}>
+                        {i.description}
+                      </option>
+                    ))}
+                </datalist>
               </div>
             )}
 
@@ -468,10 +481,21 @@ export default function ImportPastEstimatePage() {
 
 const CONFIDENCE_STYLE: Record<MappingSuggestion["confidence"], { label: string; cls: string; icon: React.ReactNode }> = {
   bridge: { label: "From this bid's own mapping", cls: "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", icon: <Link2 size={10} /> },
-  linked: { label: "GC / Site-Ops row", cls: "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300", icon: <Link2 size={10} /> },
+  linked: { label: "Linked row", cls: "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300", icon: <Link2 size={10} /> },
   similar: { label: "Best guesses — pick one", cls: "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", icon: <Sparkles size={10} /> },
   none: { label: "No match found", cls: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", icon: <Flag size={10} /> },
 };
+
+/** The chip for a suggestion; linked rows name their actual home (GC vs Site-Ops). */
+function chipFor(suggestion: MappingSuggestion): { label: string; cls: string; icon: React.ReactNode } {
+  const base = CONFIDENCE_STYLE[suggestion.confidence];
+  if (suggestion.confidence !== "linked") return base;
+  const division = getDivisionCode(suggestion.itemId);
+  return { ...base, label: division === "01" ? "GC row" : division === "02" ? "Site-Ops row" : base.label };
+}
+
+/** Catalog name for a code ("" when uncatalogued — e.g. a linked division row). */
+const codeName = (itemId: string) => ESTIMATE_ITEMS_MASTER[itemId]?.description ?? "";
 
 function ReviewRow({
   row,
@@ -488,8 +512,19 @@ function ReviewRow({
 }) {
   const [freeEntry, setFreeEntry] = useState("");
   const [entryError, setEntryError] = useState<string | null>(null);
-  const style = CONFIDENCE_STYLE[suggestion.confidence];
+  const style = chipFor(suggestion);
   const amount = row.matchedQty * row.unitPrice;
+  const comment = row.customFields?.["Comment"];
+  const descriptionCell = (
+    <td className="px-3 py-2 text-foreground">
+      {row.description}
+      {comment && (
+        <div className="text-[10px] text-slate-500 dark:text-slate-400 italic mt-0.5" title="Estimator's note from the bid (STEP 4 col E)">
+          📝 {comment}
+        </div>
+      )}
+    </td>
+  );
 
   const assignFreeEntry = () => {
     const result = validateAssignInput(freeEntry);
@@ -505,11 +540,14 @@ function ReviewRow({
   if (row.isMapped) {
     return (
       <tr className="border-t border-grid-border bg-emerald-50/40 dark:bg-emerald-950/10">
-        <td className="px-3 py-2 text-foreground">{row.description}</td>
+        {descriptionCell}
         <td className="px-3 py-2 text-right font-mono text-foreground">{money(amount)}</td>
-        <td className="px-3 py-2 font-mono text-emerald-700 dark:text-emerald-300" colSpan={2}>
+        <td className="px-3 py-2 text-emerald-700 dark:text-emerald-300" colSpan={2}>
           <span className="inline-flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={12} /> {row.itemId}</span>
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 size={12} /> <span className="font-mono">{row.itemId}</span>
+              {codeName(row.itemId) && <span className="text-emerald-600/80 dark:text-emerald-400/80">{codeName(row.itemId)}</span>}
+            </span>
             <button
               onClick={onUnaccept}
               disabled={disabled}
@@ -526,7 +564,7 @@ function ReviewRow({
 
   return (
     <tr className="border-t border-grid-border">
-      <td className="px-3 py-2 text-foreground">{row.description}</td>
+      {descriptionCell}
       <td className="px-3 py-2 text-right font-mono text-foreground">{money(amount)}</td>
       <td className="px-3 py-2">
         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${style.cls}`} title={style.label}>
@@ -536,14 +574,21 @@ function ReviewRow({
       <td className="px-3 py-2">
         <div className="flex flex-wrap items-center gap-1.5">
           {(suggestion.confidence === "bridge" || suggestion.confidence === "linked") && suggestion.itemId && (
-            <button
-              onClick={() => onAccept(suggestion.itemId)}
-              disabled={disabled}
-              className="px-2 py-1 rounded font-mono text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors"
-              title={`Accept ${suggestion.itemId}`}
-            >
-              {suggestion.itemId} ✓
-            </button>
+            <>
+              <button
+                onClick={() => onAccept(suggestion.itemId)}
+                disabled={disabled}
+                className="px-2 py-1 rounded font-mono text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+                title={`Accept ${suggestion.itemId}${codeName(suggestion.itemId) ? ` — ${codeName(suggestion.itemId)}` : ""}`}
+              >
+                {suggestion.itemId} ✓
+              </button>
+              {codeName(suggestion.itemId) && (
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 max-w-40 truncate" title={codeName(suggestion.itemId)}>
+                  {codeName(suggestion.itemId)}
+                </span>
+              )}
+            </>
           )}
           {suggestion.confidence === "similar" &&
             suggestion.candidates.slice(0, 3).map((c) => (
@@ -554,18 +599,19 @@ function ReviewRow({
                 className="px-2 py-1 rounded font-mono text-[11px] border border-grid-border text-foreground hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-40 transition-colors"
                 title={c.description}
               >
-                {c.itemId}
+                {c.itemId} <span className="font-sans text-[10px] text-slate-500">{c.description}</span>
               </button>
             ))}
           <span className="inline-flex items-center gap-1">
             <input
               type="text"
               placeholder="code…"
+              list="import-code-options"
               value={freeEntry}
               onChange={(e) => { setFreeEntry(e.target.value); setEntryError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") assignFreeEntry(); }}
               disabled={disabled}
-              className="w-28 bg-transparent border border-grid-border rounded px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-40 bg-transparent border border-grid-border rounded px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
               onClick={assignFreeEntry}

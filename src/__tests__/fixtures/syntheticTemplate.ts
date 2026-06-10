@@ -348,11 +348,12 @@ export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
 //   99-9999     ← no catalog family, no BLI row             → none tier
 
 /** Bare-coded dollar lines. Two share 08-4000 (interior vs exterior storefront). */
-const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number }[] = [
+const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number; comment?: string }[] = [
   { code: "09-9000", description: "Interior Painting", qty: 400, unitPrice: 10 }, // 4,000 → bridge-unique
   { code: "08-4000", description: "Aluminum Storefront - Interior", qty: 3, unitPrice: 1_000 }, // 3,000 ┐ ambiguous
   { code: "08-4000", description: "Aluminum Storefront - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000 ┘ bridge
-  { code: "99-9999", description: "Mystery Scope", qty: 1, unitPrice: 3_000 }, // 3,000 → none
+  // Estimators annotate odd lines in col E — the import shows + preserves it.
+  { code: "99-9999", description: "Mystery Scope", qty: 1, unitPrice: 3_000, comment: "Carried from SD pricing set" }, // 3,000 → none
 ];
 
 /** STEP 1 rates the legacy bid actually carries (design contingency slot is a LUMP). */
@@ -434,15 +435,16 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
   s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic legacy bid)";
   let row = 2;
   const rowOfCode: Record<string, number> = {};
-  const writeItem = (code: string, description: string, qty: number, unitPrice: number) => {
+  const writeItem = (code: string, description: string, qty: number, unitPrice: number, comment?: string) => {
     s4.getCell(`C${row}`).value = code;
     s4.getCell(`D${row}`).value = description;
+    if (comment) s4.getCell(`E${row}`).value = comment;
     s4.getCell(`F${row}`).value = qty;
     s4.getCell(`H${row}`).value = unitPrice;
     if (!(code in rowOfCode)) rowOfCode[code] = row; // first occurrence (SUMIF criterion)
     row++;
   };
-  for (const it of LEGACY_ITEMS) writeItem(it.code, it.description, it.qty, it.unitPrice);
+  for (const it of LEGACY_ITEMS) writeItem(it.code, it.description, it.qty, it.unitPrice, it.comment);
   // GC/Site-Ops rows: BARE base code, canonical description, lump value.
   for (const link of LINKED_ROWS) writeItem(link.itemId.split(".")[0], link.description, 1, link.value);
 

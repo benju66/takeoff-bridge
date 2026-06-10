@@ -61,6 +61,10 @@ describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
     // The unknown code is captured too — dollars are never dropped.
     const mystery = extracted.adHocLineItems.find((i) => i.rawCode === LEGACY_PAST_BID_ORACLE.noneCode);
     expect(mystery?.total).toBe(3_000);
+    // …and the estimator's col-E note rides along (shown in review, persisted).
+    expect(mystery?.comment).toBe("Carried from SD pricing set");
+    const mysteryRow = enrichImportedRows(extracted).find((r) => r.description === "Mystery Scope")!;
+    expect(mysteryRow.customFields).toEqual({ Comment: "Carried from SD pricing set" });
 
     // GC/Site-Ops rows arrive as bare-coded ad-hoc lines (description is the signal).
     const gc = extracted.adHocLineItems.find((i) => i.rawCode === "01-0000");
