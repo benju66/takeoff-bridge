@@ -25,7 +25,7 @@
  */
 
 import type { ProcessedTakeoffRow } from "@/types";
-import type { Project, ProjectEstimate } from "@/types/db";
+import type { Project, ProjectEstimate, CostCodeMapEntry } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
 // otherwise the workspace page (which imports the pure linkedTotalsFromRows) would
@@ -34,6 +34,7 @@ import type { ExtractedEstimate, ExtractedLineItem, ExtractedProjectInputs } fro
 import type { LinkedDivisionTotal, TakeoffSummary } from "./calculations";
 import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
 import { resolveProcoreCode } from "./costCodeResolver";
+import { getFuzzySuggestions, type SuggestionItem } from "./similarity";
 import { LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
 import { getDivisionCode } from "./division";
 import { RECONCILIATION_TOLERANCE } from "./exporter";
@@ -106,6 +107,143 @@ export function enrichImportedRows(extracted: ExtractedEstimate): ProcessedTakeo
     (a, b) => a.rowNumber - b.rowNumber
   );
   return all.map(enrichOne);
+}
+
+// ---------------------------------------------------------------------------
+// Code normalization (Phase 2) — suggest deterministic codes for legacy lines
+// ---------------------------------------------------------------------------
+
+/**
+ * How sure the suggestion is — drives the review UI's chips and which rows
+ * "Accept all high-confidence" may touch (bridge + linked ONLY; `similar` is a
+ * ranked shortlist a human picks from; `none` stays a flagged manual row).
+ */
+export type MappingConfidence = "bridge" | "linked" | "similar" | "none";
+
+export interface MappingSuggestion {
+  /** The enriched row this belongs to (same id scheme as enrichImportedRows). */
+  rowId: string;
+  confidence: MappingConfidence;
+  /** Primary suggested internal itemId ("" for `none`). */
+  itemId: string;
+  /** The Procore code the bridge derived ("" when not bridge-informed). */
+  procoreCode: string;
+  /** Ranked alternatives (similar tier; includes the primary first). */
+  candidates: SuggestionItem[];
+}
+
+/** Reverses cost-code-map entries to `procoreCode → internalCode[]` (sorted, deterministic). */
+export function buildReverseProcoreMap(
+  entries: readonly Pick<CostCodeMapEntry, "internalCode" | "procoreCode">[]
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const e of entries) {
+    if (!e.procoreCode) continue;
+    const list = out.get(e.procoreCode) ?? [];
+    if (!list.includes(e.internalCode)) list.push(e.internalCode);
+    out.set(e.procoreCode, list);
+  }
+  for (const list of out.values()) list.sort();
+  return out;
+}
+
+const normalizeDesc = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const LINKED_BY_DESC = new Map(LINKED_DIVISION_ROWS.map((l) => [normalizeDesc(l.description), l.itemId]));
+
+/** SuggestionItem for an internal code, catalog description when known. */
+function asCandidate(itemId: string): SuggestionItem {
+  return { itemId, description: ESTIMATE_ITEMS_MASTER[itemId]?.description ?? itemId };
+}
+
+/**
+ * Ranks ONE extracted line against the legacy bridge + today's mappings.
+ * Tiers, strongest first (never an auto-guess — the human confirms every one):
+ *  1. `bridge` — the workbook's own BLI SUMIF names a Procore code that
+ *     reverse-maps to exactly ONE internal code. Near-certain.
+ *  2. `linked` — the description IS one of the 10 GC/Site-Ops linked rows.
+ *  3. `similar` — a ranked shortlist: the bridge's ambiguous family when there
+ *     is one (storefront interior/exterior), else catalog-wide fuzzy matches.
+ *  4. `none` — nothing to offer; the row stays a flagged manual line.
+ */
+export function suggestMapping(
+  item: ExtractedLineItem,
+  bridge: ReadonlyMap<string, string>,
+  reverse: ReadonlyMap<string, string[]>
+): MappingSuggestion {
+  const rowId = importRowId(item);
+  const base = { rowId, procoreCode: "", candidates: [] as SuggestionItem[] };
+
+  const bridgedProcore = item.rawCode ? bridge.get(item.rawCode) : undefined;
+  const family = bridgedProcore ? reverse.get(bridgedProcore) ?? [] : [];
+  if (bridgedProcore && family.length === 1) {
+    return { ...base, confidence: "bridge", itemId: family[0], procoreCode: bridgedProcore };
+  }
+
+  const linkedItemId = LINKED_BY_DESC.get(normalizeDesc(item.description));
+  if (linkedItemId) {
+    return { ...base, confidence: "linked", itemId: linkedItemId };
+  }
+
+  if (bridgedProcore && family.length > 1) {
+    // Ambiguous bridge family — rank its members by description similarity.
+    const subMaster = Object.fromEntries(
+      family.map((id) => [id, ESTIMATE_ITEMS_MASTER[id] ?? { itemId: id, description: id }])
+    ) as typeof ESTIMATE_ITEMS_MASTER;
+    const ranked = getFuzzySuggestions(item.description, subMaster, family.length);
+    const candidates = ranked.length > 0 ? ranked : family.map(asCandidate);
+    return {
+      ...base,
+      confidence: "similar",
+      itemId: candidates[0].itemId,
+      procoreCode: bridgedProcore,
+      candidates,
+    };
+  }
+
+  const fuzzy = item.description ? getFuzzySuggestions(item.description, ESTIMATE_ITEMS_MASTER, 3) : [];
+  if (fuzzy.length > 0) {
+    return { ...base, confidence: "similar", itemId: fuzzy[0].itemId, candidates: fuzzy };
+  }
+
+  return { ...base, confidence: "none", itemId: "" };
+}
+
+/**
+ * Suggestions for every ad-hoc (legacy / non-conforming) line, keyed by row id.
+ * Conforming-but-unmapped lines keep their existing Flags-worklist path.
+ */
+export function suggestImportMappings(
+  extracted: ExtractedEstimate,
+  bridge: ReadonlyMap<string, string>,
+  reverse: ReadonlyMap<string, string[]>
+): Map<string, MappingSuggestion> {
+  const out = new Map<string, MappingSuggestion>();
+  for (const item of extracted.adHocLineItems) {
+    out.set(importRowId(item), suggestMapping(item, bridge, reverse));
+  }
+  return out;
+}
+
+/**
+ * Applies a HUMAN-CONFIRMED mapping to an enriched import row, returning a new
+ * row (React-state friendly). Sets the deterministic itemId + the catalog's
+ * code/costType/uom; NEVER touches qty/unitPrice (historical fidelity) or the
+ * row id/source (provenance). Clearing `needsReview` removes it from Flags.
+ */
+export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): ProcessedTakeoffRow {
+  const master = ESTIMATE_ITEMS_MASTER[itemId];
+  const procoreCode = resolveProcoreCode(itemId);
+  return {
+    ...row,
+    itemId,
+    procoreCode,
+    procoreParentCode: master?.procoreParentCode ?? row.procoreParentCode,
+    costType: master?.costType ?? row.costType,
+    uom: master?.targetUom ?? row.uom,
+    isMapped: isLinkedDivisionRow(itemId) || procoreCode !== "",
+    needsReview: false,
+  };
 }
 
 /**

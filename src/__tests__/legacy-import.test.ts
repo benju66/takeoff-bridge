@@ -8,14 +8,29 @@
  * reads that shape — and that the modern suffixed path is byte-identical to
  * before (the goldens stay the real proof of that).
  */
-import { describe, it, expect } from "vitest";
-import { extractEstimateFromBuffer } from "@/lib/templateExtractor";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { extractEstimateFromBuffer, loadTemplateWorkbook, extractEstimate } from "@/lib/templateExtractor";
+import { deriveLegacyBridge } from "@/lib/legacyBridge";
+import {
+  enrichImportedRows,
+  buildReverseProcoreMap,
+  suggestImportMappings,
+  applyImportMapping,
+} from "@/lib/importEstimate";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "@/lib/costCodeResolver";
 import {
   buildLegacyPastBidTemplateBuffer,
   buildPastBidTemplateBuffer,
   LEGACY_PAST_BID_ORACLE,
   PAST_BID_ORACLE,
 } from "./fixtures/syntheticTemplate";
+
+/** Reverse map built the same way the import page's catalog fallback primes. */
+const catalogReverse = () =>
+  buildReverseProcoreMap(
+    Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({ internalCode: i.itemId, procoreCode: i.procoreCode }))
+  );
 
 describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
   it("preserves bare base codes on ad-hoc lines via rawCode", async () => {
@@ -83,5 +98,99 @@ describe("templateExtractor — legacy bare-code shape (Slice 1)", () => {
 
     // Modern rate-driven modifiers are never lumps.
     for (const m of extracted.oracle.modifiers) expect(m.isLump).toBe(false);
+  });
+});
+
+describe("legacyBridge — the workbook's own BLI mapping (Slice 2)", () => {
+  it("derives bareCode → procoreCode from SUMIF criteria, skipping non-STEP-4 and shared formulas", async () => {
+    const wb = await loadTemplateWorkbook(await buildLegacyPastBidTemplateBuffer());
+    const bridge = deriveLegacyBridge(wb);
+
+    expect(bridge.get("09-9000")).toBe(LEGACY_PAST_BID_ORACLE.bridge["09-9000"]);
+    expect(bridge.get("08-4000")).toBe(LEGACY_PAST_BID_ORACLE.bridge["08-4000"]);
+    // The STEP-2 SUMIF row and the sharedFormula-only row contribute NOTHING.
+    expect(bridge.size).toBe(2);
+    expect([...bridge.values()]).not.toContain("9-92900.000");
+  });
+
+  it("returns an empty map for a workbook without a parsable BLI sheet", async () => {
+    // The modern synthetic past-bid fixture has no BLI sheet at all.
+    const wb = await loadTemplateWorkbook(await buildPastBidTemplateBuffer());
+    expect(deriveLegacyBridge(wb).size).toBe(0);
+  });
+});
+
+describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
+  beforeEach(() => primeCostCodeResolverFromCatalog());
+  afterEach(() => resetCostCodeResolver());
+
+  async function legacySetup() {
+    const wb = await loadTemplateWorkbook(await buildLegacyPastBidTemplateBuffer());
+    const extracted = extractEstimate(wb);
+    const bridge = deriveLegacyBridge(wb);
+    const suggestions = suggestImportMappings(extracted, bridge, catalogReverse());
+    const rows = enrichImportedRows(extracted);
+    return { extracted, suggestions, rows };
+  }
+
+  it("bridge tier: a uniquely reverse-mapped Procore code names ONE internal itemId", async () => {
+    const { suggestions, rows } = await legacySetup();
+    const painting = rows.find((r) => r.description === "Interior Painting")!;
+    const s = suggestions.get(painting.id)!;
+    expect(s.confidence).toBe("bridge");
+    expect(s.itemId).toBe(LEGACY_PAST_BID_ORACLE.bridgeUniqueItemId);
+    expect(s.procoreCode).toBe(LEGACY_PAST_BID_ORACLE.bridge["09-9000"]);
+  });
+
+  it("linked tier: GC/Site-Ops descriptions map to the 10 linked itemIds", async () => {
+    const { suggestions, rows } = await legacySetup();
+    const gc = rows.find((r) => r.description === "General Conditions")!;
+    expect(suggestions.get(gc.id)!.confidence).toBe("linked");
+    expect(suggestions.get(gc.id)!.itemId).toBe("01-0000.001");
+    const inspections = rows.find((r) => r.description === "Special Inspections")!;
+    expect(suggestions.get(inspections.id)!.itemId).toBe("02-9500.008");
+  });
+
+  it("similar tier: an ambiguous bridge family becomes a ranked shortlist, not a guess", async () => {
+    const { suggestions, rows } = await legacySetup();
+    const storefronts = rows.filter((r) => r.description.startsWith("Aluminum Storefront"));
+    expect(storefronts).toHaveLength(2);
+    for (const sf of storefronts) {
+      const s = suggestions.get(sf.id)!;
+      expect(s.confidence).toBe("similar"); // 8-84000.000 has TWO internal codes
+      expect(s.procoreCode).toBe(LEGACY_PAST_BID_ORACLE.bridge["08-4000"]);
+      expect(s.candidates.map((c) => c.itemId).sort()).toEqual(["08-4000.001", "08-4000.002"]);
+    }
+  });
+
+  it("similar tier (no bridge): unknown codes get catalog-wide fuzzy candidates only", async () => {
+    const { suggestions, rows } = await legacySetup();
+    const mystery = rows.find((r) => r.description === "Mystery Scope")!;
+    const s = suggestions.get(mystery.id)!;
+    expect(s.confidence).toBe("similar");
+    expect(s.procoreCode).toBe(""); // nothing bridge-derived — human picks or leaves flagged
+    expect(s.candidates.length).toBeGreaterThan(0);
+  });
+
+  it("applyImportMapping sets the deterministic code but never touches price, id, or source", async () => {
+    const { suggestions, rows } = await legacySetup();
+    const painting = rows.find((r) => r.description === "Interior Painting")!;
+    const mapped = applyImportMapping(painting, suggestions.get(painting.id)!.itemId);
+
+    expect(mapped.itemId).toBe("09-9000.001");
+    expect(mapped.procoreCode).toBe(ESTIMATE_ITEMS_MASTER["09-9000.001"].procoreCode);
+    expect(mapped.isMapped).toBe(true);
+    expect(mapped.needsReview).toBe(false);
+    // Historical fidelity + provenance: untouched.
+    expect(mapped.unitPrice).toBe(painting.unitPrice);
+    expect(mapped.matchedQty).toBe(painting.matchedQty);
+    expect(mapped.id).toBe(painting.id);
+    expect(mapped.source).toBe("imported");
+
+    // A linked mapping is structurally mapped even without a granular code.
+    const gc = rows.find((r) => r.description === "General Conditions")!;
+    const linked = applyImportMapping(gc, "01-0000.001");
+    expect(linked.isMapped).toBe(true);
+    expect(linked.itemId).toBe("01-0000.001");
   });
 });
