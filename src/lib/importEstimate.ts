@@ -372,7 +372,7 @@ export function linkedMappingConflict(
  * the workspace feeds these instead of recomputing from STEP 2/3 when
  * `project.isImported`. Counts each linked itemId once.
  */
-export function linkedTotalsFromRows(rows: ProcessedTakeoffRow[]): LinkedDivisionTotal[] {
+export function linkedTotalsFromRows(rows: readonly ProcessedTakeoffRow[]): LinkedDivisionTotal[] {
   const cfgByItemId = new Map(LINKED_DIVISION_ROWS.map((c) => [c.itemId, c]));
   const seen = new Set<string>();
   const out: LinkedDivisionTotal[] = [];
@@ -443,19 +443,30 @@ export function projectFromExtract(
  * calculators (which compute app DEFAULTS for imports). Used at import save
  * AND by the workspace auto-save, so a later edit can never overwrite the
  * as-imported totals with default-derived numbers.
+ *
+ * Takes the ALREADY-DERIVED linked totals so callers that have them memoized
+ * (the workspace's linkedDivisionTotals) don't walk the rows a second time.
  */
-export function linkedSectionTotals(rows: readonly ProcessedTakeoffRow[]): {
+export function sectionTotalsFromLinked(linked: readonly LinkedDivisionTotal[]): {
   generalConditionsTotal: number;
   siteOperationsTotal: number;
 } {
   let generalConditionsTotal = 0;
   let siteOperationsTotal = 0;
-  for (const l of linkedTotalsFromRows([...rows])) {
+  for (const l of linked) {
     const div = getDivisionCode(l.itemId);
     if (div === "01") generalConditionsTotal += l.total;
     else if (div === "02") siteOperationsTotal += l.total;
   }
   return { generalConditionsTotal, siteOperationsTotal };
+}
+
+/** Convenience over rows (import-save path; the workspace uses its memo). */
+export function linkedSectionTotals(rows: readonly ProcessedTakeoffRow[]): {
+  generalConditionsTotal: number;
+  siteOperationsTotal: number;
+} {
+  return sectionTotalsFromLinked(linkedTotalsFromRows(rows));
 }
 
 export function estimateTotalsForImport(

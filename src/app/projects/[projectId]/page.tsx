@@ -17,7 +17,7 @@ import {
   computeLinkedDivisionTotals,
 } from "@/lib/calculations";
 import { isLinkedDivisionRow } from "@/lib/constants";
-import { linkedTotalsFromRows, linkedSectionTotals } from "@/lib/importEstimate";
+import { linkedTotalsFromRows, sectionTotalsFromLinked } from "@/lib/importEstimate";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
@@ -247,9 +247,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // derived from the saved linked rows — personnel.totalGCs / infrastructure
   // .siteOperationsTotal are PARAMETRIC DEFAULTS for imports, and persisting
   // them would overwrite the as-imported totals on the first workspace edit.
+  // Derives from the linkedDivisionTotals memo above (for imported projects it
+  // IS linkedTotalsFromRows(rows)) — no second walk of the row set.
   const importedSectionTotals = React.useMemo(
-    () => (project?.isImported ? linkedSectionTotals(rows) : null),
-    [project?.isImported, rows]
+    () => (project?.isImported ? sectionTotalsFromLinked(linkedDivisionTotals) : null),
+    [project?.isImported, linkedDivisionTotals]
   );
   const { saveStatus, saveError } = useEstimatePersistence(
     projectId,

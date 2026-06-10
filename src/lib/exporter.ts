@@ -16,6 +16,20 @@ export { getColumnLetter } from "./exportUtils";
  * Formats columns dynamically to match user's custom and default workspace column definitions.
  * Incorporates the 7 template-aligned modifier rows at the bottom, with rounding compliance.
  */
+/**
+ * Generators refuse imported projects AT DEPTH, not only in the UI handlers:
+ * the export pipeline writes STEP 2/3 from the parametric calculators, which
+ * for an import would fabricate default-derived sheets the bid never carried.
+ * Any future call path hits this wall even if it forgets the handler guard.
+ */
+function assertNotImported(project: Project | null | undefined): void {
+  if (project?.isImported) {
+    throw new Error(
+      "Export of imported bids isn't supported yet — the original STEP 2/3 detail can't be reproduced in the export template."
+    );
+  }
+}
+
 export function generateExcelPayload(
   rows: ProcessedTakeoffRow[],
   columnDefs: ColumnDefinition[],
@@ -27,6 +41,7 @@ export function generateExcelPayload(
   // EFFECTIVE (override-applied) values — on-screen == saved == exported.
   overrides?: EstimateOverrideMap
 ): string {
+  assertNotImported(project);
   const csvLines: string[] = [];
   const activeCols = columnDefs.filter((col) => col.id !== "actions" && col.id !== "validationStatus");
   const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
@@ -189,6 +204,7 @@ export function generateProcoreBudget(
   // carry the EFFECTIVE values — the Procore budget matches the on-screen total.
   overrides?: EstimateOverrideMap
 ): string {
+  assertNotImported(project);
   const csvLines: string[] = [];
 
 
@@ -1261,6 +1277,7 @@ export async function generateExcelWorkbook(
 ): Promise<Blob> {
   // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
 
+  assertNotImported(projectMetadata);
   assertWorkbookInputs(layoutConfig, templateBuffer);
   const { anchors, sheetNames } = layoutConfig;
 
