@@ -437,19 +437,33 @@ export function projectFromExtract(
  * siteOperationsTotal are the Division 01 / 02 linked subtotals (derived from the
  * saved linked rows) so the GC/Site-Ops panels read a meaningful figure on reload.
  */
+/**
+ * The GC (div 01) / Site-Ops (div 02) section totals an IMPORTED project must
+ * persist — derived from its saved linked rows, never from the parametric
+ * calculators (which compute app DEFAULTS for imports). Used at import save
+ * AND by the workspace auto-save, so a later edit can never overwrite the
+ * as-imported totals with default-derived numbers.
+ */
+export function linkedSectionTotals(rows: readonly ProcessedTakeoffRow[]): {
+  generalConditionsTotal: number;
+  siteOperationsTotal: number;
+} {
+  let generalConditionsTotal = 0;
+  let siteOperationsTotal = 0;
+  for (const l of linkedTotalsFromRows([...rows])) {
+    const div = getDivisionCode(l.itemId);
+    if (div === "01") generalConditionsTotal += l.total;
+    else if (div === "02") siteOperationsTotal += l.total;
+  }
+  return { generalConditionsTotal, siteOperationsTotal };
+}
+
 export function estimateTotalsForImport(
   projectId: string,
   summary: TakeoffSummary,
   rows: ProcessedTakeoffRow[]
 ): Omit<ProjectEstimate, "items"> {
-  const linked = linkedTotalsFromRows(rows);
-  let generalConditionsTotal = 0;
-  let siteOperationsTotal = 0;
-  for (const l of linked) {
-    const div = getDivisionCode(l.itemId);
-    if (div === "01") generalConditionsTotal += l.total;
-    else if (div === "02") siteOperationsTotal += l.total;
-  }
+  const { generalConditionsTotal, siteOperationsTotal } = linkedSectionTotals(rows);
 
   return {
     projectId,

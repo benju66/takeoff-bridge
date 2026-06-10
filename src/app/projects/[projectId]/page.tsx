@@ -17,7 +17,8 @@ import {
   computeLinkedDivisionTotals,
 } from "@/lib/calculations";
 import { isLinkedDivisionRow } from "@/lib/constants";
-import { linkedTotalsFromRows } from "@/lib/importEstimate";
+import { linkedTotalsFromRows, linkedSectionTotals } from "@/lib/importEstimate";
+import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
@@ -235,16 +236,24 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // ---------------------------------------------------------------------------
   // Persistence Orchestration
   // ---------------------------------------------------------------------------
+  // IMPORTED projects: the persisted GC/Site-Ops section totals must stay
+  // derived from the saved linked rows — personnel.totalGCs / infrastructure
+  // .siteOperationsTotal are PARAMETRIC DEFAULTS for imports, and persisting
+  // them would overwrite the as-imported totals on the first workspace edit.
+  const importedSectionTotals = React.useMemo(
+    () => (project?.isImported ? linkedSectionTotals(rows) : null),
+    [project?.isImported, rows]
+  );
   const { saveStatus, saveError } = useEstimatePersistence(
     projectId,
     isLoaded,
     rows,
     rowVersion,
     takeoffSummary,
-    personnel.totalGCs,
+    importedSectionTotals?.generalConditionsTotal ?? personnel.totalGCs,
     personnel.gcUtilization,
     personnel.gcEquipmentOverrides,
-    infrastructure.siteOperationsTotal,
+    importedSectionTotals?.siteOperationsTotal ?? infrastructure.siteOperationsTotal,
     infrastructure.siteOpsQuantities,
     infrastructure.siteOpsRates,
     freezeRateCardSnapshot,
@@ -439,39 +448,58 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         </ErrorBoundary>
       )}
 
+      {/* IMPORTED projects: the parametric STEP 2/3 calculators would fabricate
+          default-derived numbers a finished bid never carried — show the bid's
+          own captured detail read-only instead. */}
       {activeTab === "step2" && (
         <ErrorBoundary>
-          <PersonnelPricingStep
-            durationMonths={projectDurationMonths}
-            squareFootage={squareFootage}
-            utilizations={personnel.utilizations}
-            onUtilizationChange={personnel.setUtilization}
-            equipment={personnel.equipment}
-            onEquipmentChange={personnel.handleEquipmentChange}
-            manualEntries={personnel.manualEntries}
-            onManualEntryChange={personnel.handleManualEntryChange}
-            rateOverrides={personnel.rateOverrides}
-            onRateChange={personnel.handleRateChange}
-            onRateReset={personnel.resetRate}
-            estimateTotal={takeoffSummary.totalEstimatedCost}
-            calcResult={personnel.calcResult}
-            totalGCs={personnel.totalGCs}
-          />
+          {project?.isImported ? (
+            <ImportedStep23Panel
+              step="step2"
+              payload={projectEstimate?.importedStep23Lines}
+              linkedTotals={linkedDivisionTotals}
+            />
+          ) : (
+            <PersonnelPricingStep
+              durationMonths={projectDurationMonths}
+              squareFootage={squareFootage}
+              utilizations={personnel.utilizations}
+              onUtilizationChange={personnel.setUtilization}
+              equipment={personnel.equipment}
+              onEquipmentChange={personnel.handleEquipmentChange}
+              manualEntries={personnel.manualEntries}
+              onManualEntryChange={personnel.handleManualEntryChange}
+              rateOverrides={personnel.rateOverrides}
+              onRateChange={personnel.handleRateChange}
+              onRateReset={personnel.resetRate}
+              estimateTotal={takeoffSummary.totalEstimatedCost}
+              calcResult={personnel.calcResult}
+              totalGCs={personnel.totalGCs}
+            />
+          )}
         </ErrorBoundary>
       )}
 
       {activeTab === "step3" && (
         <ErrorBoundary>
-          <InfrastructureStep
-            durationMonths={projectDurationMonths}
-            squareFootage={squareFootage}
-            quantities={infrastructure.quantities}
-            rates={infrastructure.rates}
-            onLineQuantityChange={infrastructure.handleLineQuantityChange}
-            onLineRateChange={infrastructure.handleLineRateChange}
-            calcResult={infrastructure.calcResult}
-            siteOperationsTotal={infrastructure.siteOperationsTotal}
-          />
+          {project?.isImported ? (
+            <ImportedStep23Panel
+              step="step3"
+              payload={projectEstimate?.importedStep23Lines}
+              linkedTotals={linkedDivisionTotals}
+            />
+          ) : (
+            <InfrastructureStep
+              durationMonths={projectDurationMonths}
+              squareFootage={squareFootage}
+              quantities={infrastructure.quantities}
+              rates={infrastructure.rates}
+              onLineQuantityChange={infrastructure.handleLineQuantityChange}
+              onLineRateChange={infrastructure.handleLineRateChange}
+              calcResult={infrastructure.calcResult}
+              siteOperationsTotal={infrastructure.siteOperationsTotal}
+            />
+          )}
         </ErrorBoundary>
       )}
 
