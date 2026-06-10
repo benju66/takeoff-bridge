@@ -11,6 +11,12 @@
  * bid's own line detail, captured at import (`imported_step23_lines`), shown
  * READ-ONLY. The dollars themselves ride the linked STEP 4 rows ("re-driving"
  * imported GC/Site-Ops through the calculators is a deferred feature).
+ *
+ * Phase 3 Slice 3: each line's bare legacy code is resolved AT RENDER TIME to
+ * the app's deterministic GC/Site-Ops code (step23Normalization, pure) and
+ * shown alongside the as-bid code; a line with no certain match is marked
+ * "unmapped" and stays exactly as bid. Labeling only — nothing is persisted
+ * and no dollar moves.
  */
 
 import React from "react";
@@ -18,6 +24,7 @@ import { FileSpreadsheet, Info, AlertTriangle } from "lucide-react";
 import type { ImportedStep23Lines, ImportedSheetLine } from "@/types/db";
 import type { LinkedDivisionTotal } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
+import { resolveStep23Line } from "@/lib/step23Normalization";
 import { RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 
 const money = (n: number) =>
@@ -93,9 +100,28 @@ export function ImportedStep23Panel({
               </tr>
             </thead>
             <tbody>
-              {lines.map((l) => (
+              {lines.map((l) => {
+                const resolved = resolveStep23Line(l.code, l.description);
+                return (
                 <tr key={`${l.rowNumber}`} className="border-t border-grid-border">
-                  <td className="px-4 py-2 font-mono text-slate-500">{l.code}</td>
+                  <td className="px-4 py-2 font-mono text-slate-500">
+                    {l.code}
+                    {resolved ? (
+                      <div
+                        className="text-[10px] text-violet-700 dark:text-violet-300"
+                        title={`Maps to the app's GC/Site-Ops line "${resolved.label}"`}
+                      >
+                        → {resolved.code}
+                      </div>
+                    ) : (
+                      <div
+                        className="text-[10px] italic text-amber-600 dark:text-amber-400"
+                        title="No matching app GC/Site-Ops line — shown exactly as bid"
+                      >
+                        unmapped
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-foreground">{l.description}</td>
                   <td className="px-4 py-2 text-right font-mono text-foreground">{l.qty !== 0 ? l.qty.toLocaleString() : "—"}</td>
                   {/* uom is absent on payloads saved before Slice 0 — show "—" */}
@@ -103,7 +129,8 @@ export function ImportedStep23Panel({
                   <td className="px-4 py-2 text-right font-mono text-foreground">{l.rate !== 0 ? money(l.rate) : "—"}</td>
                   <td className="px-4 py-2 text-right font-mono font-semibold text-foreground">{money(l.total)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-grid-border bg-background">

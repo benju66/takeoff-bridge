@@ -22,6 +22,7 @@ import { computeTakeoffSummary, type PersonnelCalcResult, type SiteOpsCalcResult
 import { validateExportReadiness, importedLinkedGcSiteOpsLines } from "@/lib/exporter";
 import { LINKED_DIVISION_ROWS } from "@/lib/constants";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "@/lib/costCodeResolver";
+import { resolveStep23Line } from "@/lib/step23Normalization";
 import { buildLegacyPastBidTemplateBuffer, LEGACY_PAST_BID_ORACLE } from "./fixtures/syntheticTemplate";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -72,6 +73,22 @@ describe("imported STEP 2/3 detail — capture + payload", () => {
     expect(payload.step3Lines).toHaveLength(LEGACY_PAST_BID_ORACLE.step3Detail.length);
     expect(payload.step2Lines.some((l) => l.total === 0)).toBe(false);
     expect(payload.linkedSourceSubtotals.length).toBe(LINKED_DIVISION_ROWS.length);
+  });
+
+  it("payload lines resolve to deterministic codes at render time (Slice 3 labeling)", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const payload = step23LinesForImport(extracted);
+
+    // Unique base (01-0410 → .001) and shared base split by description
+    // (02-9010 "Progress Cleaning - Hired" → .002) — the panel's exact call.
+    const resolved = [...payload.step2Lines, ...payload.step3Lines].map((l) => ({
+      code: l.code,
+      to: resolveStep23Line(l.code, l.description)?.code ?? null,
+    }));
+    expect(resolved).toEqual([
+      { code: "01-0410", to: "01-0410.001" },
+      { code: "02-9010", to: "02-9010.002" },
+    ]);
   });
 });
 
