@@ -328,3 +328,173 @@ export async function buildPastBidTemplateBuffer(): Promise<Buffer> {
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);
 }
+
+// ===========================================================================
+// LEGACY past-bid variant (Import past bids — Phase 2)
+// ===========================================================================
+//
+// Mirrors a REAL pre-app bid (the CARE probe, 2026-06-09):
+//   1. STEP 4 codes are BARE base codes (`09-9000`, no deterministic suffix) —
+//      every dollar line lands on the extractor's ad-hoc path with `rawCode`.
+//   2. The modifier zone carries a hand-typed LUMP SUM in a relabeled slot
+//      (60-1005 shows "Owner's Rep", not "Design Contingency") — `isLump`.
+//   3. The workbook's own "Budget Line Items" sheet maps bare codes to TODAY'S
+//      Procore codes via SUMIF formulas — the deterministic "bridge".
+//   4. The GC/Site-Ops rows are recognizable only by DESCRIPTION (linked tier).
+//
+// Catalog facts the cases rest on (estimate-catalog.json, checked 2026-06-09):
+//   9-99000.000 ← exactly ONE internal code (09-9000.001)   → bridge-unique
+//   8-84000.000 ← TWO internal codes (08-4000.001/.002)     → ambiguous
+//   99-9999     ← no catalog family, no BLI row             → none tier
+
+/** Bare-coded dollar lines. Two share 08-4000 (interior vs exterior storefront). */
+const LEGACY_ITEMS: { code: string; description: string; qty: number; unitPrice: number }[] = [
+  { code: "09-9000", description: "Interior Painting", qty: 400, unitPrice: 10 }, // 4,000 → bridge-unique
+  { code: "08-4000", description: "Aluminum Storefront - Interior", qty: 3, unitPrice: 1_000 }, // 3,000 ┐ ambiguous
+  { code: "08-4000", description: "Aluminum Storefront - Exterior", qty: 5, unitPrice: 1_000 }, // 5,000 ┘ bridge
+  { code: "99-9999", description: "Mystery Scope", qty: 1, unitPrice: 3_000 }, // 3,000 → none
+];
+
+/** STEP 1 rates the legacy bid actually carries (design contingency slot is a LUMP). */
+const LEGACY_RATES: Record<string, number> = {
+  constructionContingency: 0.02,
+  designContingency: 0,
+  buildersRisk: 0,
+  specialInsurance: 0,
+  glInsurance: 0.01,
+  bond: 0,
+  fee: 0.05,
+};
+
+/** The hand-typed lump in the 60-1005 slot, relabeled the way real bids do. */
+const LEGACY_LUMP = { key: "designContingency", baseCode: "60-1005", sheetLabel: "Owner's Rep", value: 7_500 };
+
+const LEGACY_TAKEOFF_SUBTOTAL = LEGACY_ITEMS.reduce((s, it) => s + it.qty * it.unitPrice, 0); // 15,000
+const LEGACY_SUBTOTAL = LEGACY_TAKEOFF_SUBTOTAL + LINKED_TOTAL; // 65,000
+const LEGACY_RATE_MODIFIER_SUM = Object.values(LEGACY_RATES).reduce((s, r) => s + r * LEGACY_SUBTOTAL, 0); // 5,200
+const LEGACY_TOTAL = LEGACY_SUBTOTAL + LEGACY_RATE_MODIFIER_SUM + LEGACY_LUMP.value; // 77,700
+
+export const LEGACY_PAST_BID_ORACLE = {
+  takeoffSubtotal: LEGACY_TAKEOFF_SUBTOTAL, // 15,000
+  linkedDivisionsTotal: LINKED_TOTAL, // 50,000
+  subtotal: LEGACY_SUBTOTAL, // 65,000
+  totalEstimatedCost: LEGACY_TOTAL, // 77,700
+  rates: LEGACY_RATES,
+  /** Every dollar line is ad-hoc: 4 bare items + 10 bare linked rows. */
+  adHocLineItemCount: LEGACY_ITEMS.length + LINKED_ROWS.length, // 14
+  conformingLineItemCount: 0,
+  lump: LEGACY_LUMP,
+  /** What the BLI bridge must derive: bare code → today's Procore code. */
+  bridge: {
+    "09-9000": "9-99000.000", // unique → internal 09-9000.001
+    "08-4000": "8-84000.000", // ambiguous (2 internal candidates)
+  } as Record<string, string>,
+  bridgeUniqueItemId: "09-9000.001",
+  noneCode: "99-9999",
+  /** Linked-tier inputs: bare code + canonical description per linked row. */
+  linkedDescriptions: LINKED_ROWS.map((l) => l.description),
+} as const;
+
+/** Builds the synthetic LEGACY past-bid workbook (.xlsx bytes). */
+export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+
+  // STEP 1 — same scan shape as the modern fixtures.
+  const s1 = wb.addWorksheet(SHEET.step1);
+  s1.getCell("C1").value = "Project Name";
+  s1.getCell("D1").value = "Synthetic Legacy Bid";
+  s1.getCell("C2").value = "Gross SF";
+  s1.getCell("D2").value = SYNTHETIC_INPUTS.squareFootage;
+  s1.getCell("C3").value = "# of Units";
+  s1.getCell("D3").value = SYNTHETIC_INPUTS.unitCount;
+  s1.getCell("C4").value = "Expected Start";
+  s1.getCell("D4").value = SYNTHETIC_INPUTS.startDate;
+  s1.getCell("C5").value = "Expected Finish";
+  s1.getCell("D5").value = SYNTHETIC_INPUTS.finishDate;
+  ESTIMATE_MODIFIERS.forEach((m, i) => {
+    const r = 8 + i;
+    s1.getCell(`F${r}`).value = m.label;
+    s1.getCell(`G${r}`).value = LEGACY_RATES[m.key] ?? 0;
+  });
+
+  // STEP 2 / STEP 3 — section subtotals (real legacy bids still carry these).
+  const s2 = wb.addWorksheet(SHEET.step2);
+  const s3 = wb.addWorksheet(SHEET.step3);
+  let s2Row = 1;
+  let s3Row = 1;
+  for (const link of LINKED_ROWS) {
+    const ws = link.sheet === "step2" ? s2 : s3;
+    const r = link.sheet === "step2" ? s2Row++ : s3Row++;
+    ws.getCell(`H${r}`).value = link.subtotalLabel;
+    ws.getCell(`I${r}`).value = link.value;
+  }
+
+  // STEP 4 — every code is BARE; track row numbers for the BLI SUMIF formulas.
+  const s4 = wb.addWorksheet(SHEET.step4);
+  s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic legacy bid)";
+  let row = 2;
+  const rowOfCode: Record<string, number> = {};
+  const writeItem = (code: string, description: string, qty: number, unitPrice: number) => {
+    s4.getCell(`C${row}`).value = code;
+    s4.getCell(`D${row}`).value = description;
+    s4.getCell(`F${row}`).value = qty;
+    s4.getCell(`H${row}`).value = unitPrice;
+    if (!(code in rowOfCode)) rowOfCode[code] = row; // first occurrence (SUMIF criterion)
+    row++;
+  };
+  for (const it of LEGACY_ITEMS) writeItem(it.code, it.description, it.qty, it.unitPrice);
+  // GC/Site-Ops rows: BARE base code, canonical description, lump value.
+  for (const link of LINKED_ROWS) writeItem(link.itemId.split(".")[0], link.description, 1, link.value);
+
+  const subtotalRow = row;
+  s4.getCell(`H${subtotalRow}`).value = "SUBTOTAL";
+  s4.getCell(`I${subtotalRow}`).value = LEGACY_SUBTOTAL;
+  row++;
+
+  // Modifier zone — BARE codes; the 60-1005 slot is a hand-typed lump with the
+  // sheet's own label ("Owner's Rep"); the rest are rate-driven (F × subtotal).
+  for (const m of ESTIMATE_MODIFIERS) {
+    const base = m.code.split(".")[0];
+    s4.getCell(`C${row}`).value = base;
+    if (m.key === LEGACY_LUMP.key) {
+      s4.getCell(`D${row}`).value = LEGACY_LUMP.sheetLabel;
+      s4.getCell(`I${row}`).value = LEGACY_LUMP.value; // F intentionally EMPTY
+    } else {
+      s4.getCell(`D${row}`).value = m.label;
+      s4.getCell(`F${row}`).value = LEGACY_RATES[m.key] ?? 0;
+      s4.getCell(`I${row}`).value = (LEGACY_RATES[m.key] ?? 0) * LEGACY_SUBTOTAL;
+    }
+    row++;
+  }
+
+  const totalRow = row;
+  s4.getCell(`H${totalRow}`).value = "TOTAL";
+  s4.getCell(`I${totalRow}`).value = LEGACY_TOTAL;
+  s4.getCell(`J${totalRow}`).value = LEGACY_TOTAL / SYNTHETIC_INPUTS.unitCount;
+
+  // Budget Line Items — the workbook's own Procore mapping ("the bridge").
+  // Col A = Procore code, col H = SUMIF whose criterion cell points at a STEP 4
+  // bare-code row. Cached results present (a calculated, saved workbook).
+  const bli = wb.addWorksheet(SHEET.bli);
+  bli.getCell("A1").value = "Cost Code";
+  bli.getCell("H1").value = "Budget Amount";
+  const s4Name = SHEET.step4;
+  const sumif = (criterionRow: number) =>
+    `SUMIF('${s4Name}'!$C$2:$C$${subtotalRow - 1}, '${s4Name}'!C${criterionRow}, '${s4Name}'!$I$2:$I$${subtotalRow - 1})`;
+  bli.getCell("A2").value = "9-99000.000";
+  bli.getCell("H2").value = { formula: sumif(rowOfCode["09-9000"]), result: 4_000 } as ExcelJS.CellFormulaValue;
+  bli.getCell("A3").value = "8-84000.000";
+  bli.getCell("H3").value = { formula: sumif(rowOfCode["08-4000"]), result: 8_000 } as ExcelJS.CellFormulaValue;
+  // A STEP 2 (non-STEP 4) SUMIF — the bridge must ignore it.
+  bli.getCell("A4").value = "1-10000.000";
+  bli.getCell("H4").value = {
+    formula: `SUMIF('${SHEET.step2}'!$C$2:$C$60, '${SHEET.step2}'!C5, '${SHEET.step2}'!$I$2:$I$60)`,
+    result: 8_000,
+  } as ExcelJS.CellFormulaValue;
+  // A shared-formula-only cell (no formula text) — the bridge must skip, not guess.
+  bli.getCell("A5").value = "9-92900.000";
+  bli.getCell("H5").value = { sharedFormula: "H2", result: 0 } as ExcelJS.CellValue;
+
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out);
+}

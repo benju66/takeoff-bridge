@@ -29,6 +29,7 @@ import ExcelJS from "exceljs";
 import type { ProcessedTakeoffRow } from "@/types";
 import { getMonthsBetween } from "./calculations";
 import { ESTIMATE_MODIFIERS, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
+import { RECONCILIATION_TOLERANCE } from "./exporter";
 
 // ---------------------------------------------------------------------------
 // Sheet names (template-canonical)
@@ -43,6 +44,13 @@ export const SHEET = {
 
 /** A STEP 4 cost code, e.g. "03-0000.001" / "60-4000.001". */
 const COST_CODE_RE = /^\d{2}-\d{4}\.\d{3}$/;
+
+/**
+ * A LEGACY STEP 4 cost code — bare base form with no deterministic suffix
+ * (e.g. "03-3000"). Real pre-app bids use these exclusively; they carry the
+ * division + family signal the import normalization flow matches against.
+ */
+const BARE_CODE_RE = /^\d{2}-\d{4}$/;
 
 // ---------------------------------------------------------------------------
 // Typed result shapes
@@ -89,6 +97,13 @@ export interface ExtractedLineItem {
   isAdHoc: boolean;
   /** Source row number on STEP 4 (provenance / debugging). */
   rowNumber: number;
+  /**
+   * The code text as it appears in the sheet's code cell. Equals `itemId` for
+   * conforming lines; for ad-hoc lines it preserves a LEGACY bare base code
+   * (`NN-NNNN`) when present, `""` otherwise — the import normalization flow
+   * needs it to bridge legacy codes to today's catalog.
+   */
+  rawCode: string;
 }
 
 /** One value the spreadsheet itself computes — the thing the engine is proven against. */
@@ -100,6 +115,17 @@ export interface ExtractedModifierOutput {
   rate: number;
   /** The dollar value in the STEP 4 modifier cell (null if the cell has no cached number). */
   total: number | null;
+  /** The label the SHEET shows for this modifier row (legacy bids relabel slots,
+   *  e.g. 60-1005 "Owner's Rep"); `""` when the row is absent. */
+  sheetLabel: string;
+  /**
+   * True when the row's dollar value is a hand-typed LUMP SUM rather than
+   * rate × subtotal (|I − rate×subtotal| > RECONCILIATION_TOLERANCE). Legacy
+   * bids carry these; the import flow records each as an audited override.
+   */
+  isLump: boolean;
+  /** Source row number on STEP 4 (provenance for the override audit trail); 0 when absent. */
+  rowNumber: number;
 }
 
 export interface ExtractedSheetLine {
@@ -165,7 +191,7 @@ export interface ExtractedEstimate {
 // formula text and a strict numeric reading of a cell's cached result.
 // ---------------------------------------------------------------------------
 
-interface CellReading {
+export interface CellReading {
   /** Resolved display value (formula → cached result, Date → ISO date). */
   value: string | number | null;
   /** Formula text without the leading "=", or null for a literal cell. */
@@ -174,7 +200,7 @@ interface CellReading {
   numeric: number | null;
 }
 
-function readCell(ws: ExcelJS.Worksheet | undefined, ref: string): CellReading {
+export function readCell(ws: ExcelJS.Worksheet | undefined, ref: string): CellReading {
   if (!ws) return { value: null, formula: null, numeric: null };
   const v = ws.getCell(ref).value as unknown;
 
@@ -351,7 +377,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
     if (COST_CODE_RE.test(rawCode)) {
       const total = qty * unitPrice;
       const isLinked = isLinkedDivisionRow(rawCode);
-      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r });
+      lineItems.push({ itemId: rawCode, description: text(s4, `D${r}`), qty, unitPrice, total, isLinked, isAdHoc: false, rowNumber: r, rawCode });
       if (isLinked) linkedDivisionValues.push({ itemId: rawCode, total });
       continue;
     }
@@ -377,33 +403,48 @@ function extractStep4(wb: ExcelJS.Workbook): {
       isLinked: false,
       isAdHoc: true,
       rowNumber: r,
+      // Preserve a legacy bare base code (NN-NNNN) so normalization can bridge it.
+      rawCode: BARE_CODE_RE.test(rawCode) ? rawCode : "",
     });
   }
 
   // Modifier dollar cells sit between SUBTOTAL and TOTAL, keyed by their 60-xxxx code.
+  // Legacy bids write the BARE base code (60-1000) where the template writes the
+  // suffixed one (60-1000.001) — match on the base so both shapes extract. The
+  // subtotal is read here (not at return) because lump classification needs it.
+  const step4Subtotal = num(s4, `I${subtotalRow}`);
+  const modifierByBase = new Map(ESTIMATE_MODIFIERS.map((m) => [m.code.split(".")[0], m]));
   const modifierByKey = new Map<string, ExtractedModifierOutput>();
   for (let r = subtotalRow + 1; r < totalRow; r++) {
     const code = text(s4, `C${r}`);
-    const cfg = modifierCodes.get(code);
+    const cfg = modifierCodes.get(code) ?? modifierByBase.get(code);
     if (!cfg) continue;
+    const rate = num(s4, `F${r}`);
+    const total = numOrNull(s4, `I${r}`);
     modifierByKey.set(cfg.key, {
       key: cfg.key,
       code: cfg.code,
       label: cfg.label,
-      rate: num(s4, `F${r}`),
-      total: numOrNull(s4, `I${r}`),
+      rate,
+      total,
+      sheetLabel: text(s4, `D${r}`),
+      // A hand-typed lump: the row's cached dollar is NOT rate × subtotal.
+      isLump: total !== null && Math.abs(total - rate * step4Subtotal) > RECONCILIATION_TOLERANCE,
+      rowNumber: r,
     });
   }
   // Preserve the canonical 7-modifier order.
   const modifiers = ESTIMATE_MODIFIERS.map(
-    (m) => modifierByKey.get(m.key) ?? { key: m.key, code: m.code, label: m.label, rate: 0, total: null }
+    (m) =>
+      modifierByKey.get(m.key) ??
+      { key: m.key, code: m.code, label: m.label, rate: 0, total: null, sheetLabel: "", isLump: false, rowNumber: 0 }
   );
 
   return {
     lineItems,
     adHocLineItems,
     oracle: {
-      step4Subtotal: num(s4, `I${subtotalRow}`),
+      step4Subtotal,
       step4SubtotalRow: subtotalRow,
       totalEstimatedCost: num(s4, `I${totalRow}`),
       step4TotalRow: totalRow,

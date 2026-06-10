@@ -54,3 +54,7 @@ next-env.d.ts
 
 # python recovery scripts
 /*.py
+
+# real past-bid workbooks for import testing (confidential pricing).
+/fixtures/past-bids/*
+!/fixtures/past-bids/.gitkeep
