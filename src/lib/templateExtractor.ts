@@ -485,7 +485,11 @@ function extractSheetLines(ws: ExcelJS.Worksheet | undefined): ExtractedSheetLin
   const lines: ExtractedSheetLine[] = [];
   for (let r = 1; r <= ws.rowCount; r++) {
     const code = text(ws, `C${r}`);
-    if (!COST_CODE_RE.test(code)) continue;
+    // Legacy bids write BARE base codes on STEP 2/3 (the CARE probe found
+    // zero suffixed codes there) — accept both shapes so an imported bid's
+    // hand-authored GC/Site-Ops detail survives. Modern templates carry no
+    // bare codes, so their extraction is byte-identical.
+    if (!COST_CODE_RE.test(code) && !BARE_CODE_RE.test(code)) continue;
     const qty = num(ws, `F${r}`);
     const rate = num(ws, `H${r}`);
     lines.push({

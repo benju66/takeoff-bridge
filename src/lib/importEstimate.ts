@@ -25,7 +25,7 @@
  */
 
 import type { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
-import type { Project, ProjectEstimate, CostCodeMapEntry } from "@/types/db";
+import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
 // otherwise the workspace page (which imports the pure linkedTotalsFromRows) would
@@ -257,6 +257,27 @@ export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): Pr
     uom: master?.targetUom ?? row.uom,
     isMapped: isLinkedDivisionRow(itemId) || procoreCode !== "",
     needsReview: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Imported STEP 2/3 detail (architect-approved 2026-06-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * The `imported_step23_lines` JSONB payload: the bid's own hand-authored
+ * STEP 2/3 lines (dollar-carrying only — hand-authored sheets are full of
+ * zero template rows that would drown the read-only panels) plus the bid's
+ * section subtotals for tie context. Captured once at import save; the
+ * workspace renders it read-only in place of the parametric GC/Site-Ops
+ * calculators, which would otherwise fabricate default-derived numbers.
+ */
+export function step23LinesForImport(extracted: ExtractedEstimate): ImportedStep23Lines {
+  const dollarLines = (lines: ExtractedEstimate["step2Lines"]) => lines.filter((l) => l.total !== 0);
+  return {
+    step2Lines: dollarLines(extracted.step2Lines),
+    step3Lines: dollarLines(extracted.step3Lines),
+    linkedSourceSubtotals: extracted.oracle.linkedSourceSubtotals,
   };
 }
 

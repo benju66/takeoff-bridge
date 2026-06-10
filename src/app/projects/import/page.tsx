@@ -16,7 +16,7 @@ import {
   enrichImportedRows, importSummaryRates, projectFromExtract, estimateTotalsForImport,
   checkImportTieOut, linkedTotalsFromRows, buildReverseProcoreMap, suggestImportMappings,
   applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
-  catalogCostCodeEntries,
+  catalogCostCodeEntries, step23LinesForImport,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import { validateAssignInput } from "@/lib/assignCode";
@@ -25,7 +25,7 @@ import { getDivisionCode } from "@/lib/division";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
-  recordEstimateOverride, recordClassificationResolution,
+  recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -203,6 +203,10 @@ export default function ImportPastEstimatePage() {
       for (const intent of parsed.lumpIntents) {
         await recordEstimateOverride(id, intent.field, intent.computedValue, intent.overrideValue, intent.reason);
       }
+
+      // The bid's own STEP 2/3 line detail — what the workspace GC/Site-Ops
+      // pages show read-only instead of fabricated parametric defaults.
+      await saveImportedStep23Lines(id, step23LinesForImport(parsed.extracted));
 
       // Confirmed mappings feed the recurring-bid memory (Phase 3 consumes
       // classification_history). Training data: fire-and-forget.
