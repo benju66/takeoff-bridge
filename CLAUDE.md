@@ -24,6 +24,8 @@ Always run the test suite after code changes and confirm green before committing
 ## Shell & Encoding Rules
 - This is a Windows environment: do NOT use emoji in PowerShell scripts (cp1252 mangles them) and do NOT mix PowerShell here-string syntax inside the Bash tool.
 - For commands likely to exceed ~965 bytes, write a script file instead of inlining.
+- Multi-line git commit messages: write the message to a temp file and commit with
+  `git commit -F <file>`. Never put multi-line commit text inline in the shell.
 
 ## Excel/XML Exports
 When generating or parsing spreadsheet XML, ensure cells are written in ascending column order to avoid corrupt files; double-check column-letter parsing.
