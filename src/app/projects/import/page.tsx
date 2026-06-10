@@ -57,10 +57,17 @@ export default function ImportPastEstimatePage() {
    * any time before save — approving the wrong code is never one-way.
    */
   const [accepted, setAccepted] = useState<Map<string, string>>(new Map());
-  /** Working rows = original enriched rows + current acceptances. */
+  /**
+   * The estimator's UOM corrections: rowId → unit (uppercased). Same escape-
+   * hatch pattern as `accepted` — an entry is a deliberate correction of a
+   * wrong as-bid unit; clearing it restores the bid's own value. Untouched
+   * rows always save exactly as bid.
+   */
+  const [uomOverrides, setUomOverrides] = useState<Map<string, string>>(new Map());
+  /** Working rows = original enriched rows + current acceptances + UOM edits. */
   const rows = useMemo(
-    () => (parsed ? applyAcceptedMappings(parsed.rows, accepted) : []),
-    [parsed, accepted]
+    () => (parsed ? applyAcceptedMappings(parsed.rows, accepted, uomOverrides) : []),
+    [parsed, accepted, uomOverrides]
   );
 
   // Editable project metadata (defaults; the bid drives sqft/units/dates/rates).
@@ -99,6 +106,7 @@ export default function ImportPastEstimatePage() {
     setError(null);
     setParsed(null);
     setAccepted(new Map());
+    setUomOverrides(new Map());
     setParsing(true);
     try {
       const buffer = await file.arrayBuffer();
@@ -163,6 +171,22 @@ export default function ImportPastEstimatePage() {
     }
     setError(null);
     setAccepted((prev) => new Map(prev).set(rowId, itemId));
+  };
+
+  /**
+   * Correct one row's UOM (empty input = clear the correction → back to the
+   * bid's own value). Free-text on purpose: real bids carry units the catalog
+   * doesn't (STOP, FLR, GAL, %) and a correction must be able to say them.
+   */
+  const setUomOverride = (rowId: string, value: string) => {
+    const uom = value.trim().toUpperCase();
+    setUomOverrides((prev) => {
+      const next = new Map(prev);
+      const original = parsed?.rows.find((r) => r.id === rowId)?.uom ?? "";
+      if (uom === "" || uom === original) next.delete(rowId);
+      else next.set(rowId, uom);
+      return next;
+    });
   };
 
   /** Withdraw a confirmation — the row returns to its suggested/pending state. */
@@ -258,6 +282,11 @@ export default function ImportPastEstimatePage() {
   const reviewRows = useMemo(
     () => (parsed ? rows.filter((r) => parsed.suggestions.has(r.id)) : []),
     [parsed, rows]
+  );
+  /** The bid's ORIGINAL unit per row (for the "corrected" cue + revert hint). */
+  const originalUomById = useMemo(
+    () => new Map((parsed?.rows ?? []).map((r) => [r.id, r.uom])),
+    [parsed]
   );
   const pendingHighConfidence = parsed
     ? reviewRows.filter((r) => {
@@ -405,8 +434,11 @@ export default function ImportPastEstimatePage() {
                           row={r}
                           suggestion={parsed.suggestions.get(r.id)!}
                           disabled={saving}
+                          uomEdited={uomOverrides.has(r.id)}
+                          asBidUom={originalUomById.get(r.id) ?? ""}
                           onAccept={(itemId) => acceptMapping(r.id, itemId)}
                           onUnaccept={() => unacceptMapping(r.id)}
+                          onUomChange={(value) => setUomOverride(r.id, value)}
                         />
                       ))}
                     </tbody>
@@ -530,34 +562,74 @@ function ReviewRow({
   row,
   suggestion,
   disabled,
+  uomEdited,
+  asBidUom,
   onAccept,
   onUnaccept,
+  onUomChange,
 }: {
   row: ProcessedTakeoffRow;
   suggestion: MappingSuggestion;
   disabled: boolean;
+  /** True when the estimator has corrected this row's UOM (override active). */
+  uomEdited: boolean;
+  /** The bid's ORIGINAL unit (pre-correction), for the cue + revert hint. */
+  asBidUom: string;
   onAccept: (itemId: string) => void;
   onUnaccept: () => void;
+  /** Commit a UOM correction; empty input restores the bid's own value. */
+  onUomChange: (value: string) => void;
 }) {
   const [freeEntry, setFreeEntry] = useState("");
   const [entryError, setEntryError] = useState<string | null>(null);
+  /** Local UOM draft while typing; null = not editing (show the row's value). */
+  const [uomDraft, setUomDraft] = useState<string | null>(null);
   const style = chipFor(suggestion);
   const amount = row.matchedQty * row.unitPrice;
   const comment = row.customFields?.["Comment"];
-  // As-bid UOM + the display-only mismatch marker (bid vs catalog for the
-  // confirmed code). Never blocks; the UOM is editable later in the grid.
+  // As-bid UOM, EDITABLE (architect-approved 2026-06-10): a correction here
+  // fixes a wrong unit before it enters the project + pricing database.
+  // Untouched = saves exactly as bid; clearing the box restores the bid's
+  // value. The amber marker is the display-only bid-vs-catalog disagreement.
   const mismatch = uomMismatch(row);
+  const commitUomDraft = () => {
+    if (uomDraft !== null) {
+      onUomChange(uomDraft);
+      setUomDraft(null);
+    }
+  };
   const uomCell = (
-    <td className="px-3 py-2 text-center font-mono text-foreground whitespace-nowrap">
-      {row.uom || "—"}
-      {mismatch && (
-        <span
-          title={`As bid: ${mismatch.bid} — catalog default for ${row.itemId}: ${mismatch.catalog}. The bid's UOM is kept (you can edit it in the grid after saving).`}
-          className="inline-flex align-middle ml-1 text-amber-500 cursor-help"
-        >
-          <AlertTriangle size={11} />
-        </span>
-      )}
+    <td className="px-3 py-2 text-center whitespace-nowrap">
+      <span className="inline-flex items-center gap-1">
+        <input
+          type="text"
+          value={uomDraft ?? row.uom}
+          placeholder="—"
+          disabled={disabled}
+          onChange={(e) => setUomDraft(e.target.value)}
+          onBlur={commitUomDraft}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitUomDraft();
+            if (e.key === "Escape") setUomDraft(null);
+          }}
+          className={`w-14 bg-transparent border rounded px-1.5 py-0.5 font-mono text-[11px] text-center outline-none focus:ring-1 focus:ring-blue-500 ${
+            uomEdited ? "border-violet-400 dark:border-violet-700 text-violet-700 dark:text-violet-300" : "border-grid-border text-foreground"
+          }`}
+          title={
+            uomEdited
+              ? `Corrected — the bid says ${asBidUom || "(blank)"}. Clear the box to restore it.`
+              : "As-bid unit. Edit to correct a wrong unit; untouched rows save exactly as bid."
+          }
+        />
+        {mismatch && (
+          <span
+            title={`As bid: ${mismatch.bid} — catalog default for ${row.itemId}: ${mismatch.catalog}. The bid's UOM is kept unless you correct it.`}
+            className="inline-flex text-amber-500 cursor-help"
+          >
+            <AlertTriangle size={11} />
+          </span>
+        )}
+      </span>
     </td>
   );
   const descriptionCell = (

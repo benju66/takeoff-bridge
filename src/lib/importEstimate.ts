@@ -383,17 +383,28 @@ export function overrideMapFromIntents(intents: readonly LumpOverrideIntent[]): 
 
 /**
  * Derives the working row set from the ORIGINAL enriched rows + the estimator's
- * current acceptances (rowId → confirmed itemId). The originals are never
- * mutated, so changing or withdrawing a confirmation is just editing the map —
- * the architect-required "I approved the wrong one" escape hatch.
+ * current acceptances (rowId → confirmed itemId) + their UOM corrections
+ * (rowId → unit, architect-approved 2026-06-10: a hand-authored bid can carry
+ * a wrong unit; fixing it at the review gate keeps the pricing database clean
+ * at the source). The originals are never mutated, so changing or withdrawing
+ * either kind of edit is just editing a map — the architect-required
+ * "I approved the wrong one" escape hatch. A UOM correction is applied AFTER
+ * the mapping, so it wins over both the as-bid value and a catalog blank-fill;
+ * UOM is non-financial, so dollars and the tie-out never move.
  */
 export function applyAcceptedMappings(
   originals: readonly ProcessedTakeoffRow[],
-  accepted: ReadonlyMap<string, string>
+  accepted: ReadonlyMap<string, string>,
+  uomOverrides?: ReadonlyMap<string, string>
 ): ProcessedTakeoffRow[] {
   return originals.map((r) => {
     const itemId = accepted.get(r.id);
-    return itemId ? applyImportMapping(r, itemId) : r;
+    let row = itemId ? applyImportMapping(r, itemId) : r;
+    const uom = uomOverrides?.get(r.id);
+    if (uom && uom !== row.uom) {
+      row = { ...row, uom };
+    }
+    return row;
   });
 }
 

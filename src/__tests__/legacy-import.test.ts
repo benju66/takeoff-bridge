@@ -291,6 +291,38 @@ describe("acceptance map â€” confirm, change, withdraw (architect escape ha
     expect(painting.needsReview).toBe(true);
   });
 
+  it("UOM corrections layer over acceptances and are fully revertible (architect 2026-06-10)", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const originals = enrichImportedRows(extracted);
+    const trusses = originals.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
+    expect(trusses.uom).toBe("SF"); // as bid
+
+    // Correction wins over the as-bid value — and survives a code acceptance
+    // (applied AFTER the mapping, so the catalog can't reassert its unit).
+    const corrected = applyAcceptedMappings(
+      originals,
+      new Map([[trusses.id, "06-1753.001"]]),
+      new Map([[trusses.id, "EA"]])
+    ).find((r) => r.id === trusses.id)!;
+    expect(corrected.uom).toBe("EA");
+    expect(corrected.itemId).toBe("06-1753.001");
+    // Non-financial: the dollars never move.
+    expect(corrected.unitPrice).toBe(trusses.unitPrice);
+    expect(corrected.matchedQty).toBe(trusses.matchedQty);
+
+    // Clearing the correction restores the bid's own unit; originals untouched.
+    const reverted = applyAcceptedMappings(originals, new Map(), new Map())
+      .find((r) => r.id === trusses.id)!;
+    expect(reverted.uom).toBe("SF");
+    expect(trusses.uom).toBe("SF");
+
+    // A correction on a BLANK as-bid unit also sticks (Mystery Scope has none).
+    const mystery = originals.find((r) => r.description === "Mystery Scope")!;
+    const filled = applyAcceptedMappings(originals, new Map(), new Map([[mystery.id, "LS"]]))
+      .find((r) => r.id === mystery.id)!;
+    expect(filled.uom).toBe("LS");
+  });
+
   it("refuses a linked code already claimed by an acceptance or a born-linked row", async () => {
     const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
     const originals = enrichImportedRows(extracted);
