@@ -143,6 +143,24 @@ tie $0.00.
 - `similar`-tier lines (43 on CARE) are deliberately NOT auto-accepted; they save flagged and are
   finished in Flags. Linked-tier matching is exact-description; drift falls back to `similar`.
 
+## Post-merge follow-up (2026-06-10, same day): truthful STEP 2/3 for imports
+The architect's first saved CARE import exposed that the workspace GC/Site-Ops pages rendered the
+PARAMETRIC calculators (fabricated defaults like "Safety $5,000") and that auto-save overwrote the
+as-imported section totals with default-derived numbers. Fixed in 6 commits (`8ca71e8`…`342c378`,
+plan `~/.claude/plans/rustling-petting-ocean.md`):
+- NEW `project_estimates.imported_step23_lines` JSONB (architect-approved; live ALTER applied,
+  advisors unchanged; outside the save_estimate RPC's upsert list so auto-save can't clobber it).
+- Extractor accepts bare codes on STEP 2/3 (CARE: 19 GC + 16 Site-Ops dollar lines, verified);
+  `step23LinesForImport` payload persisted at import save (awaited, fail-loud).
+- `ImportedStep23Panel` replaces the parametric panels for `isImported` — read-only as-bid lines,
+  section totals, delta flag when the bid's own detail doesn't sum; "re-import to capture detail"
+  fallback for imports saved before the column existed (incl. CARE save #1 → re-import it).
+- Persisted GC/Site-Ops totals now derive from the linked rows for imports (overwrite bug dead).
+- Reconciliation gates on the linked-row basis (`importedLinkedBasis`); export of imported bids is
+  BLOCKED with an explicit reason at BOTH the UI handlers and inside all three generators.
+Suite 465 pass (46 files); goldens incl. CARE tie $0.00. **Architect action: re-import CARE** so
+its STEP 2/3 detail is captured, then verify both pages + the disabled export.
+
 ## Next phase (run in a FRESH session)
 **Phase 3 — pricing/learning harvest** (`docs/plans/import-past-bids.md`): mine imported line items
 for historical unit prices (rate-card sharpening) and finally CONSUME `classification_history`
