@@ -1,7 +1,8 @@
 # Import Past Bids — Phase 3 Slice 3: STEP 2/3 Normalization + Staff-Rate Mining
-_2026-06-10 · status: APPROVED — forks locked by the architect (F-A: app defs only;
-F-B: qty ≠ 0 AND rate ≠ 0, excluding %-UOM rows) · branch `import-past-bids-slice-3`
-(phase-3 branch was fast-forward-merged to main `105eb2f` at session start, architect-approved)_
+_2026-06-10 · status: BUILT — all slices + /code-review fixes committed on
+`import-past-bids-slice-3` (`4a155ba`/`ce54a06`/`6c83444`/`4383930`); suite 505 pass / 51
+files; forks locked (F-A: app defs only; F-B: qty ≠ 0 AND rate ≠ 0, excluding %-UOM rows) ·
+build status: docs/handoffs/import-past-bids-step23-normalization-kickoff.md_
 
 ## Goal
 Imported bids' STEP 2/3 lines are stored verbatim with legacy bare codes

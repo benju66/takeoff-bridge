@@ -76,3 +76,51 @@ Procore rollup for export-of-imports (still out of scope here).
   the architect's say-so.
 
 Stop at green + committed + handoff (update `[[import-past-bids-plan]]` + this doc's status).
+
+---
+
+# BUILD STATUS — Slice 3 COMPLETE (2026-06-10, branch `import-past-bids-slice-3`, NOT pushed)
+
+Precondition handled at session start: the phase-3 branch was NOT merged; the architect chose
+"merge then build" → main fast-forwarded to `105eb2f` (zero conflicts), Slice 3 built on a
+fresh branch off main. Plan of record: `docs/plans/import-past-bids-phase-3-slice-3.md`
+(architect-approved; forks locked: **F-A app-defs-only resolver** — the probe proved the BLI
+bridge 100% redundant on the family AND unable to split shared bases; **F-B observations =
+qty ≠ 0 AND rate ≠ 0, %-UOM rows excluded**). **No DDL, no JSONB writes anywhere.**
+
+## Probe results (scripts/slice3-probe-step23-sumifs.js, read-only)
+CARE BLI: 34 STEP 2 + 38 STEP 3 SUMIF criteria (the "~73"; +2 #REF!-broken), zero conflicts,
+all 72 agreeing with the app defs' procoreCodes. Shared bases (01-5110, 02-9010, 02-9200,
+02-4100) split by exact normalized description — plus the def label with its trailing
+parenthetical stripped ("Temp Office (Monthly)"). CARE resolves STEP 2 35/35, STEP 3 41/42;
+the 1 unresolved is the hand-inserted "Demolition - Openings in CMU" (stays bare, correct).
+
+## What shipped (4 commits)
+- `4a155ba` **Slice 3A — pure resolver**: NEW `src/lib/step23Normalization.ts` —
+  `resolveStep23Line` (unique base → 1:1; shared base → exact-description, exactly-one-hit;
+  else null, never guesses) built from the SAME constants arrays the calculators read (incl.
+  EQUIPMENT_DEFAULTS — deliberately NOT RATE_LINE_DEFS, which omits equipment and classes
+  02-4100.002 as catalog); `step23Observations` → Slice 2's `PriceObservation` shape keyed by
+  the RESOLVED code, `aggregatePriceHistory` reused unchanged.
+- `ce54a06` **Slice 3B — panel labels**: ImportedStep23Panel resolves AT RENDER TIME; violet
+  "→ 01-0410.001" (app label in tooltip) under the as-bid code; unresolved → amber "unmapped".
+- `6c83444` **Slice 3C — mining on /rates**: db.ts `getImportedStep23History()` (read-only,
+  malformed JSONB skipped); second fail-soft load → SEPARATE `step23History` map (never mixes
+  with catalog observations); shared `HistoryStatLine` renders both reports with the SAME
+  UOM-gated ADOPT → existing audited `updateRateCardEntry` (confirm, MANUAL stamp). Lump-sum
+  lines have no card row → no ADOPT surface by construction; staff HR lines are the marquee.
+- `4383930` **/code-review fixes**: step3Lines added to the payload shape gate; finite guards
+  in `isMinableLine` (JSON null !== 0); ADOPT tooltip regained the line code.
+
+Resting state: **suite 505 pass / 51 files**, goldens McKenna + synthetic + CARE tie $0.00,
+tsc + next build clean. Branch NOT merged to main, nothing pushed.
+
+## Architect next steps
+1. e2e: import CARE → workspace GC/Site-Ops pages show "→ code" labels (one "unmapped" on the
+   CMU line) → /rates staff rows show the violet "As-bid GC/Site-Ops rates" line + ADOPT.
+2. Merge `import-past-bids-slice-3` → main (fast-forward); push when ready.
+3. **Start the backlog imports** (CARE + McKenna + everything) — the pipeline is finished.
+
+## Carried forward (unchanged)
+Granular GC rollup / export-of-imports; lump-override mining; archive & comparison; catalog
+manager; Permits section; master-template follow-up for the 6 manual codes.
