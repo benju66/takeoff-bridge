@@ -75,12 +75,15 @@ const currency = new Intl.NumberFormat("en-US", {
  */
 function HistoryStatLine({
   stat,
+  lineCode,
   unit,
   sourceNote,
   disabled,
   onAdopt,
 }: {
   stat: PriceHistoryStat;
+  /** The card row's code — names the ADOPT target in the button tooltip. */
+  lineCode: string;
   /** The line def's unit — gates ADOPT (prices are only adoptable within a UOM). */
   unit: string;
   /** Tooltip lead-in naming the observation source. */
@@ -107,7 +110,7 @@ function HistoryStatLine({
           onClick={() => onAdopt(stat)}
           disabled={disabled}
           className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-violet-300 dark:border-violet-800 hover:bg-violet-100 dark:hover:bg-violet-950/40 disabled:opacity-40 transition-colors cursor-pointer"
-          title={`Adopt ${currency.format(stat.median)} as the company default`}
+          title={`Adopt ${currency.format(stat.median)} as the company default for ${lineCode}`}
         >
           Adopt
         </button>
@@ -493,6 +496,7 @@ export default function RateCardDashboard() {
                                   <HistoryStatLine
                                     key={`catalog-${stat.uom || "(none)"}`}
                                     stat={stat}
+                                    lineCode={entry.lineCode}
                                     unit={def?.unit ?? ""}
                                     sourceNote="As-bid prices"
                                     disabled={isSaving}
@@ -506,6 +510,7 @@ export default function RateCardDashboard() {
                                   <HistoryStatLine
                                     key={`step23-${stat.uom || "(none)"}`}
                                     stat={stat}
+                                    lineCode={entry.lineCode}
                                     unit={def?.unit ?? ""}
                                     sourceNote="As-bid GC/Site-Ops rates"
                                     disabled={isSaving}

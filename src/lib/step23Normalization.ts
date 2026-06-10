@@ -134,7 +134,15 @@ export interface Step23HistorySource {
  */
 function isMinableLine(line: ImportedSheetLine): boolean {
   const uom = (line.uom ?? "").trim();
-  return line.qty !== 0 && line.rate !== 0 && uom !== "%";
+  // Finite guards: JSON can carry null where a number belongs (null !== 0 is
+  // true) — a corrupt payload must not mint a junk observation.
+  return (
+    Number.isFinite(line.qty) &&
+    line.qty !== 0 &&
+    Number.isFinite(line.rate) &&
+    line.rate !== 0 &&
+    uom !== "%"
+  );
 }
 
 /**

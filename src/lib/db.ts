@@ -797,7 +797,8 @@ export async function getImportedStep23History(): Promise<Step23HistorySource[]>
       payload == null ||
       typeof payload !== "object" ||
       Array.isArray(payload) ||
-      !Array.isArray((payload as ImportedStep23Lines).step2Lines)
+      !Array.isArray((payload as ImportedStep23Lines).step2Lines) ||
+      !Array.isArray((payload as ImportedStep23Lines).step3Lines)
     ) {
       continue;
     }

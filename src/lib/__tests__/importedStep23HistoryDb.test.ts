@@ -36,6 +36,9 @@ describe("getImportedStep23History", () => {
         // Malformed payloads are skipped (advisory report), never thrown over.
         { imported_step23_lines: { bogus: true }, projects: null },
         { imported_step23_lines: [1, 2], projects: null },
+        // BOTH line arrays must be present — a half-shaped payload would blow
+        // up step23Observations' spread downstream.
+        { imported_step23_lines: { step2Lines: [], linkedSourceSubtotals: [] }, projects: null },
       ],
       error: null,
     });

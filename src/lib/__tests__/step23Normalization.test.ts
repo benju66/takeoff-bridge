@@ -109,12 +109,15 @@ describe("step23Observations (fork F-B: carried + priced lines only)", () => {
     ]);
   });
 
-  it("skips zero-qty template rows, zero rates, and %-UOM pseudo-rates", () => {
+  it("skips zero-qty template rows, zero rates, %-UOM pseudo-rates, and non-finite values", () => {
     const out = step23Observations([
       source([
         line({ code: "01-0420", description: "Superintendent", qty: 0, rate: 110 }),
         line({ code: "01-0610", description: "Safety Consultant", qty: 0.0002, rate: 16_000_000, uom: "%" }),
         line({ code: "02-9200", description: "Survey & Layout - Floor Scanning", qty: 1, rate: 0, uom: "LS" }),
+        // JSON can carry null where a number belongs — never a junk observation.
+        line({ qty: null as unknown as number }),
+        line({ rate: null as unknown as number }),
       ]),
     ]);
     expect(out).toEqual([]);
