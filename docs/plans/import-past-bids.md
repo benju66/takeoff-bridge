@@ -115,11 +115,20 @@ Flow: **Upload → Extract → Enrich → Tie-out gate → Save as project.**
 
 ---
 
-## Phase 2 — Archive & comparison
+## Phase 2 — RE-SCOPED → Legacy-bid import & code normalization (BUILT 2026-06-09)
 
-Imported bids become baselines. Turn on the already-planned **Estimate Versions & Comparison** feature
-(`[[estimate-versions-feature]]`; the `estimate_snapshots` table is built and unused) — searchable past
-bids and a side-by-side Δ-vs-baseline view. UI-leaning; minimal/no schema work.
+> **Architect redirect (2026-06-09):** comparison deferred — "we need to focus on importing past
+> project estimates so we have something to compare." Archive & comparison moves to a later phase
+> (the `estimate_snapshots` plumbing is unchanged and every import still writes a milestone snapshot).
+
+Phase 2 as built (branch `import-past-bids-phase-2`, status in
+`docs/handoffs/import-past-bids-phase-2-kickoff.md`): real pre-app bids carry **bare base codes**
+and **hand-typed lump-sum modifiers**. The importer now (1) preserves bare codes (`rawCode`),
+(2) derives the workbook's own bare→Procore mapping from its BLI SUMIF formulas (`legacyBridge.ts`),
+(3) suggests deterministic codes (bridge > linked > similar > none) that the estimator confirms on
+the import page (accept-all for high-confidence; leftovers → Flags), (4) honors lump modifiers as
+append-only audited overrides (original label + provenance in the reason), and (5) proves the real
+CARE bid ties subtotal AND grand total to the cent (golden-care, local-only).
 
 ## Phase 3 — Pricing / learning harvest
 
