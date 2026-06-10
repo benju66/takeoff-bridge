@@ -16,7 +16,13 @@ import {
   buildReverseProcoreMap,
   suggestImportMappings,
   applyImportMapping,
+  lumpOverridesFromExtract,
+  overrideMapFromIntents,
+  importSummaryRates,
+  linkedTotalsFromRows,
+  checkImportTieOut,
 } from "@/lib/importEstimate";
+import { computeTakeoffSummary } from "@/lib/calculations";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "@/lib/costCodeResolver";
 import {
@@ -192,5 +198,93 @@ describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
     const linked = applyImportMapping(gc, "01-0000.001");
     expect(linked.isMapped).toBe(true);
     expect(linked.itemId).toBe("01-0000.001");
+  });
+});
+
+describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
+  beforeEach(() => primeCostCodeResolverFromCatalog());
+  afterEach(() => resetCostCodeResolver());
+
+  it("builds one intent per lump, carrying the legacy label + provenance", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const intents = lumpOverridesFromExtract(extracted, "legacy-bid.xlsx");
+
+    expect(intents).toHaveLength(1);
+    const [intent] = intents;
+    expect(intent.field).toBe(LEGACY_PAST_BID_ORACLE.lump.key);
+    expect(intent.overrideValue).toBe(LEGACY_PAST_BID_ORACLE.lump.value);
+    expect(intent.computedValue).toBe(0); // rate cell is empty → engine computes 0
+    expect(intent.reason).toContain(LEGACY_PAST_BID_ORACLE.lump.sheetLabel);
+    expect(intent.reason).toContain("legacy-bid.xlsx");
+    expect(intent.reason).toMatch(/STEP 4 r\d+/);
+
+    expect(overrideMapFromIntents(intents)).toEqual({
+      [LEGACY_PAST_BID_ORACLE.lump.key]: LEGACY_PAST_BID_ORACLE.lump.value,
+    });
+  });
+
+  it("is inert for modern rate-driven bids", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildPastBidTemplateBuffer());
+    expect(lumpOverridesFromExtract(extracted, "modern.xlsx")).toHaveLength(0);
+  });
+
+  it("ties the legacy GRAND TOTAL to the cent — before and after linked mappings", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const rates = importSummaryRates(extracted.inputs);
+    const overrides = overrideMapFromIntents(lumpOverridesFromExtract(extracted, "legacy-bid.xlsx"));
+
+    // BEFORE any mapping: every line is an ordinary ad-hoc row; no linked totals.
+    const rows = enrichImportedRows(extracted);
+    const before = computeTakeoffSummary(
+      rows,
+      extracted.inputs.squareFootage,
+      extracted.inputs.unitCount,
+      rates,
+      linkedTotalsFromRows(rows),
+      overrides
+    );
+    const tieBefore = checkImportTieOut(before, extracted.oracle);
+    expect(tieBefore.deltaSubtotal).toBe(0);
+    expect(tieBefore.deltaTotal).toBe(0);
+    expect(tieBefore.ok).toBe(true);
+
+    // AFTER mapping the 10 GC/Site-Ops rows to linked itemIds: the engine
+    // excludes their typed qty×price and counts linkedTotalsFromRows instead —
+    // the totals must NOT move (the slice-4 review flow rests on this).
+    const linkedByDesc = new Map(
+      ["General Conditions", "Supervision", "Site Operations", "Demolition", "Final Cleaning",
+        "SWPPP Permit", "Survey and Layout", "Building and Site Services", "Site Equipment",
+        "Special Inspections"].map((d, i) =>
+        [d, ["01-0000.001", "01-0400.002", "02-0000.001", "02-4100.002", "02-9005.003",
+          "02-9070.004", "02-9200.005", "02-9300.006", "02-9400.007", "02-9500.008"][i]]
+      )
+    );
+    const mappedRows = rows.map((r) =>
+      linkedByDesc.has(r.description) ? applyImportMapping(r, linkedByDesc.get(r.description)!) : r
+    );
+    const after = computeTakeoffSummary(
+      mappedRows,
+      extracted.inputs.squareFootage,
+      extracted.inputs.unitCount,
+      rates,
+      linkedTotalsFromRows(mappedRows),
+      overrides
+    );
+    const tieAfter = checkImportTieOut(after, extracted.oracle);
+    expect(tieAfter.deltaSubtotal).toBe(0);
+    expect(tieAfter.deltaTotal).toBe(0);
+    expect(tieAfter.ok).toBe(true);
+
+    // Without the lump override the total must NOT tie — proving the override
+    // is what carries the as-bid dollars (not a coincidence of the fixture).
+    const withoutLump = computeTakeoffSummary(
+      rows,
+      extracted.inputs.squareFootage,
+      extracted.inputs.unitCount,
+      rates,
+      linkedTotalsFromRows(rows)
+    );
+    expect(checkImportTieOut(withoutLump, extracted.oracle).ok).toBe(false);
+    expect(checkImportTieOut(withoutLump, extracted.oracle).deltaTotal).toBe(-LEGACY_PAST_BID_ORACLE.lump.value);
   });
 });

@@ -24,7 +24,7 @@
  *    independent — see src/lib/cascade.ts). Procore rollup sums them into one code.
  */
 
-import type { ProcessedTakeoffRow } from "@/types";
+import type { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
 import type { Project, ProjectEstimate, CostCodeMapEntry } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
@@ -244,6 +244,53 @@ export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): Pr
     isMapped: isLinkedDivisionRow(itemId) || procoreCode !== "",
     needsReview: false,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Lump-sum modifiers → audited overrides (Phase 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One legacy lump-sum modifier, expressed as an override INTENT — the exact
+ * arguments `recordEstimateOverride` takes. Architect-locked (2026-06-09):
+ * every lump is LOGGED as an immutable, queryable record carrying its original
+ * sheet label, amount, and source (file + row), because recurring items like
+ * "Owner's Rep" will appear across hundreds of bids and Phase 3 mines them.
+ */
+export interface LumpOverrideIntent {
+  /** A TakeoffSummary modifier key (member of OVERRIDABLE_SUMMARY_FIELDS). */
+  field: string;
+  /** What the engine computes from the bid's rate (the audit-trail baseline). */
+  computedValue: number;
+  /** The hand-typed as-bid dollar that must be honored. */
+  overrideValue: number;
+  /** Carries the legacy label + provenance into the append-only audit trail. */
+  reason: string;
+}
+
+/**
+ * Maps every lump-classified modifier row to an override intent. Inert for
+ * modern rate-driven bids (no `isLump` rows → empty array → no overrides).
+ */
+export function lumpOverridesFromExtract(
+  extracted: ExtractedEstimate,
+  fileName: string
+): LumpOverrideIntent[] {
+  return extracted.oracle.modifiers
+    .filter((m) => m.isLump && m.total !== null)
+    .map((m) => ({
+      field: m.key,
+      computedValue: m.rate * extracted.oracle.step4Subtotal,
+      overrideValue: m.total as number,
+      reason: `Imported as-bid lump "${m.sheetLabel || m.label}" (STEP 4 r${m.rowNumber}) from ${fileName}`,
+    }));
+}
+
+/** Collapses intents to the `overrides` map computeTakeoffSummary consumes. */
+export function overrideMapFromIntents(intents: readonly LumpOverrideIntent[]): EstimateOverrideMap {
+  const map: EstimateOverrideMap = {};
+  for (const i of intents) map[i.field] = i.overrideValue;
+  return map;
 }
 
 /**
