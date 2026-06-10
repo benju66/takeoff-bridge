@@ -687,6 +687,54 @@ export async function getClassificationHistory(
   }));
 }
 
+/**
+ * Bulk classification-history read for the import review (Phase 3 Slice 1):
+ * one chunked `.in()` query for ALL the bid's line descriptions, grouped to
+ * `classification → [{resolvedCode, count}]` sorted by count (desc) then code
+ * (deterministic ties). Classifications with no history are simply absent.
+ * READ-only; the table stays append-only. Callers treat history as advisory
+ * (fail-soft) — an empty map must leave the import flow working unchanged.
+ */
+export async function getClassificationHistoryBulk(
+  classifications: readonly string[]
+): Promise<Map<string, { resolvedCode: string; count: number }[]>> {
+  const out = new Map<string, { resolvedCode: string; count: number }[]>();
+  const unique = [...new Set(classifications.filter((c) => c.trim() !== ""))];
+  if (unique.length === 0) return out;
+
+  // PostgREST `.in()` lists go into the request URL — chunk to stay well clear
+  // of URL-length limits on big bids (CARE alone has ~140 distinct lines).
+  const CHUNK = 100;
+  const counts = new Map<string, Map<string, number>>();
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from("classification_history")
+      .select("classification, resolved_code")
+      .in("classification", unique.slice(i, i + CHUNK));
+    if (error) {
+      console.error("Failed to fetch bulk classification history:", error);
+      throw new Error(`Failed to fetch bulk classification history: ${error.message}`);
+    }
+    for (const row of data || []) {
+      const cls = row.classification as string;
+      const code = row.resolved_code as string;
+      const byCode = counts.get(cls) ?? new Map<string, number>();
+      byCode.set(code, (byCode.get(code) ?? 0) + 1);
+      counts.set(cls, byCode);
+    }
+  }
+
+  for (const [cls, byCode] of counts) {
+    out.set(
+      cls,
+      [...byCode.entries()]
+        .map(([resolvedCode, count]) => ({ resolvedCode, count }))
+        .sort((a, b) => b.count - a.count || a.resolvedCode.localeCompare(b.resolvedCode))
+    );
+  }
+  return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Estimate Snapshots (Version History / Milestones)
 // ═══════════════════════════════════════════════════════════════════

@@ -121,10 +121,11 @@ export function enrichImportedRows(extracted: ExtractedEstimate): ProcessedTakeo
 
 /**
  * How sure the suggestion is — drives the review UI's chips and which rows
- * "Accept all high-confidence" may touch (bridge + linked ONLY; `similar` is a
- * ranked shortlist a human picks from; `none` stays a flagged manual row).
+ * "Accept all high-confidence" may touch (bridge + linked ONLY — architect-
+ * locked F3: `history` is one-click per row, `similar` is a ranked shortlist
+ * a human picks from, `none` stays a flagged manual row).
  */
-export type MappingConfidence = "bridge" | "linked" | "similar" | "none";
+export type MappingConfidence = "bridge" | "linked" | "history" | "similar" | "none";
 
 export interface MappingSuggestion {
   /** The enriched row this belongs to (same id scheme as enrichImportedRows). */
@@ -134,9 +135,19 @@ export interface MappingSuggestion {
   itemId: string;
   /** The Procore code the bridge derived ("" when not bridge-informed). */
   procoreCode: string;
-  /** Ranked alternatives (similar tier; includes the primary first). */
+  /** Ranked alternatives (history/similar tiers; includes the primary first). */
   candidates: SuggestionItem[];
+  /** `history` tier only: how many past confirmations back the primary code. */
+  historyCount?: number;
 }
+
+/**
+ * Past confirmations per classification string, from classification_history
+ * (db.ts getClassificationHistoryBulk): `description → [{resolvedCode, count}]`
+ * sorted by count desc. ADVISORY input — when absent/empty every tier behaves
+ * exactly as before (fail-soft: history must never block an import).
+ */
+export type ClassificationHistoryMap = ReadonlyMap<string, { resolvedCode: string; count: number }[]>;
 
 /**
  * The static catalog expressed as cost-code-map entries — the OFFLINE fallback
@@ -180,14 +191,18 @@ function asCandidate(itemId: string): SuggestionItem {
  *  1. `bridge` — the workbook's own BLI SUMIF names a Procore code that
  *     reverse-maps to exactly ONE internal code. Near-certain.
  *  2. `linked` — the description IS one of the 10 GC/Site-Ops linked rows.
- *  3. `similar` — a ranked shortlist: the bridge's ambiguous family when there
+ *  3. `history` — the team confirmed a code for this EXACT description on past
+ *     imports (classification_history). Ranked by confirmation count; only
+ *     codes that still exist today are offered (stale codes are skipped).
+ *  4. `similar` — a ranked shortlist: the bridge's ambiguous family when there
  *     is one (storefront interior/exterior), else catalog-wide fuzzy matches.
- *  4. `none` — nothing to offer; the row stays a flagged manual line.
+ *  5. `none` — nothing to offer; the row stays a flagged manual line.
  */
 export function suggestMapping(
   item: ExtractedLineItem,
   bridge: ReadonlyMap<string, string>,
-  reverse: ReadonlyMap<string, string[]>
+  reverse: ReadonlyMap<string, string[]>,
+  history?: ClassificationHistoryMap
 ): MappingSuggestion {
   const rowId = importRowId(item);
   const base = { rowId, procoreCode: "", candidates: [] as SuggestionItem[] };
@@ -201,6 +216,22 @@ export function suggestMapping(
   const linkedItemId = LINKED_BY_DESC.get(normalizeDesc(item.description));
   if (linkedItemId) {
     return { ...base, confidence: "linked", itemId: linkedItemId };
+  }
+
+  // History tier: exact-description matches the team confirmed before. A code
+  // must still be assignable TODAY (catalogued or a linked division row) — the
+  // catalog evolves, and a stale confirmation must not become a suggestion.
+  const past = (history?.get(item.description) ?? []).filter(
+    (h) => ESTIMATE_ITEMS_MASTER[h.resolvedCode] !== undefined || isLinkedDivisionRow(h.resolvedCode)
+  );
+  if (past.length > 0) {
+    return {
+      ...base,
+      confidence: "history",
+      itemId: past[0].resolvedCode,
+      candidates: past.slice(0, 3).map((h) => asCandidate(h.resolvedCode)),
+      historyCount: past[0].count,
+    };
   }
 
   if (bridgedProcore && family.length > 1) {
@@ -230,15 +261,18 @@ export function suggestMapping(
 /**
  * Suggestions for every ad-hoc (legacy / non-conforming) line, keyed by row id.
  * Conforming-but-unmapped lines keep their existing Flags-worklist path.
+ * `history` is optional and advisory (Phase 3 Slice 1) — omitted/empty, the
+ * output is identical to the pre-history tiers.
  */
 export function suggestImportMappings(
   extracted: ExtractedEstimate,
   bridge: ReadonlyMap<string, string>,
-  reverse: ReadonlyMap<string, string[]>
+  reverse: ReadonlyMap<string, string[]>,
+  history?: ClassificationHistoryMap
 ): Map<string, MappingSuggestion> {
   const out = new Map<string, MappingSuggestion>();
   for (const item of extracted.adHocLineItems) {
-    out.set(importRowId(item), suggestMapping(item, bridge, reverse));
+    out.set(importRowId(item), suggestMapping(item, bridge, reverse, history));
   }
   return out;
 }

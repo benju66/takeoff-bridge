@@ -311,6 +311,74 @@ describe("acceptance map â€” confirm, change, withdraw (architect escape ha
   });
 });
 
+describe("history suggestion tier (Phase 3 Slice 1)", () => {
+  beforeEach(() => primeCostCodeResolverFromCatalog());
+  afterEach(() => resetCostCodeResolver());
+
+  /** History keyed by the legacy fixture's exact descriptions. */
+  const HISTORY = new Map([
+    // Mystery Scope: today it lands in `similar` (fuzzy) — history should win.
+    ["Mystery Scope", [
+      { resolvedCode: "26-0000.001", count: 4 },
+      { resolvedCode: "06-1753.001", count: 1 },
+    ]],
+    // Trusses: bridge-unique — bridge must STILL win over history.
+    ["Shop-Fabricated Wood Trusses", [{ resolvedCode: "09-2900.001", count: 9 }]],
+    // General Conditions: linked-tier description — linked must STILL win.
+    ["General Conditions", [{ resolvedCode: "03-0000.001", count: 9 }]],
+  ]);
+
+  async function legacySuggestions(history?: Parameters<typeof suggestImportMappings>[3]) {
+    const wb = await loadTemplateWorkbook(await buildLegacyPastBidTemplateBuffer());
+    const extracted = extractEstimate(wb);
+    const suggestions = suggestImportMappings(extracted, deriveLegacyBridge(wb), catalogReverse(), history);
+    return { suggestions, rows: enrichImportedRows(extracted) };
+  }
+
+  it("suggests past confirmations ranked by count, between linked and similar", async () => {
+    const { suggestions, rows } = await legacySuggestions(HISTORY);
+    const mystery = rows.find((r) => r.description === "Mystery Scope")!;
+    const s = suggestions.get(mystery.id)!;
+    expect(s.confidence).toBe("history");
+    expect(s.itemId).toBe("26-0000.001"); // count 4 beats count 1
+    expect(s.historyCount).toBe(4);
+    expect(s.candidates.map((c) => c.itemId)).toEqual(["26-0000.001", "06-1753.001"]);
+  });
+
+  it("never outranks the deterministic tiers: bridge and linked still win", async () => {
+    const { suggestions, rows } = await legacySuggestions(HISTORY);
+    const trusses = rows.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
+    expect(suggestions.get(trusses.id)!.confidence).toBe("bridge");
+    expect(suggestions.get(trusses.id)!.itemId).toBe(LEGACY_PAST_BID_ORACLE.bridgeUniqueItemId);
+    const gc = rows.find((r) => r.description === "General Conditions")!;
+    expect(suggestions.get(gc.id)!.confidence).toBe("linked");
+  });
+
+  it("skips stale codes (no longer assignable) and falls through to similar", async () => {
+    const stale = new Map([["Mystery Scope", [{ resolvedCode: "99-9999.999", count: 7 }]]]);
+    const { suggestions, rows } = await legacySuggestions(stale);
+    const mystery = rows.find((r) => r.description === "Mystery Scope")!;
+    const s = suggestions.get(mystery.id)!;
+    expect(s.confidence).toBe("similar"); // identical to the no-history outcome
+    expect(s.itemId).not.toBe("99-9999.999");
+  });
+
+  it("accepts linked division codes from history (assignable though uncatalogued)", async () => {
+    const linkedHistory = new Map([["Mystery Scope", [{ resolvedCode: "02-9400.007", count: 2 }]]]);
+    const { suggestions, rows } = await legacySuggestions(linkedHistory);
+    const mystery = rows.find((r) => r.description === "Mystery Scope")!;
+    expect(suggestions.get(mystery.id)!.confidence).toBe("history");
+    expect(suggestions.get(mystery.id)!.itemId).toBe("02-9400.007");
+  });
+
+  it("fail-soft: omitted or empty history yields EXACTLY the pre-history suggestions", async () => {
+    const { suggestions: without } = await legacySuggestions(undefined);
+    const { suggestions: empty } = await legacySuggestions(new Map());
+    expect([...empty.entries()]).toEqual([...without.entries()]);
+    for (const s of without.values()) expect(s.confidence).not.toBe("history");
+  });
+});
+
 describe("lump-sum modifiers as audited overrides (Slice 3)", () => {
   beforeEach(() => primeCostCodeResolverFromCatalog());
   afterEach(() => resetCostCodeResolver());

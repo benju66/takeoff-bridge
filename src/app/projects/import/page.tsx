@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowLeft, Loader2, Building2, MapPin, Calendar, Flag,
-  Link2, Sparkles, Wand2, ScrollText,
+  Link2, Sparkles, Wand2, ScrollText, History,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { MARKET_SECTORS, MASTER_TEMPLATE_NAME, isLinkedDivisionRow } from "@/lib/constants";
@@ -26,6 +26,7 @@ import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/c
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
   recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
+  getClassificationHistoryBulk,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -124,7 +125,17 @@ export default function ImportPastEstimatePage() {
 
       // Legacy normalization inputs: the workbook's own BLI bridge + reverse map.
       const bridge = deriveLegacyBridge(wb);
-      const suggestions = suggestImportMappings(extracted, bridge, buildReverseProcoreMap(mapEntries));
+
+      // Past confirmations for this bid's exact descriptions (Phase 3 Slice 1).
+      // ADVISORY + fail-soft: a history outage degrades to the pre-history tiers.
+      let history: Map<string, { resolvedCode: string; count: number }[]> | undefined;
+      try {
+        history = await getClassificationHistoryBulk(extracted.adHocLineItems.map((i) => i.description));
+      } catch {
+        history = undefined;
+      }
+
+      const suggestions = suggestImportMappings(extracted, bridge, buildReverseProcoreMap(mapEntries), history);
       const lumpIntents = lumpOverridesFromExtract(extracted, file.name);
 
       setParsed({ fileName: file.name, extracted, rows: enrichImportedRows(extracted), suggestions, lumpIntents });
@@ -494,13 +505,19 @@ export default function ImportPastEstimatePage() {
 const CONFIDENCE_STYLE: Record<MappingSuggestion["confidence"], { label: string; cls: string; icon: React.ReactNode }> = {
   bridge: { label: "From this bid's own mapping", cls: "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300", icon: <Link2 size={10} /> },
   linked: { label: "Linked row", cls: "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300", icon: <Link2 size={10} /> },
+  history: { label: "Confirmed on past imports", cls: "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300", icon: <History size={10} /> },
   similar: { label: "Best guesses — pick one", cls: "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300", icon: <Sparkles size={10} /> },
   none: { label: "No match found", cls: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300", icon: <Flag size={10} /> },
 };
 
-/** The chip for a suggestion; linked rows name their actual home (GC vs Site-Ops). */
+/** The chip for a suggestion; linked rows name their actual home (GC vs Site-Ops);
+ *  history chips say how many past confirmations back the code. */
 function chipFor(suggestion: MappingSuggestion): { label: string; cls: string; icon: React.ReactNode } {
   const base = CONFIDENCE_STYLE[suggestion.confidence];
+  if (suggestion.confidence === "history") {
+    const n = suggestion.historyCount ?? 0;
+    return { ...base, label: n === 1 ? "Seen in 1 past bid" : `Seen in ${n} past bids` };
+  }
   if (suggestion.confidence !== "linked") return base;
   const division = getDivisionCode(suggestion.itemId);
   return { ...base, label: division === "01" ? "GC row" : division === "02" ? "Site-Ops row" : base.label };
@@ -603,12 +620,16 @@ function ReviewRow({
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap items-center gap-1.5">
-          {(suggestion.confidence === "bridge" || suggestion.confidence === "linked") && suggestion.itemId && (
+          {(suggestion.confidence === "bridge" || suggestion.confidence === "linked" || suggestion.confidence === "history") && suggestion.itemId && (
             <>
               <button
                 onClick={() => onAccept(suggestion.itemId)}
                 disabled={disabled}
-                className="px-2 py-1 rounded font-mono text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+                className={`px-2 py-1 rounded font-mono text-[11px] font-bold text-white disabled:opacity-40 transition-colors ${
+                  suggestion.confidence === "history"
+                    ? "bg-violet-600 hover:bg-violet-700"
+                    : "bg-emerald-600 hover:bg-emerald-700"
+                }`}
                 title={`Accept ${suggestion.itemId}${codeName(suggestion.itemId) ? ` — ${codeName(suggestion.itemId)}` : ""}`}
               >
                 {suggestion.itemId} ✓
@@ -618,6 +639,19 @@ function ReviewRow({
                   {codeName(suggestion.itemId)}
                 </span>
               )}
+              {/* History runner-ups (other codes the team has confirmed before). */}
+              {suggestion.confidence === "history" &&
+                suggestion.candidates.slice(1, 3).map((c) => (
+                  <button
+                    key={c.itemId}
+                    onClick={() => onAccept(c.itemId)}
+                    disabled={disabled}
+                    className="px-2 py-1 rounded font-mono text-[11px] border border-grid-border text-foreground hover:border-violet-500 hover:text-violet-600 dark:hover:text-violet-400 disabled:opacity-40 transition-colors"
+                    title={c.description}
+                  >
+                    {c.itemId} <span className="font-sans text-[10px] text-slate-500">{c.description}</span>
+                  </button>
+                ))}
             </>
           )}
           {suggestion.confidence === "similar" &&
