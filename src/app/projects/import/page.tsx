@@ -15,7 +15,8 @@ import { computeTakeoffSummary } from "@/lib/calculations";
 import {
   enrichImportedRows, importSummaryRates, projectFromExtract, estimateTotalsForImport,
   checkImportTieOut, linkedTotalsFromRows, buildReverseProcoreMap, suggestImportMappings,
-  applyImportMapping, lumpOverridesFromExtract, overrideMapFromIntents, catalogCostCodeEntries,
+  applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
+  catalogCostCodeEntries,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import { validateAssignInput } from "@/lib/assignCode";
@@ -29,10 +30,12 @@ import type { ProcessedTakeoffRow } from "@/types";
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** Static (per-file) parse artifacts; the editable rows live in their own state. */
+/** Static (per-file) parse artifacts; the estimator's acceptances live in their own state. */
 interface Parsed {
   fileName: string;
   extracted: ExtractedEstimate;
+  /** The ORIGINAL enriched rows — never mutated; acceptances layer over them. */
+  rows: ProcessedTakeoffRow[];
   /** Per-row mapping suggestions (legacy normalization), keyed by row id. */
   suggestions: Map<string, MappingSuggestion>;
   /** Legacy lump-sum modifiers → audited override intents (recorded on save). */
@@ -45,8 +48,17 @@ export default function ImportPastEstimatePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parsed, setParsed] = useState<Parsed | null>(null);
-  /** Enriched rows — mutated (replaced) as the estimator confirms mappings. */
-  const [rows, setRows] = useState<ProcessedTakeoffRow[]>([]);
+  /**
+   * The estimator's confirmations: rowId → accepted itemId. Kept separate from
+   * the (immutable) parsed rows so a confirmation can be CHANGED or withdrawn
+   * any time before save — approving the wrong code is never one-way.
+   */
+  const [accepted, setAccepted] = useState<Map<string, string>>(new Map());
+  /** Working rows = original enriched rows + current acceptances. */
+  const rows = useMemo(
+    () => (parsed ? applyAcceptedMappings(parsed.rows, accepted) : []),
+    [parsed, accepted]
+  );
 
   // Editable project metadata (defaults; the bid drives sqft/units/dates/rates).
   const [location, setLocation] = useState("");
@@ -83,7 +95,7 @@ export default function ImportPastEstimatePage() {
     if (!file) return;
     setError(null);
     setParsed(null);
-    setRows([]);
+    setAccepted(new Map());
     setParsing(true);
     try {
       const buffer = await file.arrayBuffer();
@@ -113,8 +125,7 @@ export default function ImportPastEstimatePage() {
       const suggestions = suggestImportMappings(extracted, bridge, buildReverseProcoreMap(mapEntries));
       const lumpIntents = lumpOverridesFromExtract(extracted, file.name);
 
-      setParsed({ fileName: file.name, extracted, suggestions, lumpIntents });
-      setRows(enrichImportedRows(extracted));
+      setParsed({ fileName: file.name, extracted, rows: enrichImportedRows(extracted), suggestions, lumpIntents });
     } catch (err) {
       console.error("Import parse failed:", err);
       setError(
@@ -128,37 +139,40 @@ export default function ImportPastEstimatePage() {
     }
   };
 
-  /**
-   * A linked itemId may exist on ONE row only: the engine counts a linked
-   * value once per itemId but excludes EVERY row carrying it, so assigning the
-   * same linked code twice would drop the second row's dollars and break the
-   * tie with no way to un-map short of re-uploading. Refuse the duplicate.
-   */
-  const linkedAlreadyTaken = (prev: ProcessedTakeoffRow[], rowId: string, itemId: string) =>
-    isLinkedDivisionRow(itemId) && prev.some((r) => r.id !== rowId && r.itemId === itemId);
-
-  /** Apply a HUMAN-CONFIRMED mapping to one row (qty/unitPrice never move). */
+  /** Confirm (or re-confirm with a different code) one row's mapping. */
   const acceptMapping = (rowId: string, itemId: string) => {
-    if (linkedAlreadyTaken(rows, rowId, itemId)) {
+    if (!parsed) return;
+    // A linked GC/Site-Ops code may live on ONE row only — a duplicate would
+    // silently drop the second row's dollars and break the tie.
+    if (linkedMappingConflict(parsed.rows, accepted, rowId, itemId)) {
       setError(`"${itemId}" is a linked GC/Site-Ops code and is already assigned to another line.`);
       return;
     }
     setError(null);
-    setRows((prev) => prev.map((r) => (r.id === rowId ? applyImportMapping(r, itemId) : r)));
+    setAccepted((prev) => new Map(prev).set(rowId, itemId));
+  };
+
+  /** Withdraw a confirmation — the row returns to its suggested/pending state. */
+  const unacceptMapping = (rowId: string) => {
+    setError(null);
+    setAccepted((prev) => {
+      const next = new Map(prev);
+      next.delete(rowId);
+      return next;
+    });
   };
 
   /** Accept every bridge/linked suggestion still pending — the high-confidence tiers only. */
   const acceptAllHighConfidence = () => {
     if (!parsed) return;
-    setRows((prev) => {
-      const next = [...prev];
-      for (let i = 0; i < next.length; i++) {
-        const r = next[i];
-        if (r.isMapped) continue;
+    setAccepted((prev) => {
+      const next = new Map(prev);
+      for (const r of parsed.rows) {
+        if (r.isMapped || next.has(r.id)) continue;
         const s = parsed.suggestions.get(r.id);
         if (!s || (s.confidence !== "bridge" && s.confidence !== "linked") || !s.itemId) continue;
-        if (linkedAlreadyTaken(next, r.id, s.itemId)) continue; // first claim wins; rest stay pending
-        next[i] = applyImportMapping(r, s.itemId);
+        if (linkedMappingConflict(parsed.rows, next, r.id, s.itemId)) continue; // first claim wins
+        next.set(r.id, s.itemId);
       }
       return next;
     });
@@ -372,6 +386,7 @@ export default function ImportPastEstimatePage() {
                           suggestion={parsed.suggestions.get(r.id)!}
                           disabled={saving}
                           onAccept={(itemId) => acceptMapping(r.id, itemId)}
+                          onUnaccept={() => unacceptMapping(r.id)}
                         />
                       ))}
                     </tbody>
@@ -463,11 +478,13 @@ function ReviewRow({
   suggestion,
   disabled,
   onAccept,
+  onUnaccept,
 }: {
   row: ProcessedTakeoffRow;
   suggestion: MappingSuggestion;
   disabled: boolean;
   onAccept: (itemId: string) => void;
+  onUnaccept: () => void;
 }) {
   const [freeEntry, setFreeEntry] = useState("");
   const [entryError, setEntryError] = useState<string | null>(null);
@@ -491,7 +508,17 @@ function ReviewRow({
         <td className="px-3 py-2 text-foreground">{row.description}</td>
         <td className="px-3 py-2 text-right font-mono text-foreground">{money(amount)}</td>
         <td className="px-3 py-2 font-mono text-emerald-700 dark:text-emerald-300" colSpan={2}>
-          <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={12} /> {row.itemId}</span>
+          <span className="inline-flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={12} /> {row.itemId}</span>
+            <button
+              onClick={onUnaccept}
+              disabled={disabled}
+              className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border border-grid-border text-slate-500 hover:text-foreground hover:bg-background disabled:opacity-40 transition-colors"
+              title="Withdraw this confirmation and pick a different code"
+            >
+              Change
+            </button>
+          </span>
         </td>
       </tr>
     );

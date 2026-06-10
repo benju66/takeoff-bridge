@@ -16,6 +16,8 @@ import {
   buildReverseProcoreMap,
   suggestImportMappings,
   applyImportMapping,
+  applyAcceptedMappings,
+  linkedMappingConflict,
   lumpOverridesFromExtract,
   overrideMapFromIntents,
   importSummaryRates,
@@ -197,6 +199,53 @@ describe("suggestImportMappings — confidence tiers (Slice 2)", () => {
     const linked = applyImportMapping(gc, "01-0000.001");
     expect(linked.isMapped).toBe(true);
     expect(linked.itemId).toBe("01-0000.001");
+  });
+});
+
+describe("acceptance map — confirm, change, withdraw (architect escape hatch)", () => {
+  beforeEach(() => primeCostCodeResolverFromCatalog());
+  afterEach(() => resetCostCodeResolver());
+
+  it("a confirmation can be changed or withdrawn without touching the originals", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const originals = enrichImportedRows(extracted);
+    const painting = originals.find((r) => r.description === "Interior Painting")!;
+
+    // Accept the wrong code, then CHANGE it, then WITHDRAW it.
+    const wrong = applyAcceptedMappings(originals, new Map([[painting.id, "08-4000.001"]]));
+    expect(wrong.find((r) => r.id === painting.id)!.itemId).toBe("08-4000.001");
+
+    const fixed = applyAcceptedMappings(originals, new Map([[painting.id, "09-9000.001"]]));
+    expect(fixed.find((r) => r.id === painting.id)!.itemId).toBe("09-9000.001");
+
+    const withdrawn = applyAcceptedMappings(originals, new Map());
+    const back = withdrawn.find((r) => r.id === painting.id)!;
+    expect(back.itemId).toBe("");
+    expect(back.isMapped).toBe(false);
+    expect(back.needsReview).toBe(true); // exactly the pre-confirmation state
+
+    // Originals are never mutated by any of it.
+    expect(painting.itemId).toBe("");
+    expect(painting.needsReview).toBe(true);
+  });
+
+  it("refuses a linked code already claimed by an acceptance or a born-linked row", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const originals = enrichImportedRows(extracted);
+    const gc = originals.find((r) => r.description === "General Conditions")!;
+    const other = originals.find((r) => r.description === "Supervision")!;
+
+    const accepted = new Map([[gc.id, "01-0000.001"]]);
+    // Another row asking for the same linked code → conflict.
+    expect(linkedMappingConflict(originals, accepted, other.id, "01-0000.001")).toBe(true);
+    // Re-confirming the SAME row is not a conflict (that's a change).
+    expect(linkedMappingConflict(originals, accepted, gc.id, "01-0000.001")).toBe(false);
+    // Granular (non-linked) codes may repeat freely — the storefront case.
+    expect(linkedMappingConflict(originals, accepted, other.id, "08-4000.002")).toBe(false);
+    // A MODERN bid's born-linked row also blocks an acceptance of its code.
+    const modern = enrichImportedRows(await extractEstimateFromBuffer(await buildPastBidTemplateBuffer()));
+    const adhoc = modern.find((r) => r.needsReview)!;
+    expect(linkedMappingConflict(modern, new Map(), adhoc.id, "01-0000.001")).toBe(true);
   });
 });
 

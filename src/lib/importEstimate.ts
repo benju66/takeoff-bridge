@@ -306,6 +306,42 @@ export function overrideMapFromIntents(intents: readonly LumpOverrideIntent[]): 
 }
 
 /**
+ * Derives the working row set from the ORIGINAL enriched rows + the estimator's
+ * current acceptances (rowId → confirmed itemId). The originals are never
+ * mutated, so changing or withdrawing a confirmation is just editing the map —
+ * the architect-required "I approved the wrong one" escape hatch.
+ */
+export function applyAcceptedMappings(
+  originals: readonly ProcessedTakeoffRow[],
+  accepted: ReadonlyMap<string, string>
+): ProcessedTakeoffRow[] {
+  return originals.map((r) => {
+    const itemId = accepted.get(r.id);
+    return itemId ? applyImportMapping(r, itemId) : r;
+  });
+}
+
+/**
+ * True when assigning `itemId` to `rowId` would put a LINKED division code on
+ * two rows. The engine counts a linked value once per itemId but excludes
+ * EVERY row carrying it, so a duplicate silently drops the second row's
+ * dollars and breaks the tie. Checks both prior acceptances and rows that were
+ * born with the code (a mixed bid's real linked rows).
+ */
+export function linkedMappingConflict(
+  originals: readonly ProcessedTakeoffRow[],
+  accepted: ReadonlyMap<string, string>,
+  rowId: string,
+  itemId: string
+): boolean {
+  if (!isLinkedDivisionRow(itemId)) return false;
+  for (const [id, code] of accepted) {
+    if (id !== rowId && code === itemId) return true;
+  }
+  return originals.some((r) => r.id !== rowId && r.itemId === itemId);
+}
+
+/**
  * Builds the `linkedTotals` for the RELOAD path from the saved linked-division
  * rows themselves (their stored qty×unitPrice IS the linked total). This is what
  * makes a reopened import still tie: a finished bid's GC/Site-Ops lump sums are
