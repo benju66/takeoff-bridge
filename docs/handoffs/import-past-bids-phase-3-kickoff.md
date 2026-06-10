@@ -91,3 +91,68 @@ before Slice 0 would need re-importing.
 Stop at green + committed + handoff (update `[[import-past-bids-plan]]` + this doc's status).
 Do NOT chain into archive-&-comparison, the catalog manager, or the Permits section
 ([[permits-section-feature]]) — separate sessions.
+
+---
+
+# BUILD STATUS — Phase 3 COMPLETE (2026-06-10, branch `import-past-bids-phase-3`, NOT merged)
+
+Plan of record: `docs/plans/import-past-bids-phase-3.md` (architect skipped ultraplan —
+evidence-grounded, no schema work; all four forks locked: F1 catalog-fallback for blank UOM
+[moot — the 7 blanks are the 60-xxxx modifier rows, never line items], F2 subtle display-only
+mismatch indicator, F3 history NOT in accept-all, F4 price history on /rates). **No DDL anywhere.**
+
+## Probe corrections to this kickoff (live, 2026-06-10)
+- **TWO bids already imported**, not one: CARE Relocation (142 lines, STEP 2/3 detail captured)
+  AND McKenna Crossing Terrace II (114 lines, 1 lump override). 398 classification_history rows
+  (all user), 4 estimate_overrides, 256 imported line items.
+- CARE col-G probe: STEP 2 35/35, STEP 3 42/42, STEP 4 268/275 rows carry a UOM (lowercase
+  `ls`/`hr`/`mo`…); the 7 blanks = the soft-cost modifier rows. Catalog is uppercase →
+  extraction uppercases.
+
+## What shipped (4 commits)
+- `5d7fd20` **Slice 0 — as-bid UOM capture**: `ExtractedLineItem.uom`+`ExtractedSheetLine.uom`
+  (col G, uppercased; `toProcessedRows` untouched → goldens byte-identical); enrich + mapping:
+  as-bid UOM WINS, catalog fills blanks only; `uomMismatch()` + amber indicator in the review
+  table + mismatch count in parsed summary; `ImportedSheetLine.uom?` rides the JSONB (old
+  payloads → "—"); UOM column in review table + ImportedStep23Panel; fixtures write col G
+  lowercase; CARE golden asserts real UOMs (01-0000 LS, Sr Superintendent HR) survive accept-all.
+- `d5f3ae0` **Slice 1 — history suggestion tier**: `getClassificationHistoryBulk` (one chunked
+  `.in()`, 100/chunk); tier order **bridge > linked > history > similar > none**; exact-
+  description match; stale codes skipped (catalogued-or-linked check); violet "Seen in N past
+  bids" chip + one-click accept + runner-ups; fail-soft (outage ⇒ pre-history behavior, proven
+  identical by test); F3: excluded from accept-all.
+- `1449902` **Slice 2 — price mining on /rates**: pure `priceHistory.ts` aggregates per
+  **(itemId, uom)** (count/median/min/max + observations newest-first — the reason Slice 0 went
+  first); `getImportedPriceHistory()` (imported line items ⋈ projects context); violet history
+  line under each catalog rate + per-project tooltip; **ADOPT** (confirm → existing audited
+  `updateRateCardEntry`, stamped MANUAL, future projects only) renders ONLY when the bids' UOM
+  matches the line's catalog unit. Report-only; loads fail-soft.
+- `3499b73` **/code-review finding (real bug, pre-existing)**: the grid itemId path (which B-4
+  Flags assign uses — the recommended way to finish leftover similar rows) re-derived everything
+  from the catalog on imported rows: rawQuantities=[] → **qty zeroed → dollars dropped**, plus
+  catalog price/description/UOM stamped. Fixed: imported rows route through `applyImportMapping`
+  (the import-review chokepoint — grid and review can never disagree); unknown-code edits unmap
+  without the CSV reset; `needsReview` added to ITEM_ID_CASCADE_CAPTURE_FIELDS (undo restores
+  the flag); round-trip test.
+
+Resting state: **suite 489 pass / 49 files**, goldens McKenna + synthetic + CARE tie $0.00,
+tsc + next build clean. Branch NOT merged to main; nothing pushed.
+
+## Architect e2e (recommended before merging)
+1. `npm run dev` → `/projects/import` → upload CARE. Expect: UOM column in the review table
+   (HR/LS/MO…), violet "Seen in N past bids" chips on previously-confirmed lines (398 rows of
+   history exist), accept-all still bridge+linked only, banner green, save.
+2. Delete the OLD CARE + McKenna projects and re-import both ONCE (collects as-bid UOMs; CARE's
+   STEP 2/3 detail now shows a UOM column on the GC/Site-Ops pages).
+3. `/rates` → catalog rows that appeared in the imports show "N bids (UOM) · med $X" with
+   per-project tooltip; ADOPT only where the unit matches; adopting updates the rate (MANUAL).
+4. Flags: assign a leftover similar row a code — its dollars/description/UOM must NOT change;
+   Ctrl+Z restores the flag.
+5. Then: **backlog importing begins** (every import now feeds UOMs, the history tier, and the
+   price report).
+
+## Carried forward (not Phase-3 scope)
+- Slice 3 — STEP 2/3 normalization + staff-rate mining (own session; raw codes stored, backfillable).
+- Master-template follow-up: 6 manual catalog codes → template STEP 4 rows + `npm run sync-codes`.
+- Push main to origin when the architect says so. Archive & comparison; catalog manager; Permits.
+- Pre-Slice-0 saved imported rows carry catalog-stamped UOMs until re-imported (step 2 above).
