@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { captureRowFields, ITEM_ID_CASCADE_CAPTURE_FIELDS } from "../commandCapture";
 import { ESTIMATE_ITEMS_MASTER } from "../mock-data";
+import { applyImportMapping } from "../importEstimate";
+import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "../costCodeResolver";
 import type { ProcessedTakeoffRow } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ describe("ITEM_ID_CASCADE_CAPTURE_FIELDS contract", () => {
         "matchedQty",
         "total",
         "isMapped",
+        "needsReview", // imported branch clears the ad-hoc flag (Phase 3)
         "dataFidelity",
       ].sort()
     );
@@ -75,6 +78,58 @@ describe("captureRowFields", () => {
     // Non-listed fields must not leak into the payload
     expect("classification" in captured).toBe(false);
     expect("rawQuantities" in captured).toBe(false);
+  });
+});
+
+describe("imported-row grid assign (B-4 path) — as-imported fidelity + undo", () => {
+  beforeAll(() => primeCostCodeResolverFromCatalog());
+  afterAll(() => resetCostCodeResolver());
+
+  it("keeps the as-bid dollars/description/UOM, clears needsReview, and undo restores the flag", () => {
+    // An imported leftover (similar-tier, finished later in Flags): rawQuantities
+    // is [] — the generic itemId branch would re-match qty against it and ZERO
+    // the row's dollars. The imported branch routes through applyImportMapping.
+    const imported = makeRow({
+      id: "import-r42",
+      source: "imported",
+      itemId: "",
+      procoreCode: "",
+      procoreParentCode: "",
+      classification: "Mystery Scope",
+      description: "Mystery Scope",
+      uom: "SF", // as-bid; catalog says LS for the assigned code
+      unitPrice: 10,
+      matchedQty: 300,
+      total: 3000,
+      isMapped: false,
+      needsReview: true,
+      rawQuantities: [],
+    });
+
+    // Exactly what the grid's imported branch applies (Object.assign merge).
+    const next = { ...imported, ...applyImportMapping(imported, "06-1753.001") };
+    expect(next.itemId).toBe("06-1753.001");
+    expect(next.isMapped).toBe(true);
+    expect(next.needsReview).toBe(false);
+    // Historical fidelity: dollars + as-bid text/unit untouched.
+    expect(next.matchedQty).toBe(300);
+    expect(next.unitPrice).toBe(10);
+    expect(next.total).toBe(3000);
+    expect(next.description).toBe("Mystery Scope");
+    expect(next.uom).toBe("SF");
+
+    // Undo merge (applyCommandInverse EDIT_CELL idiom) restores the flag too —
+    // needsReview is in ITEM_ID_CASCADE_CAPTURE_FIELDS for exactly this case.
+    const effect = {
+      rowId: imported.id,
+      prevFields: captureRowFields(imported, ITEM_ID_CASCADE_CAPTURE_FIELDS),
+      nextFields: captureRowFields(next, ITEM_ID_CASCADE_CAPTURE_FIELDS),
+    };
+    const undone = { ...next, ...effect.prevFields };
+    expect(undone.itemId).toBe("");
+    expect(undone.isMapped).toBe(false);
+    expect(undone.needsReview).toBe(true);
+    expect(undone.total).toBe(3000);
   });
 });
 

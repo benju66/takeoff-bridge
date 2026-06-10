@@ -136,12 +136,10 @@ describe.skipIf(!FIXTURE)("Golden legacy import — CARE bid to the cent", () =>
 
     // Accept-all (the page's exact flow) must keep every as-bid UOM — mapping
     // a code never relabels the bid's unit with the catalog's.
-    const byId = new Map(rows.map((r) => [r.id, r]));
     for (const r of rows) {
       const s = suggestions.get(r.id);
       if (!s || (s.confidence !== "bridge" && s.confidence !== "linked") || !s.itemId) continue;
-      const mapped = applyImportMapping(r, s.itemId);
-      if (byId.get(r.id)!.uom !== "") expect(mapped.uom).toBe(byId.get(r.id)!.uom);
+      if (r.uom !== "") expect(applyImportMapping(r, s.itemId).uom).toBe(r.uom);
     }
   });
 

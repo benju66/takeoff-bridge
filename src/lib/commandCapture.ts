@@ -22,6 +22,10 @@ export const ITEM_ID_CASCADE_CAPTURE_FIELDS = [
   "matchedQty",
   "total",
   "isMapped",
+  // Imported rows: assigning a code clears the ad-hoc review flag
+  // (applyImportMapping via the grid's imported branch) — captured so a
+  // single Ctrl+Z restores the flag with the rest of the row.
+  "needsReview",
   "dataFidelity",
 ] as const satisfies readonly (keyof ProcessedTakeoffRow)[];
 

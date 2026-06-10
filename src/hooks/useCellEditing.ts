@@ -5,6 +5,7 @@ import { ProcessedTakeoffRow, WorkbookCommand, EditCellCommand } from "@/types";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { resolveProcoreCode } from "@/lib/costCodeResolver";
 import { resolveCatalogPrice } from "@/lib/rateResolver";
+import { applyImportMapping } from "@/lib/importEstimate";
 import { saveProjectRegistry, saveGlobalRegistry, recordClassificationResolution } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
@@ -104,7 +105,18 @@ export function useCellEditing(
         newRegistry = { ...currentRegistry, [classification]: newCode };
       }
 
-      if (targetItem) {
+      if (targetItem && row.source === "imported") {
+        // AS-IMPORTED FIDELITY (import invariant + Phase 3 Slice 0): an
+        // imported row's qty/unitPrice/description/UOM are HISTORICAL data
+        // read from the bid. Assigning a code (incl. B-4 Flags assign, which
+        // routes through this path) maps the row — it must never re-derive
+        // those from the catalog. The old generic branch below zeroed the
+        // row's dollars (matchedQty re-matched against rawQuantities, which
+        // is [] on imported rows) and stamped the catalog UOM/price/text.
+        // applyImportMapping is the SAME pure chokepoint the import review
+        // uses, so grid assigns and import-page confirms can never disagree.
+        Object.assign(row, applyImportMapping(row, newCode));
+      } else if (targetItem) {
         // Single chokepoint: cost_code_map (primed at workspace mount), never
         // the catalog. procoreParentCode still comes from the catalog but is
         // NON-AUTHORITATIVE — the exporter groups by procoreCode and only
@@ -157,6 +169,13 @@ export function useCellEditing(
             }
           }
         }
+      } else if (row.source === "imported") {
+        // Unknown code on an IMPORTED row: unmap it, but never zero or
+        // re-derive the as-bid dollars/description/UOM (same fidelity rule
+        // as the mapped branch above — the reset below is a CSV-row idiom).
+        row.procoreParentCode = "";
+        row.procoreCode = "";
+        row.isMapped = false;
       } else {
         row.description = "UNMAPPED - RECONCILE CODE";
         row.procoreParentCode = "";
