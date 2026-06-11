@@ -21,7 +21,8 @@ import {
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import {
-  resolveStep23Line, suggestNextStep23Code, STEP23_LINE_DEFS, type Step23LineDef,
+  resolveStep23Line, suggestNextStep23Code, activeStep23Defs, isBuiltInStep23Code,
+  type Step23LineDef,
 } from "@/lib/step23Normalization";
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 import { validateAssignInput } from "@/lib/assignCode";
@@ -38,11 +39,6 @@ import type { CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
 
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-/** Built-in GC/Site-Ops lines for the STEP 2/3 assign dropdown, code-ordered. */
-const STEP23_ASSIGN_OPTIONS: Step23LineDef[] = [...STEP23_LINE_DEFS].sort((a, b) =>
-  a.code.localeCompare(b.code, undefined, { numeric: true })
-);
 
 /** Static (per-file) parse artifacts; the estimator's acceptances live in their own state. */
 interface Parsed {
@@ -112,6 +108,14 @@ export default function ImportPastEstimatePage() {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * The codes the assign dropdown OFFERS: built-ins + only ACTIVE custom defs,
+   * code-ordered (activeStep23Defs). Retired/merged customs leave the picker
+   * here while the FULL customDefs still drive resolveStep23Line/suffix
+   * suggestion below, so old lines keep their labels.
+   */
+  const step23AssignOptions = useMemo(() => activeStep23Defs(customDefs), [customDefs]);
 
   /** The exact payload handleSave persists (pre-corrections) — built once per parse. */
   const step23Payload = useMemo(
@@ -644,7 +648,7 @@ export default function ImportPastEstimatePage() {
                                         isAssigned={resolved !== null && resolved.code === assignedRaw?.trim()}
                                         uom={step23Uom.get(lineKey) ?? l.uom ?? ""}
                                         uomEdited={step23Uom.has(lineKey)}
-                                        customDefs={customDefs}
+                                        assignOptions={step23AssignOptions}
                                         disabled={saving}
                                         onUomChange={(value) => setStep23UomCorrection(lineKey, l.uom ?? "", value)}
                                         onAssign={(code) => assignStep23(lineKey, code)}
@@ -1044,7 +1048,7 @@ function Step23ReviewRow({
   isAssigned,
   uom,
   uomEdited,
-  customDefs,
+  assignOptions,
   disabled,
   onUomChange,
   onAssign,
@@ -1059,7 +1063,8 @@ function Step23ReviewRow({
   /** Effective unit (correction applied) + whether a correction is active. */
   uom: string;
   uomEdited: boolean;
-  customDefs: CustomStep23LineDef[];
+  /** Codes the dropdown offers — built-ins + ACTIVE customs (activeStep23Defs). */
+  assignOptions: Step23LineDef[];
   disabled: boolean;
   onUomChange: (value: string) => void;
   onAssign: (code: string) => void;
@@ -1127,21 +1132,25 @@ function Step23ReviewRow({
               title="Assign an existing GC/Site-Ops code to this line"
             >
               <option value="">Assign code…</option>
-              {customDefs.length > 0 && (
+              {assignOptions.some((d) => !isBuiltInStep23Code(d.code)) && (
                 <optgroup label="Your custom codes">
-                  {customDefs.map((d) => (
+                  {assignOptions
+                    .filter((d) => !isBuiltInStep23Code(d.code))
+                    .map((d) => (
+                      <option key={d.code} value={d.code}>
+                        {d.code} — {d.label}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              <optgroup label="Built-in GC/Site-Ops lines">
+                {assignOptions
+                  .filter((d) => isBuiltInStep23Code(d.code))
+                  .map((d) => (
                     <option key={d.code} value={d.code}>
                       {d.code} — {d.label}
                     </option>
                   ))}
-                </optgroup>
-              )}
-              <optgroup label="Built-in GC/Site-Ops lines">
-                {STEP23_ASSIGN_OPTIONS.map((d) => (
-                  <option key={d.code} value={d.code}>
-                    {d.code} — {d.label}
-                  </option>
-                ))}
               </optgroup>
             </select>
             <button
