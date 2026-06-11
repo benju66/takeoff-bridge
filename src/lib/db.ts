@@ -49,6 +49,8 @@ function mapProjectFromRow(row: Record<string, unknown>): Project {
     projectType: (row.project_type as string) || "multifamily",
     marketSector: (row.market_sector as string) || "",
     isImported: row.is_imported === true,
+    bidOutcome: (row.bid_outcome as Project["bidOutcome"]) || "unknown",
+    deliveryMethod: (row.delivery_method as Project["deliveryMethod"]) || "unknown",
   };
 }
 
@@ -81,6 +83,8 @@ function mapProjectToRow(project: Project): Record<string, unknown> {
     project_type: project.projectType ?? "multifamily",
     market_sector: project.marketSector ?? "",
     is_imported: project.isImported ?? false,
+    bid_outcome: project.bidOutcome ?? "unknown",
+    delivery_method: project.deliveryMethod ?? "unknown",
   };
 }
 

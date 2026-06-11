@@ -1,7 +1,7 @@
 import React from "react";
 import { Activity, DollarSign, HelpCircle } from "lucide-react";
 import { Project } from "@/types/db";
-import { ESTIMATE_MODIFIERS, MARKET_SECTORS } from "@/lib/constants";
+import { ESTIMATE_MODIFIERS, MARKET_SECTORS, BID_OUTCOMES, DELIVERY_METHODS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // ArchitecturalParametersStep — Step 1 Panel
@@ -103,6 +103,34 @@ export function ArchitecturalParametersStep({
               <option value="">— Not Set —</option>
               {MARKET_SECTORS.map((sector) => (
                 <option key={sector} value={sector}>{sector}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Capture fields (database fidelity Phase 1) — backfillable any time;
+              'unknown' is an honest answer, not an error. */}
+          <div className="flex flex-col gap-2">
+            <label className={labelClass}>Bid Outcome</label>
+            <select
+              value={project.bidOutcome ?? "unknown"}
+              onChange={(e) => onParamChange("bidOutcome", e.target.value)}
+              className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {BID_OUTCOMES.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <label className={labelClass}>Delivery Method</label>
+            <select
+              value={project.deliveryMethod ?? "unknown"}
+              onChange={(e) => onParamChange("deliveryMethod", e.target.value)}
+              className="bg-transparent border border-grid-border rounded-lg px-3 py-2 text-foreground font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {DELIVERY_METHODS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>

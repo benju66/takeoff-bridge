@@ -4,8 +4,8 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2, FileSpreadsheet } from "lucide-react";
 import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
-import { MARKET_SECTORS } from "@/lib/constants";
-import { Project } from "@/types/db";
+import { MARKET_SECTORS, BID_OUTCOMES, DELIVERY_METHODS } from "@/lib/constants";
+import { Project, BidOutcome, DeliveryMethod } from "@/types/db";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 
@@ -71,6 +71,27 @@ export default function ProjectsDashboard() {
     setUnitCount("");
     setBidDate("");
     setIsModalOpen(false);
+  };
+
+  /**
+   * Inline backfill for the capture fields (database fidelity Phase 1):
+   * optimistic update + full-row upsert through db.ts, so the already-imported
+   * backlog can be answered straight from this table without opening each
+   * project's workspace. On failure the list reloads to the saved truth.
+   */
+  const handleCaptureFieldChange = async (
+    proj: Project,
+    field: "bidOutcome" | "deliveryMethod",
+    value: string
+  ) => {
+    const updated = { ...proj, [field]: value } as Project;
+    setProjects((prev) => prev.map((p) => (p.id === proj.id ? updated : p)));
+    try {
+      await saveProject(updated);
+    } catch (err) {
+      console.error(`Failed to save ${field}:`, err);
+      getProjects().then(setProjects).catch(() => {});
+    }
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -177,6 +198,8 @@ export default function ProjectsDashboard() {
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Square Footage</th>
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Unit Count</th>
                   <th className="p-4 text-right border-r border-b border-grid-border font-semibold">Bid Date</th>
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Bid Outcome</th>
+                  <th className="p-4 border-r border-b border-grid-border font-semibold">Delivery Method</th>
                   <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Action</th>
                 </tr>
               </thead>
@@ -208,6 +231,30 @@ export default function ProjectsDashboard() {
                         <Calendar size={12} className="text-slate-600 dark:text-slate-400" />
                         {proj.bidDate}
                       </div>
+                    </td>
+                    {/* Capture-field backfill (database fidelity Phase 1) — inline so the
+                        whole backlog can be answered without opening each workspace. */}
+                    <td className="p-2 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                      <select
+                        value={proj.bidOutcome ?? "unknown"}
+                        onChange={(e) => handleCaptureFieldChange(proj, "bidOutcome", e.target.value as BidOutcome)}
+                        className={`w-full bg-transparent border border-grid-border rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer ${(proj.bidOutcome ?? "unknown") === "unknown" ? "text-slate-400 dark:text-slate-500" : "text-foreground font-semibold"}`}
+                      >
+                        {BID_OUTCOMES.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="p-2 border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
+                      <select
+                        value={proj.deliveryMethod ?? "unknown"}
+                        onChange={(e) => handleCaptureFieldChange(proj, "deliveryMethod", e.target.value as DeliveryMethod)}
+                        className={`w-full bg-transparent border border-grid-border rounded-lg px-2 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer ${(proj.deliveryMethod ?? "unknown") === "unknown" ? "text-slate-400 dark:text-slate-500" : "text-foreground font-semibold"}`}
+                      >
+                        {DELIVERY_METHODS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-background dark:group-hover:bg-slate-800/40">
                       <div className="flex items-center justify-center gap-2">

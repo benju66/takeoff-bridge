@@ -8,7 +8,7 @@ import {
   Link2, Sparkles, Wand2, ScrollText, History, HardHat, ChevronDown, ChevronRight, PlusCircle,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { MARKET_SECTORS, MASTER_TEMPLATE_NAME, isLinkedDivisionRow } from "@/lib/constants";
+import { MARKET_SECTORS, BID_OUTCOMES, DELIVERY_METHODS, MASTER_TEMPLATE_NAME, isLinkedDivisionRow } from "@/lib/constants";
 import { loadTemplateWorkbook, extractEstimate, type ExtractedEstimate } from "@/lib/templateExtractor";
 import { deriveLegacyBridge } from "@/lib/legacyBridge";
 import { computeTakeoffSummary } from "@/lib/calculations";
@@ -18,6 +18,7 @@ import {
   applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
   catalogCostCodeEntries, step23LinesForImport, uomMismatch,
   applyStep23Corrections, step23LineKey, step23ReviewStats,
+  findLikelyDuplicateImports,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import {
@@ -31,13 +32,13 @@ import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { getDivisionCode } from "@/lib/division";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
-  getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
+  getCostCodeMap, getProjects, saveProject, saveEstimate, createEstimateSnapshot,
   recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
   getClassificationHistoryBulk, getCustomStep23LineDefs, createCustomStep23LineDef,
   getCatalogAdditions,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
-import type { CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
+import type { Project, BidOutcome, DeliveryMethod, CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
 
 const money = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -137,6 +138,35 @@ export default function ImportPastEstimatePage() {
   const [location, setLocation] = useState("");
   const [marketSector, setMarketSector] = useState("");
   const [bidDate, setBidDate] = useState("");
+  // Capture fields (database fidelity Phase 1) — 'unknown' is an honest answer;
+  // both are backfillable later from the project view.
+  const [bidOutcome, setBidOutcome] = useState<BidOutcome>("unknown");
+  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>("unknown");
+
+  /**
+   * Existing projects for the ADVISORY duplicate-import check. FAIL-SOFT: an
+   * outage just means no banner — the import itself must never block on this.
+   */
+  const [existingProjects, setExistingProjects] = useState<Project[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getProjects()
+      .then((projects) => {
+        if (!cancelled) setExistingProjects(projects);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  /** Advisory near-matches (normalized name + bid-date grade); never blocks. */
+  const duplicateMatches = useMemo(
+    () =>
+      parsed
+        ? findLikelyDuplicateImports(parsed.extracted.inputs.projectName, bidDate, existingProjects)
+        : [],
+    [parsed, bidDate, existingProjects]
+  );
 
   // The tie-out recomputes whenever rows change (mapping acceptances). The
   // linked-totals basis is the ROWS themselves (linkedTotalsFromRows): once a
@@ -352,6 +382,8 @@ export default function ImportPastEstimatePage() {
         location: location.trim(),
         marketSector,
         bidDate: bidDate || undefined,
+        bidOutcome,
+        deliveryMethod,
       });
       await saveProject(project);
 
@@ -721,6 +753,29 @@ export default function ImportPastEstimatePage() {
               </div>
             </div>
 
+            {/* Advisory duplicate-import warning — informs, NEVER blocks the save. */}
+            {duplicateMatches.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3">
+                <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                <div className="text-xs text-amber-800 dark:text-amber-200">
+                  <div className="font-bold mb-1">This bid may already be imported</div>
+                  {duplicateMatches.map((m) => (
+                    <div key={m.projectId} className="mb-0.5">
+                      Looks like{" "}
+                      <Link href={`/projects/${m.projectId}`} className="font-semibold underline hover:no-underline">
+                        {m.projectName}
+                      </Link>
+                      , added {new Date(m.importedAt).toLocaleDateString()}
+                      {m.bidDate ? ` (bid date ${m.bidDate}${m.sameBidDate ? " — same as this one" : ""})` : ""}.
+                    </div>
+                  ))}
+                  <div className="mt-1 text-amber-700 dark:text-amber-300">
+                    You can still save — this is only a heads-up to avoid counting the same bid twice in price history.
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Editable metadata */}
             <div className="bg-card border border-grid-border rounded-xl p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
               <LabeledInput label="Location" icon={<MapPin size={13} />}>
@@ -751,6 +806,28 @@ export default function ImportPastEstimatePage() {
                   value={bidDate}
                   onChange={(e) => setBidDate(e.target.value)}
                 />
+              </LabeledInput>
+              <LabeledInput label="Bid outcome" icon={<Flag size={13} />}>
+                <select
+                  className="w-full bg-transparent border border-grid-border rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  value={bidOutcome}
+                  onChange={(e) => setBidOutcome(e.target.value as BidOutcome)}
+                >
+                  {BID_OUTCOMES.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </LabeledInput>
+              <LabeledInput label="Delivery method" icon={<ScrollText size={13} />}>
+                <select
+                  className="w-full bg-transparent border border-grid-border rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  value={deliveryMethod}
+                  onChange={(e) => setDeliveryMethod(e.target.value as DeliveryMethod)}
+                >
+                  {DELIVERY_METHODS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </LabeledInput>
             </div>
 

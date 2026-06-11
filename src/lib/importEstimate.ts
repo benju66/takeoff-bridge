@@ -568,7 +568,14 @@ export function importSummaryRates(inputs: ExtractedProjectInputs): ImportSummar
  */
 export function projectFromExtract(
   extracted: ExtractedEstimate,
-  opts: { id: string; location?: string; marketSector?: string; bidDate?: string }
+  opts: {
+    id: string;
+    location?: string;
+    marketSector?: string;
+    bidDate?: string;
+    bidOutcome?: Project["bidOutcome"];
+    deliveryMethod?: Project["deliveryMethod"];
+  }
 ): Project {
   const inp = extracted.inputs;
   return {
@@ -591,7 +598,63 @@ export function projectFromExtract(
     roundingRule: "none",
     marketSector: opts.marketSector ?? "",
     isImported: true,
+    bidOutcome: opts.bidOutcome ?? "unknown",
+    deliveryMethod: opts.deliveryMethod ?? "unknown",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Advisory duplicate-import detection (database fidelity Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical form for project-name comparison: lowercased, punctuation stripped,
+ * whitespace collapsed — so "The Marquee — Phase 2" matches "the marquee phase 2".
+ */
+export function normalizeProjectName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** One existing project that looks like the bid being imported. */
+export interface DuplicateImportMatch {
+  projectId: string;
+  projectName: string;
+  /** The existing project's bid date ("" when unset). */
+  bidDate: string;
+  /** When the existing project entered the app (created_at, ISO). */
+  importedAt: string;
+  /** True when the existing project's bid date equals the incoming one. */
+  sameBidDate: boolean;
+}
+
+/**
+ * ADVISORY near-match check run before an import save: does an existing project
+ * look like this same bid? Conservative by design — a match requires normalized-
+ * name equality; the bid date only grades the match (`sameBidDate`), because the
+ * incoming date is often still blank while the estimator reviews. The caller
+ * shows a banner and NEVER blocks the save (duplicates that slip through are
+ * caught retroactively by the Phase 4 Data Health detector).
+ */
+export function findLikelyDuplicateImports(
+  incomingName: string,
+  incomingBidDate: string,
+  existing: readonly Project[]
+): DuplicateImportMatch[] {
+  const needle = normalizeProjectName(incomingName);
+  if (!needle) return [];
+  return existing
+    .filter((p) => normalizeProjectName(p.name) === needle)
+    .map((p) => ({
+      projectId: p.id,
+      projectName: p.name,
+      bidDate: p.bidDate || "",
+      importedAt: p.createdAt,
+      sameBidDate: !!incomingBidDate && !!p.bidDate && incomingBidDate === p.bidDate,
+    }));
 }
 
 /**

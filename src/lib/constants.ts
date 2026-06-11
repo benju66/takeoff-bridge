@@ -4,6 +4,8 @@
  * that were previously duplicated across multiple page-level components.
  */
 
+import type { BidOutcome, DeliveryMethod } from "@/types/db";
+
 // ---------------------------------------------------------------------------
 // Division Reference Labels
 // ---------------------------------------------------------------------------
@@ -81,6 +83,29 @@ export const MARKET_SECTORS = [
   "Restaurant",
   "Workplace",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Capture fields (database fidelity Phase 1) — value lists are CHECK-enforced
+// in the DB (supabase_schema.sql); keep these in sync with the constraints.
+// ---------------------------------------------------------------------------
+
+/** Bid outcome options — 'unknown' is the default/unanswered state. */
+export const BID_OUTCOMES: { value: BidOutcome; label: string }[] = [
+  { value: "unknown", label: "Unknown" },
+  { value: "won", label: "Won" },
+  { value: "lost", label: "Lost" },
+  { value: "pending", label: "Pending" },
+];
+
+/** Delivery method options — 'unknown' is the default/unanswered state. */
+export const DELIVERY_METHODS: { value: DeliveryMethod; label: string }[] = [
+  { value: "unknown", label: "Unknown" },
+  { value: "hard_bid", label: "Hard bid" },
+  { value: "negotiated", label: "Negotiated" },
+  { value: "gmp", label: "GMP" },
+  { value: "design_build", label: "Design-build" },
+  { value: "other", label: "Other" },
+];
 
 // ---------------------------------------------------------------------------
 // Division 01 — General Conditions Configurable Rate Table

@@ -1,6 +1,18 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "./index";
 import type { CatalogLifecycleStatus } from "@/lib/catalogLifecycle";
 
+/**
+ * Database fidelity Phase 1: did the company win this bid?
+ * 'unknown' = legacy/unanswered (the DB default; backfillable any time).
+ * Value lists are CHECK-enforced in the DB — keep these in sync with
+ * supabase_schema.sql.
+ */
+export type BidOutcome = 'won' | 'lost' | 'pending' | 'unknown';
+
+/** Database fidelity Phase 1: contract/delivery type — prices under different
+ *  delivery methods are not fully comparable, so history needs the dimension. */
+export type DeliveryMethod = 'hard_bid' | 'negotiated' | 'gmp' | 'design_build' | 'other' | 'unknown';
+
 export interface Project {
   id: string;
   name: string;
@@ -39,6 +51,10 @@ export interface Project {
    * so a reopened import still ties to the cent. Default false = a normal project.
    */
   isImported?: boolean;
+  /** Database fidelity Phase 1: bid outcome; absent/'unknown' = unanswered. */
+  bidOutcome?: BidOutcome;
+  /** Database fidelity Phase 1: delivery method; absent/'unknown' = unanswered. */
+  deliveryMethod?: DeliveryMethod;
 }
 
 export interface ProjectEstimate {

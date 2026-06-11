@@ -90,7 +90,16 @@ CREATE TABLE projects (
   -- treats the 10 saved linked-division line items as authoritative statics
   -- (their stored qty×unitPrice IS the linked total) rather than recomputing them
   -- from STEP 2/3 — this is what lets a reopened import still tie to the cent.
-  is_imported BOOLEAN NOT NULL DEFAULT false
+  is_imported BOOLEAN NOT NULL DEFAULT false,
+  -- Database fidelity Phase 1 (2026-06-11): capture fields knowable at import
+  -- time but hard to reconstruct later. Both backfillable from the project view.
+  -- bid_outcome: did the company win this bid? 'unknown' = legacy/unanswered.
+  bid_outcome TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (bid_outcome IN ('won', 'lost', 'pending', 'unknown')),
+  -- delivery_method: contract type — prices under different delivery methods
+  -- are not fully comparable, so history reporting needs this dimension.
+  delivery_method TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (delivery_method IN ('hard_bid', 'negotiated', 'gmp', 'design_build', 'other', 'unknown'))
 );
 
 -- ─────────────────────────────────────────────────
