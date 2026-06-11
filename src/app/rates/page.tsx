@@ -12,6 +12,7 @@ import {
   Layers,
   AlertTriangle,
   History,
+  PackagePlus,
 } from "lucide-react";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
@@ -20,16 +21,29 @@ import {
   getImportedPriceHistory,
   getImportedStep23History,
   getCustomStep23LineDefs,
+  getCatalogAdditions,
 } from "@/lib/db";
 import { step23Observations } from "@/lib/step23Normalization";
 import { primeRateCard } from "@/lib/rateResolver";
+import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
   groupRateCardRows,
   parseRateInput,
   RATE_LINE_DEFS,
 } from "@/lib/rateCardEditor";
 import { aggregatePriceHistory, type PriceHistoryStat } from "@/lib/priceHistory";
-import { RateCardEntry, CustomStep23LineDef } from "@/types/db";
+import { RateCardEntry, CustomStep23LineDef, CatalogAddition } from "@/types/db";
+
+// ---------------------------------------------------------------------------
+// /rates module-load decision (Catalog Manager Phase 7, plan §Risks):
+// rateCardEditor's RATE_SECTION_ORDER / RATE_LINE_DEFS read getCatalogItems()
+// ONCE at import time, so they CANNOT see a later additions prime — and even a
+// rebuild wouldn't surface additions as editable rate rows (additions have no
+// rate_card entry). Rather than mutate those workspace-independent module-load
+// globals, additions are shown in a dedicated READ-ONLY section sourced directly
+// from the fetched list (the established fail-soft async-refresh idiom). Edits
+// to an addition's price live on /catalog, its home table.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Company Rate Card editor (Rate-card slice 1 Phase C + slice 2 Phase C) — twin
@@ -155,6 +169,13 @@ export default function RateCardDashboard() {
    * promoted row simply falls back to the Unmatched display (never blocks).
    */
   const [customDefs, setCustomDefs] = useState<CustomStep23LineDef[]>([]);
+  /**
+   * In-app catalog additions (Catalog Manager Phase 7) — shown READ-ONLY in
+   * their own section (their default unit price lives on /catalog). They are NOT
+   * rate_card rows, so they are not editable here and not part of the grouped
+   * card table. Fail-soft: an outage degrades to "no additions", never blocks.
+   */
+  const [additions, setAdditions] = useState<CatalogAddition[]>([]);
 
   // Load + (re)prime the company card. Reused on mount and on visibilitychange
   // so a /rates edit in another tab — or the seed/backfill — is reflected here.
@@ -215,6 +236,23 @@ export default function RateCardDashboard() {
     })();
     return () => { cancelled = true; };
   }, [loadCard]);
+
+  // Load + prime the catalog-additions overlay independently (fail-soft). The
+  // prime keeps the in-session resolvers consistent; the list drives the
+  // read-only additions section.
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogAdditions()
+      .then((loaded) => {
+        if (cancelled) return;
+        setAdditions(loaded);
+        primeCatalogAdditionOverlays(loaded);
+      })
+      .catch((err) => {
+        console.error("Failed to load catalog additions (read-only display skipped):", err);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Re-prime on refocus (mirror /cost-codes resolver wiring): pull the latest
   // card so the resolver and this view stay consistent with other tabs.
@@ -335,6 +373,19 @@ export default function RateCardDashboard() {
     () => groupRateCardRows(filteredEntries, customDefs),
     [filteredEntries, customDefs],
   );
+
+  // Read-only additions, search-filtered with the same query as the card.
+  const filteredAdditions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return additions;
+    return additions.filter(
+      (a) =>
+        a.itemId.toLowerCase().includes(q) ||
+        a.description.toLowerCase().includes(q) ||
+        a.targetUom.toLowerCase().includes(q) ||
+        a.procoreCode.toLowerCase().includes(q),
+    );
+  }, [additions, searchQuery]);
 
   if (!isLoaded || entries === null) {
     return (
@@ -587,6 +638,62 @@ export default function RateCardDashboard() {
                 </div>
               );
             })
+          )}
+
+          {/* In-app catalog additions — READ-ONLY (price managed on /catalog) */}
+          {additions.length > 0 && (
+            <div className="bg-card border border-blue-200 dark:border-blue-900/50 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-grid-border bg-blue-50/40 dark:bg-blue-950/10 flex items-center gap-2">
+                <PackagePlus size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                  In-app catalog additions
+                </h3>
+                <span className="text-[10px] text-slate-500 ml-auto">
+                  Default unit price managed on{" "}
+                  <a href="/catalog" className="font-bold text-blue-600 dark:text-blue-400 hover:underline">
+                    /catalog
+                  </a>
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-separate border-spacing-0 border-l border-grid-border">
+                  <thead>
+                    <tr className="bg-background/60 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                      <th className="p-4 text-center border-r border-b border-grid-border font-semibold w-40">Code</th>
+                      <th className="p-4 border-r border-b border-grid-border font-semibold">Line Description</th>
+                      <th className="p-4 text-center border-r border-b border-grid-border font-semibold w-20">Unit</th>
+                      <th className="p-4 text-center border-r border-b border-grid-border font-semibold w-40">Default Unit Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAdditions.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
+                          No additions match the query: &quot;{searchQuery}&quot;
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAdditions.map((a) => (
+                        <tr key={a.itemId} className="group transition-colors">
+                          <td className="p-4 text-center font-bold text-blue-600 dark:text-blue-400 font-mono tracking-wide border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                            {a.itemId}
+                          </td>
+                          <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                            {a.description}
+                          </td>
+                          <td className="p-4 text-center text-slate-600 dark:text-slate-400 font-mono uppercase border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                            {a.targetUom || "—"}
+                          </td>
+                          <td className="p-4 text-center font-mono font-bold text-foreground border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                            {currency.format(a.defaultUnitPrice)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           <div className="flex items-center gap-2 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-lg p-4 text-[10px] text-amber-700 dark:text-amber-500 font-bold uppercase tracking-wider">

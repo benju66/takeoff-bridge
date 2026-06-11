@@ -14,6 +14,9 @@ import {
   X,
   AlertTriangle,
   TrendingUp,
+  Plus,
+  PackagePlus,
+  PackageCheck,
 } from "lucide-react";
 import {
   getCustomStep23LineDefs,
@@ -23,21 +26,30 @@ import {
   promoteCustomStep23LineDef,
   getImportedStep23History,
   getRateCard,
+  getCatalogAdditions,
+  createCatalogAddition,
+  updateCatalogAddition,
 } from "@/lib/db";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
   activeStep23Defs,
   resolveStep23Line,
+  isStep23DeterministicCode,
   type Step23LineDef,
   type Step23HistorySource,
 } from "@/lib/step23Normalization";
 import { isActive } from "@/lib/catalogLifecycle";
 import {
+  isBuiltInCatalogCode,
+  catalogAdditionDriftState,
+} from "@/lib/catalog";
+import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
+import {
   PROCORE_VALID_CODES,
   PROCORE_CODE_DESCRIPTIONS,
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
-import type { CustomStep23LineDef } from "@/types/db";
+import type { CustomStep23LineDef, CatalogAddition } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Catalog Manager (roadmap item 4, Phase 3) — the admin surface for the custom
@@ -696,6 +708,14 @@ export default function CatalogManagerDashboard() {
           </div>
         </div>
       )}
+
+      {/* ───────────────────────────────────────────────────────────────────
+          STEP 4 catalog codes (Catalog Manager Phase 7). A self-contained,
+          independently-loaded section: add a brand-new STEP 4 code that works
+          everywhere immediately (pickers, import, row birth, mapping, rates)
+          with no redeploy, manage existing additions, and reconcile template
+          drift. Mounted unconditionally — it has its own loading + error UI. */}
+      <Step4CatalogSection />
     </div>
   );
 }
@@ -786,5 +806,761 @@ function MergePanel({
         </p>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// STEP 4 catalog section (Catalog Manager Phase 7). Add / manage in-app catalog
+// additions (the catalog_additions table). An addition is SELF-CONTAINED — it
+// carries its own Procore BLI + default unit price — so it resolves at every
+// chokepoint the moment it is created (the overlays are re-primed here on
+// create / edit) with NO cost_code_map / rate_card widening and no redeploy.
+// Adds never move a saved dollar: a price freezes on a row at birth.
+//
+// Drift honesty: an addition lives only in-app until its STEP 4 row is hand-
+// added to the master template and `npm run sync-codes` re-harvests it into
+// estimate-catalog.json. The banner makes that owed work loud; once a harvest
+// ships the code as a built-in, one-click "mark landed" retires the now-
+// superseded overlay (the built-in wins by construction).
+// ---------------------------------------------------------------------------
+
+const COST_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "L", label: "Labor" },
+  { value: "M", label: "Materials" },
+  { value: "S", label: "Subcontract" },
+];
+
+const COST_TYPE_LABELS: Record<string, string> = {
+  L: "Labor",
+  M: "Materials",
+  S: "Subcontract",
+};
+
+const additionCurrency = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function Step4CatalogSection() {
+  const [additions, setAdditions] = useState<CatalogAddition[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Load the live additions on mount and prime the in-session overlay so a
+  // workspace opened later in this tab — and this page's own drift math — reflect
+  // them. FAIL-SOFT: an outage degrades to "no additions", never blocks.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await getCatalogAdditions();
+        if (!cancelled) {
+          setAdditions(loaded);
+          primeCatalogAdditionOverlays(loaded);
+        }
+      } catch (err) {
+        console.error("Failed to load catalog additions:", err);
+        if (!cancelled) {
+          setAdditions([]);
+          setLoadError(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const flashSaved = (itemId: string) => {
+    setSaveSuccess(itemId);
+    setTimeout(() => setSaveSuccess((c) => (c === itemId ? null : c)), 3000);
+  };
+
+  // Re-prime the overlays after any mutation so the new/edited addition is live
+  // in-session at every chokepoint (no remount needed).
+  const commit = (next: CatalogAddition[]) => {
+    setAdditions(next);
+    primeCatalogAdditionOverlays(next);
+  };
+
+  // Create: validate client-side for instant clean messages (mirroring the db
+  // gate), then write through db.ts — the authoritative gate + 23505 race guard.
+  // Returns an error string for the form to show, or null on success.
+  const handleCreate = async (draft: {
+    itemId: string;
+    description: string;
+    targetUom: string;
+    unitPrice: string;
+    costType: string;
+    procoreCode: string;
+  }): Promise<string | null> => {
+    const itemId = draft.itemId.trim();
+    const description = draft.description.trim();
+    if (!isStep23DeterministicCode(itemId)) {
+      return `"${draft.itemId || "(empty)"}" is not a valid catalog code — it must be NN-NNNN.NNN (e.g. 11-5000.010).`;
+    }
+    if (isBuiltInCatalogCode(itemId)) {
+      return `${itemId} is already a built-in STEP 4 code — a built-in always wins, so an addition can't shadow it.`;
+    }
+    if ((additions ?? []).some((a) => a.itemId === itemId)) {
+      return `${itemId} already exists as a catalog addition.`;
+    }
+    if (description === "") {
+      return "A description is required — it is the import-match and display label.";
+    }
+    if (draft.procoreCode === "" || !isValidProcoreCode(draft.procoreCode)) {
+      return "Pick a Procore Budget Line Item — it names where this code's dollars land.";
+    }
+    const price = draft.unitPrice.trim() === "" ? 0 : Number(draft.unitPrice);
+    if (!Number.isFinite(price)) {
+      return `"${draft.unitPrice}" is not a valid unit price — enter a finite number (a negative deduction is allowed).`;
+    }
+    if (!["L", "M", "S"].includes(draft.costType)) {
+      return "Choose a cost type: Labor, Materials, or Subcontract.";
+    }
+
+    setBusyItemId(itemId);
+    try {
+      const created = await createCatalogAddition({
+        itemId,
+        description,
+        targetUom: draft.targetUom,
+        defaultUnitPrice: price,
+        costType: draft.costType,
+        procoreCode: draft.procoreCode,
+      });
+      commit([...(additions ?? []), created].sort((a, b) => a.itemId.localeCompare(b.itemId)));
+      flashSaved(itemId);
+      setShowAddForm(false);
+      return null;
+    } catch (err) {
+      console.error(`Failed to create catalog code ${itemId}:`, err);
+      return err instanceof Error ? err.message : `Failed to create ${itemId}.`;
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const handleFieldEdit = async (
+    itemId: string,
+    patch: {
+      description?: string;
+      targetUom?: string;
+      defaultUnitPrice?: number;
+      costType?: string;
+      procoreCode?: string;
+    }
+  ) => {
+    setBusyItemId(itemId);
+    try {
+      const updated = await updateCatalogAddition({ itemId, ...patch });
+      commit((additions ?? []).map((a) => (a.itemId === itemId ? updated : a)));
+      flashSaved(itemId);
+    } catch (err) {
+      console.error(`Failed to update catalog code ${itemId}:`, err);
+      alert(err instanceof Error ? err.message : `Failed to update ${itemId}. No change was saved.`);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const handleMarkLanded = async (itemId: string) => {
+    if (
+      !window.confirm(
+        `Mark ${itemId} as landed?\n\nThis code now ships as a built-in STEP 4 code from the harvested template, so the built-in already wins everywhere. Marking it landed retires the in-app overlay; the addition row stays as the audit record. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusyItemId(itemId);
+    try {
+      const updated = await updateCatalogAddition({ itemId, status: "landed" });
+      commit((additions ?? []).map((a) => (a.itemId === itemId ? updated : a)));
+      flashSaved(itemId);
+    } catch (err) {
+      console.error(`Failed to mark ${itemId} landed:`, err);
+      alert(err instanceof Error ? err.message : `Failed to mark ${itemId} landed. No change was saved.`);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  // Drift partition (the honest-banner oracle): active additions not yet in the
+  // template (drifted) vs. those a fresh harvest now ships as built-ins (ready).
+  const { drifted, landedReady } = useMemo(() => {
+    const d: CatalogAddition[] = [];
+    const r: CatalogAddition[] = [];
+    for (const a of additions ?? []) {
+      const state = catalogAdditionDriftState(a);
+      if (state === "drifted") d.push(a);
+      else if (state === "landed-ready") r.push(a);
+    }
+    return { drifted: d, landedReady: r };
+  }, [additions]);
+
+  const filtered = useMemo(() => {
+    const list = additions ?? [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (a) =>
+        a.itemId.toLowerCase().includes(q) ||
+        a.description.toLowerCase().includes(q) ||
+        a.targetUom.toLowerCase().includes(q) ||
+        a.costType.toLowerCase().includes(q) ||
+        (COST_TYPE_LABELS[a.costType] ?? "").toLowerCase().includes(q) ||
+        a.procoreCode.toLowerCase().includes(q) ||
+        a.status.toLowerCase().includes(q)
+    );
+  }, [additions, searchQuery]);
+
+  return (
+    <section className="flex flex-col gap-4 border-t border-grid-border pt-8 mt-4">
+      {/* Section header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
+            <PackagePlus className="text-blue-600 dark:text-blue-400" size={24} /> STEP 4 CATALOG CODES
+          </h2>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1.5">
+            Add a brand-new STEP 4 catalog code that works everywhere immediately — pickers, import matching, row birth,
+            cost-code mapping, and rates — with no redeploy. An addition carries its own Procore destination and default
+            unit price; it never moves a saved dollar.
+          </p>
+        </div>
+        {additions !== null && !loadError && (
+          <button
+            onClick={() => setShowAddForm((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-bold uppercase bg-blue-600 hover:bg-blue-700 text-white transition-colors shrink-0 self-start"
+            title="Add a new STEP 4 catalog code"
+          >
+            {showAddForm ? <X size={14} /> : <Plus size={14} />} {showAddForm ? "Close" : "Add code"}
+          </button>
+        )}
+      </div>
+
+      {/* Add form */}
+      {showAddForm && additions !== null && !loadError && (
+        <AddStep4CodeForm disabled={busyItemId !== null} onSubmit={handleCreate} onCancel={() => setShowAddForm(false)} />
+      )}
+
+      {/* Drift banner — additions not yet in the harvested template file */}
+      {drifted.length > 0 && (
+        <div className="bg-rose-50/50 dark:bg-rose-950/10 border border-rose-200 dark:border-rose-900/50 p-4 rounded-xl flex items-start gap-3">
+          <AlertTriangle className="text-rose-500 mt-0.5 flex-shrink-0 animate-pulse" size={18} />
+          <div>
+            <h4 className="text-xs font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider">
+              {drifted.length} catalog addition{drifted.length === 1 ? "" : "s"} not yet in the template file
+            </h4>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mt-1">
+              These codes work in the app now, but they live ONLY here until their STEP 4 row is added to{" "}
+              <span className="font-mono">templates/Company_Estimate_Template.xlsx</span> and{" "}
+              <span className="font-mono font-bold">npm run sync-codes</span> is re-run — otherwise the next harvest will
+              not know about them:&nbsp;
+              <span className="font-mono font-bold">
+                {drifted.slice(0, 12).map((a) => a.itemId).join(", ")}
+                {drifted.length > 12 ? ", …" : ""}
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Reconciliation banner — additions a fresh harvest now ships as built-ins */}
+      {landedReady.length > 0 && (
+        <div className="bg-blue-50/50 dark:bg-blue-950/10 border border-blue-200 dark:border-blue-900/50 p-4 rounded-xl flex items-start gap-3">
+          <PackageCheck className="text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" size={18} />
+          <div className="flex-1">
+            <h4 className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider">
+              {landedReady.length} addition{landedReady.length === 1 ? "" : "s"} now shipped in the template — mark landed
+            </h4>
+            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mt-1">
+              A fresh harvest added {landedReady.length === 1 ? "this code" : "these codes"} as built-in STEP 4{" "}
+              {landedReady.length === 1 ? "code" : "codes"}, so the built-in already wins everywhere. Mark{" "}
+              {landedReady.length === 1 ? "it" : "each"} landed to retire the now-superseded in-app overlay:
+            </p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {landedReady.map((a) => (
+                <button
+                  key={a.itemId}
+                  onClick={() => handleMarkLanded(a.itemId)}
+                  disabled={busyItemId !== null}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase border border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/40 disabled:opacity-40 transition-colors"
+                  title={`Mark ${a.itemId} landed (the built-in now wins)`}
+                >
+                  <PackageCheck size={11} /> {a.itemId}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Body — additions is null only while loading (set to [] on error) */}
+      {additions === null ? (
+        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 p-6">
+          <Terminal className="text-blue-600 dark:text-blue-400 animate-pulse" size={18} /> Loading catalog additions…
+        </div>
+      ) : loadError ? (
+        <div className="flex items-center gap-2 bg-rose-50/50 dark:bg-rose-950/10 border border-rose-200 dark:border-rose-900/50 rounded-lg p-4 text-[11px] text-rose-700 dark:text-rose-400">
+          <AlertTriangle size={16} className="shrink-0" /> The catalog additions table could not be loaded. Adds and edits
+          are unavailable until the live table is reachable — reload to retry.
+        </div>
+      ) : additions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center border-2 border-dashed border-grid-border rounded-xl p-12 text-center bg-card dark:bg-card/10">
+          <PackagePlus size={40} className="text-blue-500 mb-4" />
+          <h3 className="text-sm font-bold text-foreground mb-1">No catalog additions yet</h3>
+          <p className="text-slate-600 dark:text-slate-400 max-w-md text-[11px] leading-relaxed">
+            Use <span className="font-bold">Add code</span> to create a STEP 4 catalog code in-app. It becomes available
+            everywhere immediately and is reconciled into the template at the next harvest.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-4 top-3 text-slate-600 dark:text-slate-400" size={15} />
+            <input
+              type="text"
+              placeholder="Search additions by code, description, unit, cost type, Procore code, or status…"
+              className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg pl-11 pr-4 py-2.5 text-xs text-foreground outline-none transition-all"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Table */}
+          <div className="bg-card border border-grid-border rounded-xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-grid-border">
+                <thead>
+                  <tr className="bg-background/80 dark:bg-slate-900/80 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Code</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Description</th>
+                    <th className="p-3 text-center w-20 border-r border-b border-grid-border font-semibold">UOM</th>
+                    <th className="p-3 text-center w-28 border-r border-b border-grid-border font-semibold">Unit Price</th>
+                    <th className="p-3 text-center w-28 border-r border-b border-grid-border font-semibold">Cost Type</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Procore BLI</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Status</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
+                        No additions match the query: &quot;{searchQuery}&quot;
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((a) => (
+                      <Step4AdditionRow
+                        key={a.itemId}
+                        addition={a}
+                        busy={busyItemId === a.itemId}
+                        anyBusy={busyItemId !== null}
+                        justSaved={saveSuccess === a.itemId}
+                        onEdit={handleFieldEdit}
+                        onMarkLanded={handleMarkLanded}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-lg p-4 text-[10px] text-amber-700 dark:text-amber-500 font-bold uppercase tracking-wider">
+            <Info className="text-amber-500/80 shrink-0" size={14} />
+            <span>
+              Editing an addition changes only FUTURE row births — a catalog unit price freezes on each line item the
+              moment a row is saved, so existing estimates never move.
+            </span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add-code form — its own field state; full client-side validation runs in the
+// parent's onSubmit (which mirrors the db gate) and returns a clean message.
+// ---------------------------------------------------------------------------
+
+function AddStep4CodeForm({
+  disabled,
+  onSubmit,
+  onCancel,
+}: {
+  disabled: boolean;
+  onSubmit: (draft: {
+    itemId: string;
+    description: string;
+    targetUom: string;
+    unitPrice: string;
+    costType: string;
+    procoreCode: string;
+  }) => Promise<string | null>;
+  onCancel: () => void;
+}) {
+  const [itemId, setItemId] = useState("");
+  const [description, setDescription] = useState("");
+  const [targetUom, setTargetUom] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [costType, setCostType] = useState("M");
+  const [procoreCode, setProcoreCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const busy = disabled || submitting;
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    const err = await onSubmit({ itemId, description, targetUom, unitPrice, costType, procoreCode });
+    setSubmitting(false);
+    if (err) setError(err);
+    // On success the parent hides the form, so no reset is needed here.
+  };
+
+  const fieldClasses =
+    "bg-card border border-grid-border rounded px-2 py-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50";
+
+  return (
+    <div className="bg-blue-50/30 dark:bg-blue-950/10 border border-blue-200 dark:border-blue-900/50 rounded-xl p-5 space-y-4 animate-fade-in">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Catalog code *
+          <input
+            value={itemId}
+            onChange={(e) => setItemId(e.target.value)}
+            disabled={busy}
+            placeholder="11-5000.010"
+            className={`font-mono ${fieldClasses}`}
+            title="A deterministic STEP 4 code, NN-NNNN.NNN"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 lg:col-span-2">
+          Description *
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={busy}
+            placeholder="e.g. Window Washing Hoist"
+            className={fieldClasses}
+            title="The import-match and display label"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Unit of measure
+          <input
+            value={targetUom}
+            onChange={(e) => setTargetUom(e.target.value)}
+            disabled={busy}
+            placeholder="EA"
+            className={`font-mono uppercase ${fieldClasses}`}
+            title="The as-bid unit of measure (optional)"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Default unit price
+          <input
+            type="number"
+            step="0.01"
+            inputMode="decimal"
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            disabled={busy}
+            placeholder="0.00"
+            className={`font-mono text-right ${fieldClasses}`}
+            title="Frozen onto a row at birth — a negative deduction is allowed"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Cost type *
+          <select value={costType} onChange={(e) => setCostType(e.target.value)} disabled={busy} className={`cursor-pointer ${fieldClasses}`}>
+            {COST_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value} — {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 lg:col-span-3">
+          Procore Budget Line Item *
+          <select value={procoreCode} onChange={(e) => setProcoreCode(e.target.value)} disabled={busy} className={`font-mono cursor-pointer ${fieldClasses}`}>
+            <option value="">— select a Procore destination —</option>
+            {PROCORE_VALID_CODES.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.code} — {o.description}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {error && (
+        <p className="text-[11px] text-rose-600 dark:text-rose-400 flex items-start gap-1.5">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {error}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={submit}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[11px] font-bold uppercase bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="Create the catalog code"
+        >
+          {submitting ? "Adding…" : (<><Plus size={12} /> Add code</>)}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[11px] font-bold uppercase border border-grid-border text-foreground hover:border-slate-400 disabled:opacity-40 transition-colors"
+        >
+          Cancel
+        </button>
+        <span className="text-[10px] text-slate-500 ml-1">
+          Works everywhere immediately — pickers, import, row birth, mapping, rates.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One addition row. Active rows are inline-editable (description, UOM, price,
+// cost type, Procore BLI); a landed row is frozen (the built-in supersedes it).
+// ---------------------------------------------------------------------------
+
+function Step4AdditionRow({
+  addition,
+  busy,
+  anyBusy,
+  justSaved,
+  onEdit,
+  onMarkLanded,
+}: {
+  addition: CatalogAddition;
+  busy: boolean;
+  anyBusy: boolean;
+  justSaved: boolean;
+  onEdit: (
+    itemId: string,
+    patch: { description?: string; targetUom?: string; defaultUnitPrice?: number; costType?: string; procoreCode?: string }
+  ) => void;
+  onMarkLanded: (itemId: string) => void;
+}) {
+  const a = addition;
+  const active = a.status === "active";
+  const drift = catalogAdditionDriftState(a);
+  const [editingCostType, setEditingCostType] = useState(false);
+  const [editingProcore, setEditingProcore] = useState(false);
+  const isLegacyProcore = !isValidProcoreCode(a.procoreCode);
+
+  const cellHover = "transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
+
+  return (
+    <tr className="group transition-colors">
+      {/* Code */}
+      <td className={`p-3 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-wide uppercase border-r border-b border-grid-border whitespace-nowrap ${cellHover}`}>
+        <div className="flex items-center gap-2">
+          {a.itemId}
+          {justSaved && <CheckCircle2 size={14} className="text-emerald-500 animate-pulse shrink-0" />}
+        </div>
+      </td>
+
+      {/* Description */}
+      <td className={`p-2 border-r border-b border-grid-border ${cellHover}`}>
+        {active ? (
+          <InlineTextCell
+            value={a.description}
+            placeholder="Description"
+            disabled={busy}
+            title="the import-match and display label"
+            onCommit={(next) => {
+              if (next.trim() === "") {
+                alert("A description is required.");
+                return;
+              }
+              onEdit(a.itemId, { description: next });
+            }}
+          />
+        ) : (
+          <span className="px-2 text-foreground">{a.description}</span>
+        )}
+      </td>
+
+      {/* UOM */}
+      <td className={`p-2 border-r border-b border-grid-border ${cellHover}`}>
+        {active ? (
+          <InlineTextCell
+            value={a.targetUom}
+            placeholder="—"
+            mono
+            disabled={busy}
+            title="the as-bid unit of measure"
+            onCommit={(next) => onEdit(a.itemId, { targetUom: next })}
+          />
+        ) : (
+          <span className="px-2 font-mono text-foreground">{a.targetUom || "—"}</span>
+        )}
+      </td>
+
+      {/* Unit price */}
+      <td className={`p-2 text-right border-r border-b border-grid-border ${cellHover}`}>
+        {active ? (
+          <InlineTextCell
+            value={String(a.defaultUnitPrice)}
+            placeholder="0"
+            mono
+            disabled={busy}
+            title="frozen onto a row at birth (negatives allowed)"
+            onCommit={(next) => {
+              const v = next.trim() === "" ? 0 : Number(next);
+              if (!Number.isFinite(v)) {
+                alert(`"${next}" is not a valid unit price.`);
+                return;
+              }
+              onEdit(a.itemId, { defaultUnitPrice: v });
+            }}
+          />
+        ) : (
+          <span className="px-2 font-mono text-foreground">{additionCurrency.format(a.defaultUnitPrice)}</span>
+        )}
+      </td>
+
+      {/* Cost type */}
+      <td className={`p-2 text-center border-r border-b border-grid-border ${cellHover}`}>
+        {!active ? (
+          <span className="font-mono text-foreground" title={COST_TYPE_LABELS[a.costType]}>{a.costType}</span>
+        ) : editingCostType ? (
+          <select
+            autoFocus
+            value={a.costType}
+            disabled={busy}
+            onChange={(e) => {
+              onEdit(a.itemId, { costType: e.target.value });
+              setEditingCostType(false);
+            }}
+            onBlur={() => { if (!busy) setEditingCostType(false); }}
+            className="text-xs font-mono rounded-md border border-blue-500 px-2 py-1.5 bg-card cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 text-foreground disabled:opacity-50"
+            title={`Cost type for ${a.itemId}`}
+          >
+            {COST_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value} — {o.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <button
+            onClick={() => setEditingCostType(true)}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-xs font-mono font-bold rounded-md border border-grid-border hover:border-blue-500 px-2.5 py-1.5 bg-card text-foreground cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
+            title={`${COST_TYPE_LABELS[a.costType] ?? a.costType} — click to change`}
+          >
+            {a.costType}
+            <PenLine size={11} className="text-slate-400 shrink-0" />
+          </button>
+        )}
+      </td>
+
+      {/* Procore BLI */}
+      <td className={`p-3 text-center border-r border-b border-grid-border ${cellHover}`}>
+        {!active ? (
+          <span className="font-mono text-slate-500">{a.procoreCode}</span>
+        ) : editingProcore ? (
+          <select
+            autoFocus
+            value={a.procoreCode}
+            disabled={busy}
+            onChange={(e) => {
+              onEdit(a.itemId, { procoreCode: e.target.value });
+              setEditingProcore(false);
+            }}
+            onBlur={() => { if (!busy) setEditingProcore(false); }}
+            className="text-xs font-mono rounded-md border border-blue-500 px-2 py-2 bg-card cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 text-foreground disabled:opacity-50 disabled:cursor-wait w-44"
+            title={`Procore Budget Line Item for ${a.itemId}`}
+          >
+            {/* Legacy out-of-list value: shown so the select never blanks; not re-selectable */}
+            {isLegacyProcore && (
+              <option value={a.procoreCode} disabled>
+                {a.procoreCode} (not on Importer list)
+              </option>
+            )}
+            {PROCORE_VALID_CODES.map((opt) => (
+              <option key={opt.code} value={opt.code}>
+                {opt.code}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <button
+            onClick={() => setEditingProcore(true)}
+            disabled={busy}
+            className="flex items-center gap-2 text-xs font-mono font-bold rounded-md border border-grid-border hover:border-blue-500 px-3 py-2 bg-card text-foreground cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait w-44 justify-between mx-auto"
+            title={PROCORE_CODE_DESCRIPTIONS.get(a.procoreCode) || `Procore destination for ${a.itemId}`}
+          >
+            <span className={isLegacyProcore ? "text-rose-500" : ""}>{busy ? "Saving…" : a.procoreCode}</span>
+            <PenLine size={12} className="text-slate-400 shrink-0" />
+          </button>
+        )}
+      </td>
+
+      {/* Status */}
+      <td className={`p-3 text-center border-r border-b border-grid-border ${cellHover}`}>
+        {active ? (
+          <div className="flex flex-col items-center gap-1">
+            <span className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50">
+              ACTIVE
+            </span>
+            {drift === "drifted" ? (
+              <span className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-wider bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-500 border-amber-200 dark:border-amber-900/50" title="Not yet in the harvested template — add the STEP 4 row and re-run sync-codes">
+                NOT IN TEMPLATE
+              </span>
+            ) : (
+              <span className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-wider bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/50" title="Now shipped as a built-in — ready to mark landed">
+                IN TEMPLATE
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest bg-slate-100 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700">
+            LANDED
+          </span>
+        )}
+      </td>
+
+      {/* Actions */}
+      <td className={`p-3 text-center border-r border-b border-grid-border ${cellHover}`}>
+        {active && drift === "landed-ready" ? (
+          <button
+            onClick={() => onMarkLanded(a.itemId)}
+            disabled={anyBusy}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase border border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-950/40 disabled:opacity-40 transition-colors"
+            title="The built-in now wins — mark this addition landed"
+          >
+            <PackageCheck size={11} /> Mark landed
+          </button>
+        ) : active ? (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">In-app only</span>
+        ) : (
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">Landed (superseded)</span>
+        )}
+      </td>
+    </tr>
   );
 }

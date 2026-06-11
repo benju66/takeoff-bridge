@@ -26,10 +26,10 @@ import {
 } from "@/lib/step23Normalization";
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 import { validateAssignInput } from "@/lib/assignCode";
-import { getCatalogItems, primeCatalogAdditions, catalogAdditionToItem } from "@/lib/catalog";
+import { getCatalogItems } from "@/lib/catalog";
+import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { getDivisionCode } from "@/lib/division";
-import { primeCostCodeResolver, primeCostCodeResolverFromCatalog, primeCostCodeAdditions } from "@/lib/costCodeResolver";
-import { primeCatalogPriceAdditions } from "@/lib/rateResolver";
+import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
   recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
@@ -185,10 +185,7 @@ export default function ImportPastEstimatePage() {
       // matching) already includes additions. Self-contained — additions carry
       // their own procore_code + default_unit_price — so the catalog item overlay
       // + BOTH resolvers carry them; cost_code_map / rate_card untouched. FAIL-SOFT.
-      const additionItems = (await getCatalogAdditions().catch(() => [])).map(catalogAdditionToItem);
-      primeCatalogAdditions(additionItems);
-      primeCostCodeAdditions(additionItems);
-      primeCatalogPriceAdditions(additionItems);
+      primeCatalogAdditionOverlays(await getCatalogAdditions().catch(() => []));
 
       // Prime the granular-code resolver the same way the workspace mount does;
       // the same entries (reversed) feed the bridge's procore→internal lookup.

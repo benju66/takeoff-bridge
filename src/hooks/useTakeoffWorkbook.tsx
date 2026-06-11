@@ -12,7 +12,8 @@ import {
   ColumnFiltersState,
   Table,
 } from "@tanstack/react-table";
-import { getCatalogItems, primeCatalogAdditions, catalogAdditionToItem } from "@/lib/catalog";
+import { getCatalogItems } from "@/lib/catalog";
+import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
@@ -36,10 +37,9 @@ import {
 import {
   primeCostCodeResolver,
   primeCostCodeResolverFromCatalog,
-  primeCostCodeAdditions,
   resolveProcoreCode,
 } from "@/lib/costCodeResolver";
-import { primeRateCard, primeCatalogPriceAdditions, resolveCatalogPrice } from "@/lib/rateResolver";
+import { primeRateCard, resolveCatalogPrice } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
@@ -373,10 +373,7 @@ export function useTakeoffWorkbook(
         // carry their own procore_code + default_unit_price — so the catalog item
         // overlay + BOTH resolvers carry them; cost_code_map / rate_card untouched.
         // An empty list is a no-op identity (nothing primed).
-        const additionItems = savedCatalogAdditions.map(catalogAdditionToItem);
-        primeCatalogAdditions(additionItems);
-        primeCostCodeAdditions(additionItems);
-        primeCatalogPriceAdditions(additionItems);
+        primeCatalogAdditionOverlays(savedCatalogAdditions);
 
         // Prime the company-default rate chokepoint (Rate-card Phase B). On an
         // EMPTY result (unseeded DB / template-name mismatch) leave it unprimed:

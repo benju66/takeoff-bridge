@@ -60,6 +60,28 @@ export function isBuiltInCatalogCode(itemId: string): boolean {
 }
 
 /**
+ * Drift state of a catalog addition vs the HARVESTED template
+ * (estimate-catalog.json → ESTIMATE_ITEMS_MASTER). Phase 7's "honest drift"
+ * banner is built on this single oracle:
+ *  - 'reconciled'   — already marked 'landed'; the built-in wins the overlay and
+ *                     the row remains only as the audit/reconciliation record.
+ *  - 'landed-ready' — still 'active' but its code now ships as a BUILT-IN (a fresh
+ *                     harvest added the STEP 4 row): the in-app overlay is now
+ *                     superseded, so the page offers one-click "mark landed".
+ *  - 'drifted'      — 'active' and NOT yet a built-in: the row exists only in-app.
+ *                     Its STEP 4 row must be hand-added to the master template and
+ *                     `npm run sync-codes` re-run, or it is lost on a re-harvest.
+ * Reads the BUILT-INS only (via isBuiltInCatalogCode) — never the primed overlay —
+ * so the answer is stable regardless of what is primed in the session.
+ */
+export type CatalogAdditionDriftState = "reconciled" | "landed-ready" | "drifted";
+
+export function catalogAdditionDriftState(a: CatalogAddition): CatalogAdditionDriftState {
+  if (a.status === "landed") return "reconciled";
+  return isBuiltInCatalogCode(a.itemId) ? "landed-ready" : "drifted";
+}
+
+/**
  * Project a DB CatalogAddition row to the InternalEstimateItem the catalog +
  * resolver overlays consume (primeCatalogAdditions / primeCostCodeAdditions /
  * primeCatalogPriceAdditions). procoreParentCode mirrors the granular procoreCode:

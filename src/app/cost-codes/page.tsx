@@ -11,17 +11,19 @@ import {
   PenLine,
   ShieldCheck,
   AlertTriangle,
+  PackagePlus,
 } from "lucide-react";
-import { getCatalogItems } from "@/lib/catalog";
+import { getCatalogItems, isBuiltInCatalogCode } from "@/lib/catalog";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getCostCodeMap, updateCostCodeMapping } from "@/lib/db";
+import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions } from "@/lib/db";
 import { primeCostCodeResolver } from "@/lib/costCodeResolver";
+import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
   PROCORE_VALID_CODES,
   PROCORE_CODE_DESCRIPTIONS,
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
-import { CostCodeMapEntry } from "@/types/db";
+import { CostCodeMapEntry, CatalogAddition } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Cost Code Mapping editor (Phase 3c) — global view/edit of cost_code_map,
@@ -65,6 +67,15 @@ export default function CostCodeMappingDashboard() {
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [savingCode, setSavingCode] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  /**
+   * In-app catalog additions (Catalog Manager Phase 7). Self-contained codes
+   * that carry their OWN procore_code via the resolver overlay — they are NOT in
+   * cost_code_map, so they are shown here READ-ONLY (mapping edits live on
+   * /catalog) and excluded from the missing-from-map divergence (their overlay
+   * IS their mapping, so flagging them would be a false alarm). Fail-soft: an
+   * outage degrades to "no additions", never blocks the editor.
+   */
+  const [additions, setAdditions] = useState<CatalogAddition[]>([]);
 
   // Load the live mapping on mount (single gateway: db.ts)
   useEffect(() => {
@@ -85,6 +96,23 @@ export default function CostCodeMappingDashboard() {
         }
       }
     })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load + prime the catalog-additions overlay independently (fail-soft). Prime
+  // keeps the in-session resolvers consistent; the list drives the read-only
+  // additions display + the divergence exclusion.
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogAdditions()
+      .then((loaded) => {
+        if (cancelled) return;
+        setAdditions(loaded);
+        primeCatalogAdditionOverlays(loaded);
+      })
+      .catch((err) => {
+        console.error("Failed to load catalog additions (read-only display skipped):", err);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -140,14 +168,37 @@ export default function CostCodeMappingDashboard() {
     });
   }, [entries, searchQuery]);
 
-  // Divergence diagnostic: catalog itemIds with NO cost_code_map row resolve
-  // to "" at row creation (export blocker) and are editable nowhere — surface
-  // them here so the gap is visible before it bites at export time.
+  // Divergence diagnostic: BUILT-IN catalog itemIds with NO cost_code_map row
+  // resolve to "" at row creation (export blocker) and are editable nowhere —
+  // surface them here so the gap is visible before it bites at export time.
+  // Scoped to built-ins via isBuiltInCatalogCode (NOT the primed overlay): an
+  // in-app addition resolves through its own overlay, so its absence from
+  // cost_code_map is by design — never a gap, regardless of prime timing. A
+  // LANDED addition that is now a genuine built-in DOES surface if its map row
+  // is still missing (a real gap to seed).
   const catalogCodesMissingFromMap = useMemo(() => {
     if (!entries || entries.length === 0) return [];
     const mapped = new Set(entries.map((e) => e.internalCode));
-    return Object.keys(getCatalogItems()).filter((id) => !mapped.has(id)).sort();
+    return Object.keys(getCatalogItems())
+      .filter((id) => isBuiltInCatalogCode(id) && !mapped.has(id))
+      .sort();
   }, [entries]);
+
+  // Read-only additions for display, joined to their Procore description and
+  // search-filtered with the same query as the editable map table.
+  const filteredAdditions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return additions;
+    return additions.filter((a) => {
+      const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(a.procoreCode) || "";
+      return (
+        a.itemId.toLowerCase().includes(query) ||
+        a.description.toLowerCase().includes(query) ||
+        a.procoreCode.toLowerCase().includes(query) ||
+        procoreDescription.toLowerCase().includes(query)
+      );
+    });
+  }, [additions, searchQuery]);
 
   if (!isLoaded || entries === null) {
     return (
@@ -367,6 +418,65 @@ export default function CostCodeMappingDashboard() {
               </table>
             </div>
           </div>
+
+          {/* In-app catalog additions — READ-ONLY here (managed on /catalog) */}
+          {additions.length > 0 && (
+            <div className="bg-card border border-blue-200 dark:border-blue-900/50 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-grid-border bg-blue-50/40 dark:bg-blue-950/10 flex items-center gap-2">
+                <PackagePlus size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                  In-app catalog additions ({additions.length})
+                </h3>
+                <span className="text-[10px] text-slate-500 ml-auto">
+                  Self-contained — managed on{" "}
+                  <a href="/catalog" className="font-bold text-blue-600 dark:text-blue-400 hover:underline">
+                    /catalog
+                  </a>
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-separate border-spacing-0 border-l border-grid-border">
+                  <thead>
+                    <tr className="bg-background/60 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                      <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Internal Code</th>
+                      <th className="p-4 text-center w-80 border-r border-b border-grid-border font-semibold">Item Description</th>
+                      <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Procore Code</th>
+                      <th className="p-4 text-center w-72 border-r border-b border-grid-border font-semibold">Procore Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAdditions.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
+                          No additions match the query: &quot;{searchQuery}&quot;
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredAdditions.map((a) => {
+                        const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(a.procoreCode);
+                        return (
+                          <tr key={a.itemId} className="group transition-colors">
+                            <td className="p-4 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-widest uppercase border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                              {a.itemId}
+                            </td>
+                            <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                              {a.description}
+                            </td>
+                            <td className="p-4 text-center font-mono font-bold text-foreground border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                              {a.procoreCode}
+                            </td>
+                            <td className="p-4 text-slate-600 dark:text-slate-400 font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                              {procoreDescription || <span className="italic text-rose-500">Not on Importer list</span>}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-lg p-4 text-[10px] text-amber-700 dark:text-amber-500 font-bold uppercase tracking-wider">
             <Info className="text-amber-500/80 shrink-0" size={14} />
