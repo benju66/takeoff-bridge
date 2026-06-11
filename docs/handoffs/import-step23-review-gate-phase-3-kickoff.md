@@ -1,5 +1,9 @@
 # Kickoff — STEP 2/3 Review Gate, Phase 3 (the import-page review section: UI + save wiring)
 
+> **STATUS: PHASE 3 BUILT 2026-06-10 (commit `6235a35`, local main, NOT pushed) —
+> this kickoff is now historical. The review gate (roadmap item 1) is COMPLETE;
+> see docs/handoffs/import-step23-review-gate-complete.md for the closure note.**
+
 > Paste the prompt at the bottom as the first message of a fresh session. Workflow per
 > [[feedback-one-phase-per-fresh-session]]. Plan of record (all forks locked):
 > `docs/plans/import-step23-review-gate.md`. Phase 3 is the LAST phase of this roadmap
