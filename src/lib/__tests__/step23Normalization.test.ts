@@ -11,6 +11,7 @@ import {
   isStep23DeterministicCode,
   isBuiltInStep23Code,
   suggestNextStep23Code,
+  activeStep23Defs,
   STEP23_LINE_DEFS,
   type Step23HistorySource,
   type Step23LineDef,
@@ -194,6 +195,94 @@ describe("custom def overlay (extra defs parameter, gate Phase 2)", () => {
     expect(isStep23DeterministicCode("2-4100.003")).toBe(false);
     expect(isBuiltInStep23Code("02-4100.001")).toBe(true);
     expect(isBuiltInStep23Code("02-4100.003")).toBe(false);
+  });
+});
+
+describe("lifecycle: merge redirects + retire (Catalog Manager Phase 1)", () => {
+  // A minted custom (02-4100.003) that duplicated CARE's hand-inserted scope
+  // line, later MERGED into the built-in 02-4100.001 (the common repair).
+  const MERGED_TO_BUILTIN: Step23LineDef[] = [
+    { code: "02-4100.003", label: "Demolition - Openings in CMU", status: "merged", mergedInto: "02-4100.001" },
+  ];
+
+  it("a merged code redirects to its winner at render time (no payload rewrite)", () => {
+    // Assignment to the merged code now shows the WINNER's def…
+    expect(resolveStep23Line("02-4100", "x", "02-4100.003", MERGED_TO_BUILTIN)).toMatchObject({
+      code: "02-4100.001",
+      label: "Demolition",
+    });
+    // …and so does the deterministic pass-through of the merged code itself.
+    expect(resolveStep23Line("02-4100.003", "anything", undefined, MERGED_TO_BUILTIN)?.code).toBe("02-4100.001");
+  });
+
+  it("two custom codes, one merged into the other, redirect to the active winner", () => {
+    const defs: Step23LineDef[] = [
+      { code: "02-4100.003", label: "CMU Openings (old)", status: "merged", mergedInto: "02-4100.004" },
+      { code: "02-4100.004", label: "CMU Openings" },
+    ];
+    expect(resolveStep23Line("02-4100.003", "x", undefined, defs)?.code).toBe("02-4100.004");
+    // The winner resolves to itself.
+    expect(resolveStep23Line("02-4100.004", "x", undefined, defs)?.code).toBe("02-4100.004");
+  });
+
+  it("a retired code STILL labels its old lines (history intact) but its label is its own", () => {
+    const retired: Step23LineDef[] = [
+      { code: "02-4100.003", label: "Demolition - Openings in CMU", status: "retired" },
+    ];
+    expect(resolveStep23Line("02-4100.003", "anything", undefined, retired)).toMatchObject({
+      code: "02-4100.003",
+      label: "Demolition - Openings in CMU",
+      status: "retired",
+    });
+    // Assignment to a retired code still resolves it.
+    expect(resolveStep23Line("02-4100", "x", "02-4100.003", retired)?.code).toBe("02-4100.003");
+  });
+
+  it("activeStep23Defs drops retired/merged customs from pickers but keeps active ones + all built-ins", () => {
+    const overlay: Step23LineDef[] = [
+      { code: "01-0410.002", label: "Night Superintendent" }, // active (status absent)
+      { code: "02-4100.003", label: "Retired Line", status: "retired" },
+      { code: "02-4100.004", label: "Merged Line", status: "merged", mergedInto: "02-4100.001" },
+      { code: "02-4100.001", label: "Hijack", status: "active" }, // shadows a built-in → dropped
+      { code: "02-4100", label: "Malformed" }, // not deterministic → dropped
+    ];
+    const codes = activeStep23Defs(overlay).map((d) => d.code);
+    expect(codes).toContain("01-0410.002"); // active custom offered
+    expect(codes).not.toContain("02-4100.003"); // retired gone
+    expect(codes).not.toContain("02-4100.004"); // merged gone
+    expect(codes).not.toContain("02-4100"); // malformed gone
+    // Built-ins are always present, and the shadowing custom never doubles them.
+    expect(codes.filter((c) => c === "02-4100.001")).toEqual(["02-4100.001"]);
+    expect(codes).toContain("01-0410.001");
+    // Empty/absent overlay === the built-in list.
+    expect(activeStep23Defs().map((d) => d.code)).toEqual(activeStep23Defs([]).map((d) => d.code));
+    expect(activeStep23Defs().every((d) => isBuiltInStep23Code(d.code))).toBe(true);
+  });
+
+  it("suggestNextStep23Code keeps counting retired/merged suffixes (never reused)", () => {
+    // .003 is retired and .004 merged, but both still occupy the suffix space.
+    const defs: Step23LineDef[] = [
+      { code: "02-4100.003", label: "Retired", status: "retired" },
+      { code: "02-4100.004", label: "Merged", status: "merged", mergedInto: "02-4100.001" },
+    ];
+    expect(suggestNextStep23Code("02-4100", defs)).toBe("02-4100.005");
+  });
+
+  it("no dollars move: merging refiles history under the winner with the SAME rate", () => {
+    const cmu = line({ code: "02-4100", description: "Demolition - Openings in CMU", qty: 82, rate: 3419.44, uom: "EA" });
+    const active: Step23LineDef[] = [{ code: "02-4100.003", label: "Demolition - Openings in CMU" }];
+    const merged: Step23LineDef[] = [
+      { code: "02-4100.003", label: "Demolition - Openings in CMU", status: "merged", mergedInto: "02-4100.001" },
+    ];
+    const before = step23Observations([source([], [cmu])], active);
+    const after = step23Observations([source([], [cmu])], merged);
+    // The code the observation files under moves to the winner…
+    expect(before.map((o) => o.itemId)).toEqual(["02-4100.003"]);
+    expect(after.map((o) => o.itemId)).toEqual(["02-4100.001"]);
+    // …but the mined RATE (the only number) is byte-identical — a merge is a
+    // label/redirect, never a dollar.
+    expect(after[0].unitPrice).toBe(before[0].unitPrice);
+    expect(after[0].unitPrice).toBe(3419.44);
   });
 });
 

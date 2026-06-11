@@ -1,4 +1,5 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "./index";
+import type { CatalogLifecycleStatus } from "@/lib/catalogLifecycle";
 
 export interface Project {
   id: string;
@@ -262,5 +263,14 @@ export interface CustomStep23LineDef {
   /** Optional Procore Budget Line Item; null until Catalog Manager fills it. */
   procoreCode: string | null;
   source: 'import_gate' | 'manual';
+  /**
+   * Lifecycle state (Catalog Manager Phase 1). ABSENT === 'active' — every
+   * existing row and code path degrades unchanged until Phase 2 writes these.
+   * 'retired' leaves all pickers but keeps labeling old lines; 'merged'
+   * redirects to `mergedInto` at render time. See `src/lib/catalogLifecycle.ts`.
+   */
+  status?: CatalogLifecycleStatus;
+  /** Winning code when `status === 'merged'`; null/absent otherwise. */
+  mergedInto?: string | null;
 }
 

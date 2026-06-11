@@ -41,6 +41,11 @@ import {
 } from "./constants";
 import type { ImportedSheetLine, ImportedStep23Lines } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
+import {
+  statusOf,
+  resolveMergeTarget,
+  type CatalogLifecycleStatus,
+} from "./catalogLifecycle";
 
 /** A deterministic GC/Site-Ops line a bare STEP 2/3 code can resolve to. */
 export interface Step23LineDef {
@@ -48,6 +53,11 @@ export interface Step23LineDef {
   code: string;
   /** The app's display label for the line, e.g. "Sr Superintendent". */
   label: string;
+  /** Lifecycle state (Catalog Manager Phase 1). Absent === 'active'; built-ins
+   *  never set it. A 'merged' def redirects to `mergedInto` at render time. */
+  status?: CatalogLifecycleStatus;
+  /** Winning code when `status === 'merged'`. */
+  mergedInto?: string | null;
 }
 
 const DETERMINISTIC_RE = /^(\d{2}-\d{4})\.\d{3}$/;
@@ -147,6 +157,12 @@ function lookupsFor(extraDefs?: readonly Step23LineDef[]): Step23DefLookups {
  * `extraDefs` (gate Phase 2) overlays user-minted custom defs on the built-ins
  * — see `lookupsFor` for the collision rule (built-in always beats custom).
  * Pure: same inputs, same answer; the overlay is merely memoized per array.
+ *
+ * Lifecycle (Catalog Manager Phase 1): once a candidate def is found by any
+ * path (assignment, deterministic pass-through, or base/description), a MERGED
+ * def redirects to its winner via `resolveMergeTarget`, so every stored bid
+ * shows the winning code at render time with nothing rewritten. A RETIRED def
+ * still resolves to itself — old lines keep their label, history intact.
  */
 export function resolveStep23Line(
   code: string,
@@ -155,21 +171,24 @@ export function resolveStep23Line(
   extraDefs?: readonly Step23LineDef[]
 ): Step23LineDef | null {
   const { byCode, byBase } = lookupsFor(extraDefs);
+  // Every return follows a merge redirect to the winning def (one hop after
+  // chain-collapse; the guard tolerates accidental chains).
+  const resolve = (def: Step23LineDef | null) => resolveMergeTarget(def, byCode);
 
   if (assignedCode) {
     const assigned = byCode.get(assignedCode.trim());
-    if (assigned) return assigned;
+    if (assigned) return resolve(assigned);
   }
 
   const trimmed = code.trim();
 
   // Already deterministic and known → itself (future re-imports of app exports).
-  if (DETERMINISTIC_RE.test(trimmed)) return byCode.get(trimmed) ?? null;
+  if (DETERMINISTIC_RE.test(trimmed)) return resolve(byCode.get(trimmed) ?? null);
 
   if (!BARE_RE.test(trimmed)) return null;
   const candidates = byBase.get(trimmed);
   if (!candidates) return null;
-  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 1) return resolve(candidates[0]);
 
   // Shared base — exact normalized-description match, exactly one hit.
   const desc = normalize(description);
@@ -177,7 +196,26 @@ export function resolveStep23Line(
   const hits = candidates.filter(
     (c) => desc === normalize(c.label) || desc === normalize(stripTrailingParenthetical(c.label))
   );
-  return hits.length === 1 ? hits[0] : null;
+  return hits.length === 1 ? resolve(hits[0]) : null;
+}
+
+/**
+ * The defs a picker should OFFER (gate Phase 3): the built-ins plus only the
+ * ACTIVE custom overlay defs, code-ordered. Retired and merged customs keep
+ * labeling their old lines through `resolveStep23Line` but leave every dropdown
+ * here. Malformed and built-in-shadowing customs are dropped (the resolver's
+ * own collision rule). Built-ins are always active. Returns a fresh array.
+ */
+export function activeStep23Defs(extraDefs?: readonly Step23LineDef[]): Step23LineDef[] {
+  const usableExtras = (extraDefs ?? []).filter(
+    (d) =>
+      DETERMINISTIC_RE.test(d.code) &&
+      statusOf(d) === "active" &&
+      !builtInLookups.byCode.has(d.code)
+  );
+  return [...STEP23_LINE_DEFS, ...usableExtras].sort((a, b) =>
+    a.code.localeCompare(b.code, undefined, { numeric: true })
+  );
 }
 
 /**
