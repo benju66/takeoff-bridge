@@ -742,6 +742,20 @@ export async function getClassificationHistoryBulk(
 }
 
 /**
+ * Unwraps a PostgREST `projects(...)` join cell (object, or array on older
+ * client versions) into the observation's project context. Shared by the
+ * imported and submitted-version price-history pools so the two can never
+ * normalize the join differently.
+ */
+function mapObservationProjectContext(
+  projects: unknown
+): { name?: string; bid_date?: string; market_sector?: string } | null {
+  return (Array.isArray(projects) ? projects[0] : projects) as
+    | { name?: string; bid_date?: string; market_sector?: string }
+    | null;
+}
+
+/**
  * Imported observations WITH their source project id — the internal shape the
  * Estimate Versioning supersede rule needs (getBidPriceHistory drops a
  * project's imported observations once it has a SUBMITTED version). Shared by
@@ -761,9 +775,7 @@ async function fetchImportedPriceObservations(): Promise<(PriceObservation & { p
   }
 
   return (data || []).map((row) => {
-    const project = (Array.isArray(row.projects) ? row.projects[0] : row.projects) as
-      | { name?: string; bid_date?: string; market_sector?: string }
-      | null;
+    const project = mapObservationProjectContext(row.projects);
     return {
       projectId: (row.project_id as string) || "",
       itemId: row.item_id as string,
@@ -1012,7 +1024,7 @@ export async function getEstimateVersionDetail(
 ): Promise<EstimateVersionDetail | null> {
   const { data, error } = await supabase
     .from("estimate_versions")
-    .select("*")
+    .select(`${ESTIMATE_VERSION_META_COLUMNS}, line_items`)
     .eq("id", versionId)
     .maybeSingle();
 
@@ -1109,9 +1121,7 @@ export async function getBidPriceHistory(): Promise<PriceObservation[]> {
 
   for (const row of submittedRows) {
     submittedProjectIds.add(row.project_id as string);
-    const project = (Array.isArray(row.projects) ? row.projects[0] : row.projects) as
-      | { name?: string; bid_date?: string; market_sector?: string }
-      | null;
+    const project = mapObservationProjectContext(row.projects);
     const items = Array.isArray(row.line_items) ? row.line_items : [];
     for (const item of items as Record<string, unknown>[]) {
       const itemId = (item.item_id as string) || "";

@@ -203,6 +203,10 @@ export function VersionsPanel({
       if (cancelled) return;
       console.error("Failed to load versions for comparison:", err);
       setCompareError(err instanceof Error ? err.message : "Failed to load versions for comparison");
+      // Clear BOTH sides: a previously loaded side must not keep rendering a
+      // diff that no longer matches what the pickers say is being compared.
+      setCompareRowsA(null);
+      setCompareRowsB(null);
     });
 
     return () => { cancelled = true; };
