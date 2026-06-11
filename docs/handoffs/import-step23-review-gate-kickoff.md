@@ -1,5 +1,10 @@
 # Kickoff — STEP 2/3 Review Gate at Import (Import-module roadmap item 1)
 
+> **STATUS 2026-06-10:** planning session produced the plan of record
+> (`docs/plans/import-step23-review-gate.md`, all forks locked) and **Phase 1 is BUILT**
+> (`e8aa586`, suite 514/51, goldens tie). Next session = Phase 2 via
+> `docs/handoffs/import-step23-review-gate-phase-2-kickoff.md`. This doc is historical.
+
 > Paste this as the first message of a fresh session. Workflow per
 > [[feedback-one-phase-per-fresh-session]]: evidence probe → local plan → lock forks with the
 > architect (AskUserQuestion, one option "(Recommended)") → build in slices → end

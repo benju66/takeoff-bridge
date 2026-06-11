@@ -1,6 +1,6 @@
 # STEP 2/3 Review Gate at Import — Plan of Record
-_2026-06-10 · status: PROPOSED · import-module roadmap item 1
-(kickoff: docs/handoffs/import-step23-review-gate-kickoff.md)_
+_2026-06-10 · status: PHASE 1 DONE (`e8aa586`, suite 514/51) · Phases 2–3 pending
+(Phase 2 kickoff: docs/handoffs/import-step23-review-gate-phase-2-kickoff.md)_
 
 ## Goal
 When an estimator imports a past bid, the GC/Site-Ops (STEP 2/3) lines get the same
