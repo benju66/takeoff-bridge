@@ -88,6 +88,9 @@ describe("imported STEP 2/3 detail — capture + payload", () => {
     expect(resolved).toEqual([
       { code: "01-0410", to: "01-0410.001" },
       { code: "02-9010", to: "02-9010.002" },
+      // The hand-inserted scope line on a shared base NEVER resolves on its
+      // own (gate Phase 3's unmappable case — assign or mint at the review).
+      { code: "02-4100", to: null },
     ]);
   });
 });

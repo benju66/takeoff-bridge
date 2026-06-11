@@ -180,6 +180,32 @@ export function resolveStep23Line(
   return hits.length === 1 ? hits[0] : null;
 }
 
+/**
+ * The code the import gate's "create new code" mini-form pre-fills (gate
+ * Phase 3): the as-bid code's base with the next free `.NNN` suffix — one
+ * past the HIGHEST suffix any known def (built-in + custom) claims under that
+ * base, never filling gaps (a gap may be a future built-in's slot; see the
+ * plan's suffix-collision risk). Returns "" when the as-bid code carries no
+ * usable base (non-code junk) or the suffix space is exhausted — the
+ * estimator types the code by hand.
+ */
+export function suggestNextStep23Code(
+  asBidCode: string,
+  extraDefs?: readonly Step23LineDef[]
+): string {
+  const trimmed = asBidCode.trim();
+  const base = BARE_RE.test(trimmed) ? trimmed : DETERMINISTIC_RE.exec(trimmed)?.[1] ?? "";
+  if (!base) return "";
+  const { byBase } = lookupsFor(extraDefs);
+  let highest = 0;
+  for (const def of byBase.get(base) ?? []) {
+    const suffix = Number(def.code.slice(-3));
+    if (suffix > highest) highest = suffix;
+  }
+  if (highest >= 999) return "";
+  return `${base}.${String(highest + 1).padStart(3, "0")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Staff-rate mining (Slice C) — stored STEP 2/3 lines → PriceObservations
 // ---------------------------------------------------------------------------

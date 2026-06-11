@@ -34,6 +34,7 @@ import type { ExtractedEstimate, ExtractedLineItem, ExtractedProjectInputs } fro
 import type { LinkedDivisionTotal, TakeoffSummary } from "./calculations";
 import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
 import { resolveProcoreCode } from "./costCodeResolver";
+import { resolveStep23Line, type Step23LineDef } from "./step23Normalization";
 import { getFuzzySuggestions, type SuggestionItem } from "./similarity";
 import { LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
 import { getDivisionCode } from "./division";
@@ -364,6 +365,10 @@ export interface Step23Corrections {
  * dollars and the tie-out cannot move. Applied in memory immediately before
  * the single `saveImportedStep23Lines` write; the stored column stays
  * write-once.
+ *
+ * CONTRACT (step23ReviewStats depends on it): the output arrays preserve the
+ * input's length and order, and a line object is CLONED only when a correction
+ * actually changes it — an untouched line keeps its reference identity.
  */
 export function applyStep23Corrections(
   payload: ImportedStep23Lines,
@@ -388,6 +393,43 @@ export function applyStep23Corrections(
     step2Lines: correctLines("step2", payload.step2Lines),
     step3Lines: correctLines("step3", payload.step3Lines),
   };
+}
+
+/** The import page's parsed-summary counts for the STEP 2/3 review section
+ *  (gate Phase 3), computed over the payload WITH the estimator's current
+ *  corrections applied — so assigning a line moves it unmapped → resolved live. */
+export interface Step23ReviewStats {
+  /** Captured dollar lines across both sheets. */
+  lineCount: number;
+  /** Lines resolving to a deterministic GC/Site-Ops code (auto, assigned, or minted). */
+  resolved: number;
+  /** Lines with no certain match — they save verbatim, exactly as today. */
+  unmapped: number;
+  /** Lines the current corrections actually change (UOM and/or assignment). */
+  corrected: number;
+}
+
+/**
+ * Counts over `applyStep23Corrections(payload, corrections)`. A line counts as
+ * corrected when a correction CHANGED it — applyStep23Corrections clones a
+ * line only in that case, so reference identity against the original is the
+ * exact "changed" test (inert or stale map entries count nothing). Pure.
+ */
+export function step23ReviewStats(
+  payload: ImportedStep23Lines,
+  corrections: Step23Corrections,
+  extraDefs?: readonly Step23LineDef[]
+): Step23ReviewStats {
+  const correctedPayload = applyStep23Corrections(payload, corrections);
+  const originals = [...payload.step2Lines, ...payload.step3Lines];
+  const lines = [...correctedPayload.step2Lines, ...correctedPayload.step3Lines];
+  let resolved = 0;
+  let corrected = 0;
+  lines.forEach((l, i) => {
+    if (resolveStep23Line(l.code, l.description, l.assignedCode, extraDefs)) resolved++;
+    if (l !== originals[i]) corrected++;
+  });
+  return { lineCount: lines.length, resolved, unmapped: lines.length - resolved, corrected };
 }
 
 // ---------------------------------------------------------------------------

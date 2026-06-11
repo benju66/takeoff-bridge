@@ -28,7 +28,9 @@ import {
   step23LinesForImport,
   applyStep23Corrections,
   step23LineKey,
+  step23ReviewStats,
 } from "@/lib/importEstimate";
+import { resolveStep23Line } from "@/lib/step23Normalization";
 import type { ImportedSheetLine, ImportedStep23Lines } from "@/types/db";
 import { computeTakeoffSummary } from "@/lib/calculations";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
@@ -262,6 +264,76 @@ describe("applyStep23Corrections â€” review-gate edits over the immutable p
       assignments: new Map([[step23LineKey("step3", 30), ""]]),
     });
     expect(corrected).toEqual(payload());
+  });
+});
+
+describe("STEP 2/3 review section — stats + save wiring over the fixture (gate Phase 3)", () => {
+  /** The fixture's unmappable line (shared base, hand-inserted description). */
+  const unmappable = LEGACY_PAST_BID_ORACLE.unmappableStep23;
+
+  async function fixturePayload() {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const payload = step23LinesForImport(extracted);
+    const cmu = payload.step3Lines.find((l) => l.description === unmappable.description)!;
+    return { payload, cmu, key: step23LineKey("step3", cmu.rowNumber) };
+  }
+
+  it("counts resolved/unmapped live as corrections change — assignment moves the needle", async () => {
+    const { payload, key } = await fixturePayload();
+
+    // Baseline: Sr Superintendent + Progress Cleaning resolve; the CMU line cannot.
+    expect(step23ReviewStats(payload, {})).toEqual({
+      lineCount: 3,
+      resolved: 2,
+      unmapped: 1,
+      corrected: 0,
+    });
+
+    // Assigning the line to a freshly-minted custom def resolves it (and counts
+    // as ONE corrected line even with a UOM fix on the same line).
+    const minted = [{ code: "02-4100.003", label: unmappable.description }];
+    const corrections = {
+      uomCorrections: new Map([[key, "EA"]]),
+      assignments: new Map([[key, "02-4100.003"]]),
+    };
+    expect(step23ReviewStats(payload, corrections, minted)).toEqual({
+      lineCount: 3,
+      resolved: 3,
+      unmapped: 0,
+      corrected: 1,
+    });
+
+    // Inert corrections (the bid's own value, stale keys) count nothing.
+    const inert = step23ReviewStats(payload, {
+      uomCorrections: new Map([
+        [key, "SF"], // the as-bid unit — no change
+        [step23LineKey("step2", 999), "WK"], // no such line
+      ]),
+    });
+    expect(inert.corrected).toBe(0);
+  });
+
+  it("the saved payload carries the corrections, never the dollars (handleSave's exact call)", async () => {
+    const { payload, cmu, key } = await fixturePayload();
+    const saved = applyStep23Corrections(payload, {
+      uomCorrections: new Map([[key, " ea "]]),
+      assignments: new Map([[key, "02-4100.003"]]),
+    });
+
+    const savedCmu = saved.step3Lines.find((l) => l.rowNumber === cmu.rowNumber)!;
+    expect(savedCmu.assignedCode).toBe("02-4100.003");
+    expect(savedCmu.uom).toBe("EA");
+    expect(savedCmu.code).toBe(unmappable.code); // as-bid code never rewritten
+    expect([savedCmu.qty, savedCmu.rate, savedCmu.total]).toEqual([cmu.qty, cmu.rate, cmu.total]);
+
+    // The workspace panel's exact render-time call then labels the stored line
+    // under the minted def — retroactively, with no re-import.
+    const minted = [{ code: "02-4100.003", label: unmappable.description }];
+    expect(resolveStep23Line(savedCmu.code, savedCmu.description, savedCmu.assignedCode, minted)?.code).toBe(
+      "02-4100.003"
+    );
+    // Without the custom def the assignment is stale and the line stays bare.
+    expect(resolveStep23Line(savedCmu.code, savedCmu.description, savedCmu.assignedCode)).toBeNull();
   });
 });
 

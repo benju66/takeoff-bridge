@@ -10,6 +10,7 @@ import {
   step23Observations,
   isStep23DeterministicCode,
   isBuiltInStep23Code,
+  suggestNextStep23Code,
   STEP23_LINE_DEFS,
   type Step23HistorySource,
   type Step23LineDef,
@@ -193,6 +194,32 @@ describe("custom def overlay (extra defs parameter, gate Phase 2)", () => {
     expect(isStep23DeterministicCode("2-4100.003")).toBe(false);
     expect(isBuiltInStep23Code("02-4100.001")).toBe(true);
     expect(isBuiltInStep23Code("02-4100.003")).toBe(false);
+  });
+});
+
+describe("suggestNextStep23Code (mint mini-form pre-fill, gate Phase 3)", () => {
+  it("suggests one past the highest suffix the built-ins claim under the base", () => {
+    expect(suggestNextStep23Code("02-4100")).toBe("02-4100.003"); // .001/.002 built-in
+    expect(suggestNextStep23Code("01-0410")).toBe("01-0410.002"); // 1:1 base
+  });
+
+  it("counts custom defs under the base too (never re-suggests a minted code)", () => {
+    expect(suggestNextStep23Code("02-4100", [{ code: "02-4100.003", label: "CMU Openings" }])).toBe(
+      "02-4100.004"
+    );
+  });
+
+  it("starts at .001 for a base no def claims", () => {
+    expect(suggestNextStep23Code("02-7777")).toBe("02-7777.001");
+  });
+
+  it("takes the base from an already-deterministic as-bid code", () => {
+    expect(suggestNextStep23Code("02-4100.002")).toBe("02-4100.003");
+  });
+
+  it("returns '' when there is no usable base — the estimator types the code", () => {
+    expect(suggestNextStep23Code("")).toBe("");
+    expect(suggestNextStep23Code("SPECIAL-CRANE")).toBe("");
   });
 });
 

@@ -391,6 +391,12 @@ const LEGACY_STEP2_DETAIL = [
 ];
 const LEGACY_STEP3_DETAIL = [
   { code: "02-9010", description: "Progress Cleaning - Hired", qty: 2, rate: 1_000, total: 2_000, uom: "hr" },
+  // UNMAPPABLE (gate Phase 3, mirroring CARE's hand-inserted scope line):
+  // 02-4100 is a SHARED base (.001 Demolition / .002 Sawcutting) and this
+  // description matches neither label — resolution must return null and the
+  // review gate must offer assign/mint. Detail lines never feed the totals
+  // (the section subtotals in col H/I do), so the oracle dollars are untouched.
+  { code: "02-4100", description: "Demolition - Openings in CMU", qty: 40, rate: 25, total: 1_000, uom: "sf" },
 ];
 
 const LEGACY_TAKEOFF_SUBTOTAL = LEGACY_ITEMS.reduce((s, it) => s + it.qty * it.unitPrice, 0); // 15,000
@@ -430,6 +436,8 @@ export const LEGACY_PAST_BID_ORACLE = {
   /** STEP 2/3 hand-authored detail (dollar lines only — the zero row is filtered). */
   step2Detail: LEGACY_STEP2_DETAIL.filter((l) => l.total !== 0),
   step3Detail: LEGACY_STEP3_DETAIL.filter((l) => l.total !== 0),
+  /** The review gate's unmappable case (shared base, hand-inserted description). */
+  unmappableStep23: { code: "02-4100", description: "Demolition - Openings in CMU" },
   /** Expected linked section totals once the 10 GC/Site-Ops rows are mapped. */
   gcSectionTotal: LINKED_ROWS.filter((l) => l.sheet === "step2").reduce((s, l) => s + l.value, 0), // 20,000
   siteOpsSectionTotal: LINKED_ROWS.filter((l) => l.sheet === "step3").reduce((s, l) => s + l.value, 0), // 30,000
