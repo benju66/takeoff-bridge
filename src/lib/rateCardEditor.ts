@@ -10,7 +10,8 @@ import {
 } from "./constants";
 import { getDivisionCode } from "./division";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
-import { RateCardEntry } from "@/types/db";
+import { RateCardEntry, CustomStep23LineDef } from "@/types/db";
+import { statusOf, type CatalogLifecycleStatus } from "./catalogLifecycle";
 
 // ---------------------------------------------------------------------------
 // rateCardEditor — pure join + validation helpers for the /rates editor
@@ -43,6 +44,10 @@ export interface RateLineDef {
   unit: string;
   sectionId: string;
   kind: RateLineKind;
+  /** Lifecycle status when this def came from a PROMOTED custom GC/Site-Ops code
+   *  (Catalog Manager Phase 4). Absent on built-in/catalog defs (always active);
+   *  drives the retired/merged badge on a promoted-then-retired card row. */
+  status?: CatalogLifecycleStatus;
 }
 
 /** Synthetic section id for staff rates (StaffRoleConfig carries no `section`). */
@@ -51,6 +56,12 @@ export const STAFF_SECTION_ID = "staff";
 /** Section-id prefix for a catalog division group (keeps it disjoint from the
  *  GC/Site Ops section ids, which include bare names like `demolition`). */
 export const CATALOG_SECTION_PREFIX = "catalog-";
+
+/** Section id for PROMOTED custom GC/Site-Ops codes (Catalog Manager Phase 4).
+ *  A custom def carries no inherent `section`, so its promoted card row files
+ *  here — a dedicated, honest home that keeps it out of the "Unmatched" bucket.
+ *  Placed before the catalog divisions so the GC/Site-Ops block stays first. */
+export const CUSTOM_SECTION_ID = "promoted-custom-gc-site-ops";
 
 /** GC/Site Ops section render order: staff, the GC `section` groups, then Site Ops. */
 const GC_SITE_OPS_SECTIONS: { id: string; label: string }[] = [
@@ -81,9 +92,12 @@ function buildCatalogDivisionSections(): { id: string; label: string }[] {
     }));
 }
 
-/** Full section render order: all GC/Site Ops sections first, then catalog divisions. */
+/** Full section render order: GC/Site Ops sections, then promoted custom codes,
+ *  then catalog divisions. The custom section is omitted by groupRateCardRows
+ *  when no promoted custom code is present (empty sections are dropped). */
 export const RATE_SECTION_ORDER: { id: string; label: string }[] = [
   ...GC_SITE_OPS_SECTIONS,
+  { id: CUSTOM_SECTION_ID, label: "Promoted Custom GC/Site-Ops Codes" },
   ...buildCatalogDivisionSections(),
 ];
 
@@ -152,12 +166,41 @@ const UNMATCHED_SECTION_ID = "__unmatched__";
  * whose `lineCode` matches no constants line (or whose section is unknown) are
  * surfaced in a trailing "Unmatched" group rather than dropped. Empty sections
  * are omitted.
+ *
+ * `customDefs` (Catalog Manager Phase 4 — thin promotion): a card row keyed by a
+ * PROMOTED custom GC/Site-Ops code has no built-in line def, so without this it
+ * would fall into "Unmatched". Joining it to its custom def lifts it into the
+ * dedicated CUSTOM_SECTION_ID group with the def's label/unit (kind 'gcSiteOps'
+ * → ADOPT gates non-negative, same as any GC/Site-Ops rate) and carries its
+ * lifecycle `status` so a promoted-then-retired row renders the retired badge.
  */
-export function groupRateCardRows(entries: RateCardEntry[]): RateSectionGroup[] {
-  const enriched: EnrichedRateRow[] = entries.map((entry) => ({
-    entry,
-    def: RATE_LINE_DEFS.get(entry.lineCode) ?? null,
-  }));
+export function groupRateCardRows(
+  entries: RateCardEntry[],
+  customDefs?: readonly CustomStep23LineDef[],
+): RateSectionGroup[] {
+  const customByCode = new Map<string, CustomStep23LineDef>();
+  for (const d of customDefs ?? []) customByCode.set(d.code, d);
+
+  const enriched: EnrichedRateRow[] = entries.map((entry) => {
+    const builtIn = RATE_LINE_DEFS.get(entry.lineCode);
+    if (builtIn) return { entry, def: builtIn };
+
+    const custom = customByCode.get(entry.lineCode);
+    if (custom) {
+      return {
+        entry,
+        def: {
+          code: custom.code,
+          label: custom.label,
+          unit: custom.unit,
+          sectionId: CUSTOM_SECTION_ID,
+          kind: "gcSiteOps",
+          status: statusOf(custom),
+        },
+      };
+    }
+    return { entry, def: null };
+  });
 
   const knownSectionIds = new Set(RATE_SECTION_ORDER.map((s) => s.id));
   const groups: RateSectionGroup[] = [];

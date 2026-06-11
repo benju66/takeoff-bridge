@@ -864,6 +864,23 @@ CREATE POLICY "rate_card_update_policy" ON rate_card
   USING (true)
   WITH CHECK (true);
 
+-- INSERT policy (Catalog Manager Phase 4 — thin promotion). Required by
+-- db.ts/promoteCustomStep23LineDef: a promoted custom GC/Site-Ops code gets ONE
+-- opt-in rate_card row so /rates shows it with its label/unit and the existing
+-- audited ADOPT path works over its mined STEP 2/3 history — nothing more (no
+-- calculator visibility; architect-locked 2026-06-11). THE deliberate widening of
+-- this prior UPDATE-only table; promotion is one-way (no DELETE policy). The seed
+-- still runs via migration/service role (which bypasses RLS). Adds ONE expected
+-- rls_policy_always_true advisor WARN, mirroring the cost_code_map /
+-- custom_step23_line_defs UPDATE precedent.
+-- FOLLOW-UP (deferred, same CONSOLIDATED note shared by cost_code_map / rate_card
+-- / custom_step23_line_defs): move writes server-side (service-role only) to fully
+-- close the "any authenticated user can insert/edit a company rate" exposure.
+CREATE POLICY "rate_card_insert_policy" ON rate_card
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
 -- ═════════════════════════════════════════════════════════════════════
 -- Table 13: estimate_overrides (Phase 4 — Override + Audit Model)
 -- ═════════════════════════════════════════════════════════════════════

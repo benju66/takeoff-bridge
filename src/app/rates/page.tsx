@@ -147,6 +147,14 @@ export default function RateCardDashboard() {
    * Fail-soft, same as the catalog report.
    */
   const [step23History, setStep23History] = useState<Map<string, PriceHistoryStat[]>>(new Map());
+  /**
+   * Custom (user-minted) GC/Site-Ops defs (Catalog Manager Phase 4). A PROMOTED
+   * custom code has a rate_card row but NO built-in line def, so the card join
+   * needs these to lift it out of "Unmatched" into the promoted-custom section
+   * with its label/unit/status. Fail-soft: an outage leaves it empty and a
+   * promoted row simply falls back to the Unmatched display (never blocks).
+   */
+  const [customDefs, setCustomDefs] = useState<CustomStep23LineDef[]>([]);
 
   // Load + (re)prime the company card. Reused on mount and on visibilitychange
   // so a /rates edit in another tab — or the seed/backfill — is reflected here.
@@ -190,14 +198,17 @@ export default function RateCardDashboard() {
         // under a custom code is REPORT-only by construction: no rate_card row
         // → no card row here → no ADOPT. A defs outage degrades to built-ins
         // only — the report still renders.
-        const [sources, customDefs] = await Promise.all([
+        const [sources, loadedDefs] = await Promise.all([
           getImportedStep23History(),
           getCustomStep23LineDefs().catch((err) => {
             console.error("Failed to load custom GC/Site-Ops codes (mining with built-ins only):", err);
             return [] as CustomStep23LineDef[];
           }),
         ]);
-        if (!cancelled) setStep23History(aggregatePriceHistory(step23Observations(sources, customDefs)));
+        if (!cancelled) {
+          setCustomDefs(loadedDefs);
+          setStep23History(aggregatePriceHistory(step23Observations(sources, loadedDefs)));
+        }
       } catch (err) {
         console.error("Failed to load imported STEP 2/3 rate history (report skipped):", err);
       }
@@ -294,22 +305,36 @@ export default function RateCardDashboard() {
     }
   };
 
+  // Promoted custom codes have no built-in line def — key their label/unit here
+  // so search matches them (the card join uses the same defs via groupRateCardRows).
+  const customByCode = useMemo(() => {
+    const m = new Map<string, CustomStep23LineDef>();
+    for (const d of customDefs) m.set(d.code, d);
+    return m;
+  }, [customDefs]);
+
   const filteredEntries = useMemo(() => {
     if (!entries) return [];
     const query = searchQuery.trim().toLowerCase();
     if (!query) return entries;
     return entries.filter((e) => {
       const def = RATE_LINE_DEFS.get(e.lineCode);
+      const custom = customByCode.get(e.lineCode);
       return (
         e.lineCode.toLowerCase().includes(query) ||
         (def?.label.toLowerCase().includes(query) ?? false) ||
         (def?.unit.toLowerCase().includes(query) ?? false) ||
+        (custom?.label.toLowerCase().includes(query) ?? false) ||
+        (custom?.unit.toLowerCase().includes(query) ?? false) ||
         e.source.toLowerCase().includes(query)
       );
     });
-  }, [entries, searchQuery]);
+  }, [entries, searchQuery, customByCode]);
 
-  const groups = useMemo(() => groupRateCardRows(filteredEntries), [filteredEntries]);
+  const groups = useMemo(
+    () => groupRateCardRows(filteredEntries, customDefs),
+    [filteredEntries, customDefs],
+  );
 
   if (!isLoaded || entries === null) {
     return (
@@ -459,7 +484,25 @@ export default function RateCardDashboard() {
                                 {entry.lineCode}
                               </td>
                               <td className="p-4 text-foreground font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
-                                {def ? def.label : <span className="italic text-rose-500">No current line definition</span>}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {def ? def.label : <span className="italic text-rose-500">No current line definition</span>}
+                                  {def?.status === "retired" && (
+                                    <span
+                                      className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest bg-slate-100 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700"
+                                      title="This promoted custom code was retired. Its company rate-card row stays; it no longer appears in pickers."
+                                    >
+                                      RETIRED
+                                    </span>
+                                  )}
+                                  {def?.status === "merged" && (
+                                    <span
+                                      className="inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest bg-violet-50 dark:bg-violet-950/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/50"
+                                      title="This promoted custom code was merged into another. Its company rate-card row stays."
+                                    >
+                                      MERGED
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="p-4 text-center text-slate-600 dark:text-slate-400 font-mono uppercase border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                                 {def?.unit || "—"}

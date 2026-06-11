@@ -13,14 +13,18 @@ import {
   GitMerge,
   X,
   AlertTriangle,
+  TrendingUp,
 } from "lucide-react";
 import {
   getCustomStep23LineDefs,
   updateCustomStep23LineDef,
   retireCustomStep23LineDef,
   mergeCustomStep23LineDef,
+  promoteCustomStep23LineDef,
   getImportedStep23History,
+  getRateCard,
 } from "@/lib/db";
+import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
   activeStep23Defs,
   resolveStep23Line,
@@ -167,6 +171,13 @@ export default function CatalogManagerDashboard() {
   const [mergingCode, setMergingCode] = useState<string | null>(null);
   const [busyCode, setBusyCode] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  /**
+   * Codes that already have a company rate_card row (Catalog Manager Phase 4).
+   * Promotion is one-way and exactly-once, so the Promote button is hidden for a
+   * code already in this set (a "Promoted" pill shows instead). Loaded FAIL-SOFT
+   * from the rate card — an outage hides promoted state, never blocks the page.
+   */
+  const [promotedCodes, setPromotedCodes] = useState<Set<string>>(new Set());
 
   // Load the live custom defs on mount (single gateway: db.ts).
   useEffect(() => {
@@ -203,6 +214,22 @@ export default function CatalogManagerDashboard() {
       })
       .catch((err) => {
         console.error("Failed to load imported STEP 2/3 history (merge counts hidden):", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Which custom codes are already promoted (have a rate_card row). FAIL-SOFT and
+  // independent: an outage degrades to "none promoted", never blocks the page.
+  useEffect(() => {
+    let cancelled = false;
+    getRateCard(MASTER_TEMPLATE_NAME)
+      .then((card) => {
+        if (!cancelled) setPromotedCodes(new Set(card.map((r) => r.lineCode)));
+      })
+      .catch((err) => {
+        console.error("Failed to load rate card (promoted state hidden):", err);
       });
     return () => {
       cancelled = true;
@@ -272,6 +299,30 @@ export default function CatalogManagerDashboard() {
     } catch (err) {
       console.error(`Failed to merge ${code} into ${winner}:`, err);
       alert(err instanceof Error ? err.message : `Failed to merge ${code}. No change was saved.`);
+    } finally {
+      setBusyCode(null);
+    }
+  };
+
+  const handlePromote = async (code: string) => {
+    if (
+      !window.confirm(
+        `Promote ${code} to the Company Rate Card?\n\n` +
+          `This adds the code to the Rate Card so you can review its past-bid history and adopt a company default rate for it. ` +
+          `It applies to FUTURE projects only — no existing estimate moves, and no dollar changes until you set a rate on the Rate Card page. ` +
+          `Promotion is one-way (it cannot be undone here). The code is not yet shown in the GC / Site Ops calculators.`
+      )
+    ) {
+      return;
+    }
+    setBusyCode(code);
+    try {
+      await promoteCustomStep23LineDef(MASTER_TEMPLATE_NAME, code);
+      setPromotedCodes((prev) => new Set(prev).add(code));
+      flashSaved(code);
+    } catch (err) {
+      console.error(`Failed to promote ${code}:`, err);
+      alert(err instanceof Error ? err.message : `Failed to promote ${code}. No change was saved.`);
     } finally {
       setBusyCode(null);
     }
@@ -469,6 +520,7 @@ export default function CatalogManagerDashboard() {
                       const isLegacyProcore = entry.procoreCode !== null && !isValidProcoreCode(entry.procoreCode);
                       const isMerging = mergingCode === entry.code;
                       const bidCount = resolveCounts.get(entry.code) ?? 0;
+                      const isPromoted = promotedCodes.has(entry.code);
 
                       return (
                         <React.Fragment key={entry.code}>
@@ -587,6 +639,23 @@ export default function CatalogManagerDashboard() {
                                   >
                                     <Archive size={11} /> Retire
                                   </button>
+                                  {isPromoted ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20"
+                                      title="This code is on the Company Rate Card — review and adopt a rate there"
+                                    >
+                                      <CheckCircle2 size={11} /> Promoted
+                                    </span>
+                                  ) : (
+                                    <button
+                                      onClick={() => handlePromote(entry.code)}
+                                      disabled={isBusy}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase border border-grid-border text-foreground hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors"
+                                      title="Promote this code to the Company Rate Card so you can review its history and adopt a default rate (future projects only)"
+                                    >
+                                      <TrendingUp size={11} /> Promote
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
                                 <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">Frozen (tombstone)</span>

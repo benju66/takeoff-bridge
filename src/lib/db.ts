@@ -1624,4 +1624,71 @@ export async function mergeCustomStep23LineDef(code: string, winner: string): Pr
   return mapCustomStep23LineDefRow(data);
 }
 
+/**
+ * Promotes an ACTIVE custom GC/Site-Ops code (Catalog Manager Phase 4 — thin
+ * promotion). Creates the code's ONE opt-in rate_card row so /rates shows it with
+ * its label/unit and the existing audited ADOPT path works over its mined STEP
+ * 2/3 history — and NOTHING more (no calculator visibility; architect-locked
+ * 2026-06-11). One-way: there is no un-promote (rate_card carries no DELETE
+ * policy). The row is stamped source='manual' (an estimator action, not the
+ * constants seed) with the supplied default rate — validated finite >= 0, default
+ * 0 so the estimator then ADOPTs a real median (or types a rate) on /rates.
+ *
+ * Created EXACTLY ONCE: a pre-check rejects a code that already has a rate_card
+ * row with a clean "already promoted" message; the PK (template_name, line_code)
+ * is the authoritative gate, so a same-moment race surfaces as the same message
+ * via 23505. Only ACTIVE codes may be promoted (a retired/merged tombstone is
+ * frozen). NOT a calculator write — the rate is a recorded company default
+ * awaiting future calculator integration; it moves no estimate dollar today.
+ */
+export async function promoteCustomStep23LineDef(
+  templateName: string,
+  code: string,
+  rate: number = 0
+): Promise<RateCardEntry> {
+  const trimmed = code.trim();
 
+  if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0) {
+    throw new Error(`Invalid promotion rate ${rate} for ${trimmed}: must be a finite number >= 0`);
+  }
+
+  const def = await fetchCustomStep23LineDef(trimmed);
+  if (!def) throw new Error(`Custom code ${trimmed} not found`);
+  if (!isActive(def)) {
+    throw new Error(`Code ${trimmed} is ${def.status ?? "active"}; only active codes can be promoted.`);
+  }
+
+  // Exactly once: an existing rate_card row for this code === already promoted.
+  const { data: existing, error: existsError } = await supabase
+    .from("rate_card")
+    .select("line_code")
+    .eq("template_name", templateName)
+    .eq("line_code", trimmed)
+    .maybeSingle();
+
+  if (existsError) {
+    console.error(`Failed to check promotion state for ${trimmed}:`, existsError);
+    throw new Error(`Failed to check promotion state for ${trimmed}: ${existsError.message}`);
+  }
+  if (existing) {
+    throw new Error(`Code ${trimmed} is already promoted (it already has a company rate-card row)`);
+  }
+
+  const { data, error } = await supabase
+    .from("rate_card")
+    .insert({ template_name: templateName, line_code: trimmed, rate, source: "manual" })
+    .select(RATE_CARD_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    // 23505 = unique_violation: a concurrent promote won the PK race after our
+    // pre-check — same outcome, same clean message.
+    if (error?.code === "23505") {
+      throw new Error(`Code ${trimmed} is already promoted (it already has a company rate-card row)`);
+    }
+    console.error(`Failed to promote custom GC/Site-Ops code ${trimmed}:`, error);
+    throw new Error(`Failed to promote custom GC/Site-Ops code ${trimmed}: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapRateCardRow(data);
+}

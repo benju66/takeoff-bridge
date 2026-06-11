@@ -6,7 +6,9 @@ import {
   RATE_SECTION_ORDER,
   STAFF_SECTION_ID,
   CATALOG_SECTION_PREFIX,
+  CUSTOM_SECTION_ID,
 } from "../rateCardEditor";
+import type { CustomStep23LineDef } from "@/types/db";
 import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
@@ -87,6 +89,74 @@ describe("Rate-card Phase C — groupRateCardRows", () => {
   it("no real seeded code lands in the unmatched group", () => {
     const groups = groupRateCardRows(rateBearingCodes().map((c) => entry(c, 1)));
     expect(groups.find((g) => g.id === "__unmatched__")).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// Catalog Manager Phase 4 — promoted custom GC/Site-Ops codes on /rates
+// ===========================================================================
+
+describe("Catalog Manager Phase 4 — groupRateCardRows custom-def enrichment", () => {
+  const customDef = (over: Partial<CustomStep23LineDef> = {}): CustomStep23LineDef => ({
+    code: "02-4100.003",
+    label: "Demolition - Openings in CMU",
+    unit: "EA",
+    procoreCode: null,
+    source: "import_gate",
+    status: "active",
+    mergedInto: null,
+    ...over,
+  });
+
+  it("lifts a promoted custom-code row into the custom section with its label/unit (not Unmatched)", () => {
+    const rows = [entry("02-4100.003", 125, "manual")];
+    const groups = groupRateCardRows(rows, [customDef()]);
+
+    expect(groups.find((g) => g.id === "__unmatched__")).toBeUndefined();
+    const custom = groups.find((g) => g.id === CUSTOM_SECTION_ID);
+    expect(custom).toBeDefined();
+    expect(custom!.rows).toHaveLength(1);
+    expect(custom!.rows[0].def).toMatchObject({
+      code: "02-4100.003",
+      label: "Demolition - Openings in CMU",
+      unit: "EA",
+      sectionId: CUSTOM_SECTION_ID,
+      kind: "gcSiteOps",
+      status: "active",
+    });
+  });
+
+  it("carries a retired status through so the page can render the retired badge", () => {
+    const groups = groupRateCardRows([entry("02-4100.003", 125, "manual")], [customDef({ status: "retired" })]);
+    const def = groups.find((g) => g.id === CUSTOM_SECTION_ID)!.rows[0].def;
+    expect(def!.status).toBe("retired");
+  });
+
+  it("still surfaces a promoted code as Unmatched when no custom def is available (fail-soft)", () => {
+    const groups = groupRateCardRows([entry("02-4100.003", 125, "manual")]); // no customDefs passed
+    const unmatched = groups.find((g) => g.id === "__unmatched__");
+    expect(unmatched).toBeDefined();
+    expect(unmatched!.rows[0].def).toBeNull();
+  });
+
+  it("the custom section sits after the GC/Site-Ops block and before every catalog division", () => {
+    const ids = RATE_SECTION_ORDER.map((s) => s.id);
+    const customIdx = ids.indexOf(CUSTOM_SECTION_ID);
+    const firstCatalog = ids.findIndex((id) => id.startsWith(CATALOG_SECTION_PREFIX));
+    expect(customIdx).toBeGreaterThan(ids.indexOf(STAFF_SECTION_ID));
+    expect(customIdx).toBeLessThan(firstCatalog);
+  });
+
+  it("a built-in line still wins over a custom def of the same code", () => {
+    // 01-0310.001 is a built-in staff line; a custom def of that code must not shadow it.
+    const groups = groupRateCardRows(
+      [entry("01-0310.001", 175)],
+      [customDef({ code: "01-0310.001", label: "Bogus", unit: "ZZ" })],
+    );
+    const staff = groups.find((g) => g.id === STAFF_SECTION_ID);
+    expect(staff).toBeDefined();
+    expect(staff!.rows[0].def).toMatchObject({ label: "Project Executive", kind: "gcSiteOps" });
+    expect(groups.find((g) => g.id === CUSTOM_SECTION_ID)).toBeUndefined();
   });
 });
 
