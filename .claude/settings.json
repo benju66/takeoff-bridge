@@ -1,7 +1,8 @@
 {
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "npx tsc --noEmit" }] }
+      { "hooks": [{ "type": "command", "command": "npx tsc --noEmit" }] },
+      { "hooks": [{ "type": "command", "command": "node -e \"const { execSync } = require('child_process'); try { const t = parseInt(execSync('git log -1 --format=%ct').toString().trim()); if (Date.now()/1000 - t < 120) console.log('--- Commit detected. Run /compact to trim context before continuing. ---'); } catch(e){}\"" }] }
     ]
   },
   "permissions": {
@@ -19,8 +20,27 @@
       "mcp__plugin_supabase_supabase__search_docs",
       "Bash(npm run test)",
       "Bash(npm run lint)",
+      "Bash(npx tsc --noEmit)",
       "PowerShell(Get-ChildItem *)",
-      "PowerShell(git diff *)"
+      "PowerShell(git diff *)",
+      "PowerShell(npm run test)",
+      "PowerShell(npm run test *)",
+      "PowerShell(npm run lint)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npx tsc --noEmit *)",
+      "PowerShell(npx vitest run *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(git status *)",
+      "PowerShell(git log *)",
+      "PowerShell(cd *)",
+      "PowerShell(Set-Location *)",
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_in_Chrome__read_console_messages",
+      "mcp__claude-in-chrome__read_console_messages",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__render__list_services",
+      "mcp__render__list_deploys"
     ]
   }
 }

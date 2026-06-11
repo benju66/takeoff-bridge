@@ -39,7 +39,9 @@ export format, what's deferred). For each:
 Do not write the plan file until the load-bearing decisions are settled — a plan
 built on guessed decisions gets rewritten.
 
-## Step 3 — Write the plan to `docs/plans/<feature-slug>.md`
+## Step 3 — Write the plan to `docs/plans/<YYYY-MM-DD>-<feature-slug>.md`
+
+Use the date from `currentDate` in the system context (format: `YYYY-MM-DD`) as the filename prefix.
 
 Use this structure:
 
