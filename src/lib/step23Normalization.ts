@@ -20,7 +20,10 @@
  *    annotation stripped ("Temp Office (Monthly)" → "temp office") — and only
  *    when exactly one candidate matches;
  *  - anything else returns null and the line stays bare and visible
- *    (CARE's hand-inserted "Demolition - Openings in CMU" is the honest case).
+ *    (CARE's hand-inserted "Demolition - Openings in CMU" is the honest case);
+ *  - EXCEPT: a line carrying an estimator-assigned code from the import
+ *    review gate (`assignedCode`, locked 2026-06-10) resolves to that def
+ *    directly — assignment wins over description matching.
  *
  * The workbook's own BLI bridge was probed and is provably redundant here:
  * all 72 of CARE's STEP 2/3 SUMIF mappings agree with the app's line defs,
@@ -91,8 +94,22 @@ const defsByBase = (() => {
 /**
  * Resolves one imported STEP 2/3 line (as-bid code + description) to the
  * app's deterministic GC/Site-Ops line, or null when no certain match exists.
+ *
+ * An estimator-assigned code from the import review gate (`assignedCode`,
+ * locked 2026-06-10) WINS over description matching — but only when it names
+ * a known def; a stale assignment (e.g. a def later removed) falls through to
+ * normal resolution rather than fabricating a line.
  */
-export function resolveStep23Line(code: string, description: string): Step23LineDef | null {
+export function resolveStep23Line(
+  code: string,
+  description: string,
+  assignedCode?: string
+): Step23LineDef | null {
+  if (assignedCode) {
+    const assigned = defsByCode.get(assignedCode.trim());
+    if (assigned) return assigned;
+  }
+
   const trimmed = code.trim();
 
   // Already deterministic and known → itself (future re-imports of app exports).
@@ -158,7 +175,9 @@ export function step23Observations(sources: readonly Step23HistorySource[]): Pri
     const lines = [...src.payload.step2Lines, ...src.payload.step3Lines];
     for (const line of lines) {
       if (!isMinableLine(line)) continue;
-      const resolved = resolveStep23Line(line.code, line.description);
+      // Assignment = resolution (locked 2026-06-10): an assigned line files
+      // its observations under the assigned code, same minable filter.
+      const resolved = resolveStep23Line(line.code, line.description, line.assignedCode);
       if (!resolved) continue;
       out.push({
         itemId: resolved.code,

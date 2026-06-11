@@ -25,7 +25,7 @@
  */
 
 import type { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
-import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines } from "@/types/db";
+import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines, ImportedSheetLine } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
 // otherwise the workspace page (which imports the pure linkedTotalsFromRows) would
@@ -331,6 +331,62 @@ export function step23LinesForImport(extracted: ExtractedEstimate): ImportedStep
     step2Lines: dollarLines(extracted.step2Lines),
     step3Lines: dollarLines(extracted.step3Lines),
     linkedSourceSubtotals: extracted.oracle.linkedSourceSubtotals,
+  };
+}
+
+/**
+ * Stable key for one STEP 2/3 line inside its payload — what the review gate's
+ * correction maps are keyed by. `rowNumber` is unique within a sheet but the
+ * two sheets can reuse numbers, so the key carries the sheet.
+ */
+export function step23LineKey(step: "step2" | "step3", rowNumber: number): string {
+  return `${step}:${rowNumber}`;
+}
+
+/** The estimator's STEP 2/3 review-gate edits, keyed by `step23LineKey`. */
+export interface Step23Corrections {
+  /** lineKey → corrected UOM. REPLACES the stored value (architect-locked
+   *  2026-06-10: a wrong unit is not history worth preserving); normalized to
+   *  the payload's uppercase contract. */
+  uomCorrections?: ReadonlyMap<string, string>;
+  /** lineKey → assigned deterministic GC/Site-Ops code, written to the
+   *  ADDITIVE `assignedCode` field — the as-bid `code` is never rewritten. */
+  assignments?: ReadonlyMap<string, string>;
+}
+
+/**
+ * Derives the payload to persist from the ORIGINAL parsed STEP 2/3 payload +
+ * the estimator's current corrections, mirroring `applyAcceptedMappings`: the
+ * originals are never mutated, so changing or withdrawing an edit is just
+ * editing a map (the proven escape-hatch pattern), and corrections win over
+ * stored values. Only `uom` and `assignedCode` can change — qty, rate, total,
+ * and the linked subtotals are untouched BY CONSTRUCTION, so the imported
+ * dollars and the tie-out cannot move. Applied in memory immediately before
+ * the single `saveImportedStep23Lines` write; the stored column stays
+ * write-once.
+ */
+export function applyStep23Corrections(
+  payload: ImportedStep23Lines,
+  corrections: Step23Corrections
+): ImportedStep23Lines {
+  const correctLines = (step: "step2" | "step3", lines: readonly ImportedSheetLine[]) =>
+    lines.map((l) => {
+      const key = step23LineKey(step, l.rowNumber);
+      let line = l;
+      const uom = corrections.uomCorrections?.get(key)?.trim().toUpperCase();
+      if (uom && uom !== (line.uom ?? "")) {
+        line = { ...line, uom };
+      }
+      const assigned = corrections.assignments?.get(key)?.trim();
+      if (assigned && assigned !== line.assignedCode) {
+        line = { ...line, assignedCode: assigned };
+      }
+      return line;
+    });
+  return {
+    ...payload,
+    step2Lines: correctLines("step2", payload.step2Lines),
+    step3Lines: correctLines("step3", payload.step3Lines),
   };
 }
 

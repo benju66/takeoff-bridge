@@ -101,7 +101,8 @@ export function ImportedStep23Panel({
             </thead>
             <tbody>
               {lines.map((l) => {
-                const resolved = resolveStep23Line(l.code, l.description);
+                const resolved = resolveStep23Line(l.code, l.description, l.assignedCode);
+                const isAssigned = resolved !== null && resolved.code === l.assignedCode?.trim();
                 return (
                 <tr key={`${l.rowNumber}`} className="border-t border-grid-border">
                   <td className="px-4 py-2 font-mono text-slate-500">
@@ -109,7 +110,11 @@ export function ImportedStep23Panel({
                     {resolved ? (
                       <div
                         className="text-[10px] text-violet-700 dark:text-violet-300"
-                        title={`Maps to the app's GC/Site-Ops line "${resolved.label}"`}
+                        title={
+                          isAssigned
+                            ? `Assigned at import review to the app's GC/Site-Ops line "${resolved.label}"`
+                            : `Maps to the app's GC/Site-Ops line "${resolved.label}"`
+                        }
                       >
                         → {resolved.code}
                       </div>

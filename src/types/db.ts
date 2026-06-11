@@ -91,6 +91,12 @@ export interface ImportedSheetLine {
   /** As-bid UOM from col G (uppercased; "" when the bid's cell was blank).
    *  OPTIONAL: payloads saved before Phase 3 Slice 0 lack it — render "—". */
   uom?: string;
+  /** Deterministic GC/Site-Ops code the estimator assigned at the import
+   *  review gate (additive, architect-locked 2026-06-10): set only when the
+   *  line could not resolve on its own; the as-bid `code` is never rewritten.
+   *  Wins over description matching in resolveStep23Line. OPTIONAL: absent on
+   *  every payload saved before the review gate existed. */
+  assignedCode?: string;
 }
 
 /** The `project_estimates.imported_step23_lines` JSONB payload. */

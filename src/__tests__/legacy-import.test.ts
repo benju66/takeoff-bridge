@@ -26,7 +26,10 @@ import {
   catalogCostCodeEntries,
   uomMismatch,
   step23LinesForImport,
+  applyStep23Corrections,
+  step23LineKey,
 } from "@/lib/importEstimate";
+import type { ImportedSheetLine, ImportedStep23Lines } from "@/types/db";
 import { computeTakeoffSummary } from "@/lib/calculations";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 import { LINKED_DIVISION_ROWS } from "@/lib/constants";
@@ -167,6 +170,98 @@ describe("as-bid UOM capture (Phase 3 Slice 0)", () => {
     const mysteryMapped = applyImportMapping(mystery, "06-1753.001");
     expect(mysteryMapped.uom).toBe("LS");
     expect(uomMismatch(mysteryMapped)).toBeNull();
+  });
+});
+
+describe("applyStep23Corrections â€” review-gate edits over the immutable payload (gate Phase 1)", () => {
+  const sheetLine = (over: Partial<ImportedSheetLine>): ImportedSheetLine => ({
+    code: "02-4100",
+    description: "Demolition - Openings in CMU",
+    utilization: null,
+    qty: 82,
+    rate: 3419.44,
+    total: 280_394.08,
+    rowNumber: 30,
+    uom: "EA",
+    ...over,
+  });
+  const payload = (): ImportedStep23Lines => ({
+    step2Lines: [
+      sheetLine({ code: "01-0410", description: "Sr Superintendent", qty: 1818.6, rate: 125, total: 227_325, rowNumber: 12, uom: "HR" }),
+      sheetLine({ code: "01-1000", description: "Small Tools", qty: 1, rate: 5000, total: 5000, rowNumber: 30, uom: "LS" }),
+    ],
+    step3Lines: [sheetLine({})],
+    linkedSourceSubtotals: [{ itemId: "01-0000", total: 232_325 }],
+  });
+
+  it("is the identity with no corrections and NEVER mutates the originals", () => {
+    const original = payload();
+    const snapshot = structuredClone(original);
+
+    expect(applyStep23Corrections(original, {})).toEqual(snapshot);
+
+    const corrected = applyStep23Corrections(original, {
+      uomCorrections: new Map([[step23LineKey("step2", 12), "WK"]]),
+      assignments: new Map([[step23LineKey("step3", 30), "02-4100.001"]]),
+    });
+    expect(original).toEqual(snapshot); // escape hatch: originals untouched
+    expect(corrected).not.toEqual(snapshot);
+  });
+
+  it("a UOM correction REPLACES the stored value (normalized), on the keyed line only", () => {
+    const corrected = applyStep23Corrections(payload(), {
+      uomCorrections: new Map([[step23LineKey("step2", 12), " wk "]]),
+    });
+    expect(corrected.step2Lines[0].uom).toBe("WK");
+    expect(corrected.step2Lines[1].uom).toBe("LS");
+    expect(corrected.step3Lines[0].uom).toBe("EA");
+  });
+
+  it("an assignment writes the ADDITIVE assignedCode; the as-bid code is never rewritten", () => {
+    const corrected = applyStep23Corrections(payload(), {
+      assignments: new Map([[step23LineKey("step3", 30), "02-4100.001"]]),
+    });
+    expect(corrected.step3Lines[0].assignedCode).toBe("02-4100.001");
+    expect(corrected.step3Lines[0].code).toBe("02-4100");
+    // Withdrawing = re-deriving from the originals without the map entry.
+    expect(applyStep23Corrections(payload(), {}).step3Lines[0].assignedCode).toBeUndefined();
+  });
+
+  it("keys are sheet-scoped: step2 and step3 lines sharing a rowNumber stay independent", () => {
+    const corrected = applyStep23Corrections(payload(), {
+      assignments: new Map([[step23LineKey("step2", 30), "01-1000.001"]]),
+    });
+    expect(corrected.step2Lines[1].assignedCode).toBe("01-1000.001");
+    expect(corrected.step3Lines[0].assignedCode).toBeUndefined(); // same rowNumber 30
+  });
+
+  it("dollars cannot move BY CONSTRUCTION: qty, rate, total, and subtotals survive any correction", () => {
+    const original = payload();
+    const corrected = applyStep23Corrections(original, {
+      uomCorrections: new Map([
+        [step23LineKey("step2", 12), "WK"],
+        [step23LineKey("step3", 30), "SF"],
+      ]),
+      assignments: new Map([
+        [step23LineKey("step2", 30), "01-1000.001"],
+        [step23LineKey("step3", 30), "02-4100.001"],
+      ]),
+    });
+    const dollars = (p: ImportedStep23Lines) =>
+      [...p.step2Lines, ...p.step3Lines].map((l) => [l.qty, l.rate, l.total]);
+    expect(dollars(corrected)).toEqual(dollars(original));
+    expect(corrected.linkedSourceSubtotals).toEqual(original.linkedSourceSubtotals);
+  });
+
+  it("ignores unknown keys and blank values (no phantom lines, no empty assignments)", () => {
+    const corrected = applyStep23Corrections(payload(), {
+      uomCorrections: new Map([
+        [step23LineKey("step2", 999), "WK"],
+        [step23LineKey("step2", 12), "  "],
+      ]),
+      assignments: new Map([[step23LineKey("step3", 30), ""]]),
+    });
+    expect(corrected).toEqual(payload());
   });
 });
 

@@ -86,6 +86,25 @@ describe("resolveStep23Line", () => {
     expect(resolveStep23Line("03-3000", "Concrete")).toBeNull();
   });
 
+  it("an assigned code WINS over description matching (import review gate, Phase 1)", () => {
+    // CARE's hand-inserted line — unresolvable on its own — resolves once assigned.
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", "02-4100.001")).toMatchObject({
+      code: "02-4100.001",
+      label: "Demolition",
+    });
+    // Assignment beats a description that would match a DIFFERENT def.
+    expect(resolveStep23Line("02-9010", "Progress Cleaning - Hired", "02-9010.001")?.code).toBe("02-9010.001");
+    // Whitespace-tolerant, same as the other inputs.
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", " 02-4100.001 ")?.code).toBe("02-4100.001");
+  });
+
+  it("a stale assignment (unknown def) falls through to normal resolution, never fabricates", () => {
+    expect(resolveStep23Line("02-9010", "Progress Cleaning - Hired", "99-9999.001")?.code).toBe("02-9010.002");
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", "99-9999.001")).toBeNull();
+    // Absent/blank assignment = exactly the old behavior.
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", "")).toBeNull();
+  });
+
   it("derives defs from the app's own constants (no duplicated codes)", () => {
     const codes = STEP23_LINE_DEFS.map((d) => d.code);
     expect(new Set(codes).size).toBe(codes.length);
@@ -131,6 +150,31 @@ describe("step23Observations (fork F-B: carried + priced lines only)", () => {
       ),
     ]);
     expect(out).toEqual([]);
+  });
+
+  it("files an ASSIGNED line under its assigned code (assignment = resolution, gate Phase 1)", () => {
+    const out = step23Observations([
+      source(
+        [],
+        [
+          line({
+            code: "02-4100",
+            description: "Demolition - Openings in CMU",
+            qty: 82,
+            rate: 3419.44,
+            uom: "EA",
+            assignedCode: "02-4100.001",
+          }),
+        ]
+      ),
+    ]);
+    expect(out.map((o) => o.itemId)).toEqual(["02-4100.001"]);
+    expect(out[0].unitPrice).toBe(3419.44);
+    // The minable filter still applies to assigned lines (zero-qty stays out).
+    const zeroQty = step23Observations([
+      source([], [line({ code: "02-4100", description: "Demolition - Openings in CMU", qty: 0, assignedCode: "02-4100.001" })]),
+    ]);
+    expect(zeroQty).toEqual([]);
   });
 
   it("reads both sheets and tolerates a pre-Slice-0 payload with no uom", () => {
