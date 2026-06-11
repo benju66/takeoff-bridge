@@ -8,7 +8,9 @@
 --
 -- Tables: 16 (added custom_step23_line_defs — import STEP 2/3 review gate Phase 2)
 -- RPC Functions: 2 (save_estimate_line_items, save_estimate)
--- RLS Policies: 24
+-- Trigger Functions: 2 (custom_step23_line_defs lifecycle guard + updated_at touch
+--   — Catalog Manager Phase 2; the FIRST triggers in this schema)
+-- RLS Policies: 25 (added custom_step23_line_defs UPDATE — Catalog Manager Phase 2)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -19,9 +21,10 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-10 (import STEP 2/3 review gate Phase 2: added
--- custom_step23_line_defs — user-minted GC/Site-Ops line definitions the
--- step23Normalization resolver overlays on the built-in constants.ts defs)
+-- Last updated: 2026-06-11 (Catalog Manager Phase 2: custom_step23_line_defs gains
+-- the lifecycle layer — status + merged_into columns, a transition-enforcing guard
+-- trigger, an updated_at touch trigger, and the deliberate UPDATE policy widening
+-- that lets the browser edit/retire/merge minted GC/Site-Ops codes)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -967,16 +970,121 @@ CREATE POLICY "custom_step23_line_defs_select_policy" ON custom_step23_line_defs
   TO authenticated
   USING (true);
 
--- Write: INSERT-only, required by the import review gate's mint form (db.ts/
--- createCustomStep23LineDef — validates shape + built-in/custom collisions before
--- the write; the CHECK constraints above are the server-side backstop). NO
--- UPDATE/DELETE policy → minted codes are immutable from the browser; editing/
--- retiring them is Catalog Manager scope (roadmap item 4).
--- FOLLOW-UP (deferred, same note as cost_code_map / rate_card): move writes
--- server-side (service-role only) to fully close the "any authenticated user can
--- mint a code" exposure — accepted for a single-company tool (plan §Risks).
+-- Write: INSERT (mint, import review gate) + UPDATE (lifecycle, Catalog Manager).
+-- db.ts validates shape + built-in/custom collisions before the write; the CHECK
+-- constraints + the lifecycle guard trigger (below) are the server-side backstop.
+-- No DELETE policy → a code's row is never removed; retire/merge are tombstones.
+-- FOLLOW-UP (deferred, same CONSOLIDATED note now shared by cost_code_map /
+-- rate_card / custom_step23_line_defs): move writes server-side (service-role
+-- only) to fully close the "any authenticated user can mint/edit a code" exposure
+-- — accepted for a single-company tool (plan §Risks; flagged at the Phase 2 gate).
 CREATE POLICY "custom_step23_line_defs_insert_policy" ON custom_step23_line_defs
   FOR INSERT
   TO authenticated
+  WITH CHECK (true);
+
+-- ─────────────────────────────────────────────────
+-- Table 14 LIFECYCLE LAYER (Catalog Manager, Phase 2)
+-- ─────────────────────────────────────────────────
+--
+-- A minted code's row is NEVER deleted. It transitions (architect-locked
+-- 2026-06-11, merge/retire = redirects + tombstones):
+--   active → retired  (leaves every picker; still labels its old lines)
+--   active → merged   (redirects to a WINNER; every stored bid shows the winner
+--                      at render time — no imported payload is ever rewritten)
+-- A winner (merged_into) may be ANY active def — custom OR built-in — so there is
+-- intentionally NO FK on merged_into (a built-in winner lives only in constants.ts).
+-- These rules MIRROR src/lib/catalogLifecycle.ts (transitionError) and the db.ts
+-- write surface; the trigger is the authority no client bug can bypass.
+
+ALTER TABLE custom_step23_line_defs
+  ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'retired', 'merged')),
+  ADD COLUMN merged_into TEXT
+    CHECK (merged_into IS NULL OR merged_into ~ '^\d{2}-\d{4}\.\d{3}$'),  -- shape only; no FK (winner may be a built-in)
+  -- merged ⇔ merged_into consistency, declaratively (the guard trigger raises the
+  -- clean message first on UPDATE; this CHECK is the always-on backstop and also
+  -- guards direct INSERTs): merged requires a non-self winner; non-merged is NULL.
+  ADD CONSTRAINT custom_step23_line_defs_merge_consistency CHECK (
+    (status = 'merged' AND merged_into IS NOT NULL AND merged_into <> code)
+    OR (status <> 'merged' AND merged_into IS NULL)
+  );
+
+-- Lifecycle guard (BEFORE UPDATE): mirrors catalogLifecycle.transitionError so the
+-- DB row and the browser enforce the SAME rule. SET search_path = '' pins schema
+-- resolution (only pg_catalog built-ins are referenced) — keeps the security
+-- advisor clean (no function_search_path_mutable). SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION custom_step23_line_defs_lifecycle_guard()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  -- code (PK) is immutable.
+  IF NEW.code <> OLD.code THEN
+    RAISE EXCEPTION 'Custom code is immutable (% cannot become %).', OLD.code, NEW.code;
+  END IF;
+
+  -- Status transitions: only an active code may transition, and only to
+  -- retired/merged. A merged→merged re-point (chain-collapse) keeps status equal
+  -- and is allowed; the consistency block below validates the new winner.
+  IF NEW.status <> OLD.status THEN
+    IF OLD.status <> 'active' THEN
+      RAISE EXCEPTION 'Code % is %; only active codes can be retired or merged.', OLD.code, OLD.status;
+    END IF;
+    IF NEW.status NOT IN ('retired', 'merged') THEN
+      RAISE EXCEPTION 'Cannot transition % to "%".', OLD.code, NEW.status;
+    END IF;
+  END IF;
+
+  -- merged ⇔ merged_into consistency (clean messages mirroring transitionError).
+  IF NEW.status = 'merged' THEN
+    IF NEW.merged_into IS NULL OR btrim(NEW.merged_into) = '' THEN
+      RAISE EXCEPTION 'A merged code requires a winning code.';
+    END IF;
+    IF NEW.merged_into = NEW.code THEN
+      RAISE EXCEPTION 'A code cannot be merged into itself.';
+    END IF;
+  ELSIF NEW.merged_into IS NOT NULL THEN
+    RAISE EXCEPTION 'A non-merged code carries no merge target.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- updated_at touch (BEFORE UPDATE). Fires AFTER the guard (trigger names fire in
+-- alphabetical order: ..._lifecycle_guard_trg < ..._touch_updated_at_trg).
+CREATE OR REPLACE FUNCTION touch_custom_step23_line_defs_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER custom_step23_line_defs_lifecycle_guard_trg
+  BEFORE UPDATE ON custom_step23_line_defs
+  FOR EACH ROW
+  EXECUTE FUNCTION custom_step23_line_defs_lifecycle_guard();
+
+CREATE TRIGGER custom_step23_line_defs_touch_updated_at_trg
+  BEFORE UPDATE ON custom_step23_line_defs
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_custom_step23_line_defs_updated_at();
+
+-- UPDATE policy: THE deliberate widening of the by-design-immutable table (the
+-- guard trigger is what makes it safe). USING/WITH CHECK are (true) — the trigger,
+-- not the policy predicate, enforces legal lifecycle transitions. This adds one
+-- expected rls_policy_always_true advisor WARN, mirroring the cost_code_map /
+-- rate_card UPDATE precedent. Carries the same consolidated server-side-writes
+-- follow-up note above.
+CREATE POLICY "custom_step23_line_defs_update_policy" ON custom_step23_line_defs
+  FOR UPDATE
+  TO authenticated
+  USING (true)
   WITH CHECK (true);
 

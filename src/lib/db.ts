@@ -2,6 +2,8 @@ import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCod
 import type { PriceObservation } from "./priceHistory";
 import type { Step23HistorySource } from "./step23Normalization";
 import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
+import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus } from "./catalogLifecycle";
+import { isValidProcoreCode } from "./procoreValidCodes";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -1341,7 +1343,7 @@ export async function updateRateCardEntry(
 // Custom GC/Site-Ops line definitions (import STEP 2/3 review gate, Phase 2)
 // ═══════════════════════════════════════════════════════════════════
 
-const CUSTOM_STEP23_LINE_DEF_COLUMNS = "code, label, unit, procore_code, source";
+const CUSTOM_STEP23_LINE_DEF_COLUMNS = "code, label, unit, procore_code, source, status, merged_into";
 
 function mapCustomStep23LineDefRow(row: Record<string, unknown>): CustomStep23LineDef {
   return {
@@ -1350,6 +1352,11 @@ function mapCustomStep23LineDefRow(row: Record<string, unknown>): CustomStep23Li
     unit: (row.unit as string) || "",
     procoreCode: (row.procore_code as string | null) ?? null,
     source: row.source as CustomStep23LineDef["source"],
+    // Lifecycle (Catalog Manager Phase 2). The column is NOT NULL DEFAULT 'active',
+    // so a row always carries one; the ?? keeps the mapper safe if a caller ever
+    // selects a narrower projection. mergedInto is null unless status === 'merged'.
+    status: (row.status as CatalogLifecycleStatus) ?? "active",
+    mergedInto: (row.merged_into as string | null) ?? null,
   };
 }
 
@@ -1440,6 +1447,178 @@ export async function createCustomStep23LineDef(input: {
     }
     console.error(`Failed to create custom GC/Site-Ops code ${code}:`, error);
     throw new Error(`Failed to create custom GC/Site-Ops code ${code}: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapCustomStep23LineDefRow(data);
+}
+
+/**
+ * Fetches one custom def by code (lifecycle-aware), or null when absent. Shared
+ * by the lifecycle writers below so each can validate the CURRENT state (e.g.
+ * active-only) and emit the same clean message the DB trigger would.
+ */
+async function fetchCustomStep23LineDef(code: string): Promise<CustomStep23LineDef | null> {
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .eq("code", code)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Failed to load custom GC/Site-Ops code ${code}:`, error);
+    throw new Error(`Failed to load custom GC/Site-Ops code ${code}: ${error.message}`);
+  }
+  return data ? mapCustomStep23LineDefRow(data) : null;
+}
+
+/**
+ * Edits an ACTIVE custom def's name, unit, and/or Procore BLI (the Catalog
+ * Manager scope-2 BLI backfill write). Only the supplied fields change. Mirrors
+ * the lifecycle guard trigger client-side for clean errors: the code (PK) is
+ * never touched; only active codes may be edited (a retired/merged tombstone is
+ * frozen). A non-empty procoreCode MUST be on Procore's Importer list
+ * (PROCORE_VALID_CODES); '' / null clears the backfill. NOT a financial write —
+ * a def is a label, resolver target, and mining key only. The DB triggers
+ * (guard + updated_at touch) are the backstop behind this validation.
+ */
+export async function updateCustomStep23LineDef(input: {
+  code: string;
+  label?: string;
+  unit?: string;
+  procoreCode?: string | null;
+}): Promise<CustomStep23LineDef> {
+  const code = input.code.trim();
+
+  const def = await fetchCustomStep23LineDef(code);
+  if (!def) throw new Error(`Custom code ${code} not found`);
+  if (!isActive(def)) {
+    throw new Error(`Code ${code} is ${def.status ?? "active"}; only active codes can be edited.`);
+  }
+
+  const patch: { label?: string; unit?: string; procore_code?: string | null } = {};
+
+  if (input.label !== undefined) {
+    const label = input.label.trim();
+    if (label === "") {
+      throw new Error(`Custom code ${code} needs a non-empty name — the name is what auto-resolves matching lines`);
+    }
+    patch.label = label;
+  }
+
+  if (input.unit !== undefined) {
+    patch.unit = input.unit.trim().toUpperCase();
+  }
+
+  if (input.procoreCode !== undefined) {
+    const procoreCode = (input.procoreCode ?? "").trim();
+    if (procoreCode !== "" && !isValidProcoreCode(procoreCode)) {
+      throw new Error(`Procore code ${procoreCode} is not on the Importer Data Fields list — pick a valid Budget Line Item`);
+    }
+    patch.procore_code = procoreCode || null;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error(`Nothing to update on custom code ${code} — provide a name, unit, or Procore code`);
+  }
+
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .update(patch)
+    .eq("code", code)
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to update custom GC/Site-Ops code ${code}:`, error);
+    throw new Error(`Failed to update custom GC/Site-Ops code ${code}: ${error?.message ?? "no row returned"}`);
+  }
+  return mapCustomStep23LineDefRow(data);
+}
+
+/**
+ * Retires an ACTIVE custom def (active → retired). A retired code leaves every
+ * picker (activeStep23Defs drops it) but keeps labeling its old lines through
+ * the resolver — history intact, suffix never reused. A tombstone, not a delete:
+ * the row stays. Mirrors `transitionError` for the clean message the trigger
+ * would also raise; the trigger is the backstop.
+ */
+export async function retireCustomStep23LineDef(code: string): Promise<CustomStep23LineDef> {
+  const trimmed = code.trim();
+  const def = await fetchCustomStep23LineDef(trimmed);
+  if (!def) throw new Error(`Custom code ${trimmed} not found`);
+
+  const err = transitionError(def, "retired", null, () => false);
+  if (err) throw new Error(err);
+
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .update({ status: "retired", merged_into: null })
+    .eq("code", trimmed)
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to retire custom GC/Site-Ops code ${trimmed}:`, error);
+    throw new Error(`Failed to retire custom GC/Site-Ops code ${trimmed}: ${error?.message ?? "no row returned"}`);
+  }
+  return mapCustomStep23LineDefRow(data);
+}
+
+/**
+ * Merges an ACTIVE custom def into a WINNER (active → merged). Every stored bid
+ * that referenced the losing code now renders the winner at render time — no
+ * imported payload is rewritten (redirects + tombstones, architect-locked
+ * 2026-06-11). The winner may be any ACTIVE def — a built-in or another active
+ * custom — validated via Phase 1's `transitionError` with an `isActiveWinner`
+ * predicate composed here from the built-in set + the live custom rows. After
+ * the merge, the `redirectsToRepoint` chain-collapse sweep re-points every def
+ * already merged into the loser onto the winner, so redirects stay exactly one
+ * hop (the resolver also carries a hop guard). Mirrors the DB trigger; the
+ * trigger is the backstop. NOT a financial write.
+ */
+export async function mergeCustomStep23LineDef(code: string, winner: string): Promise<CustomStep23LineDef> {
+  const losing = code.trim();
+  const win = winner.trim();
+
+  const all = await getCustomStep23LineDefs();
+  const def = all.find((d) => d.code === losing);
+  if (!def) throw new Error(`Custom code ${losing} not found`);
+
+  const isActiveWinner = (c: string): boolean =>
+    isBuiltInStep23Code(c) || all.some((d) => d.code === c && isActive(d));
+
+  const err = transitionError(def, "merged", win, isActiveWinner);
+  if (err) throw new Error(err);
+
+  // 1. Tombstone the loser → winner.
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .update({ status: "merged", merged_into: win })
+    .eq("code", losing)
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to merge custom GC/Site-Ops code ${losing} into ${win}:`, error);
+    throw new Error(`Failed to merge custom GC/Site-Ops code ${losing} into ${win}: ${error?.message ?? "no row returned"}`);
+  }
+
+  // 2. Chain-collapse: re-point anything previously merged into the loser onto
+  //    the winner so redirects are always one hop. Computed from the pre-merge
+  //    snapshot; a no-op when the loser had no followers.
+  const followers = redirectsToRepoint(all, losing);
+  if (followers.length > 0) {
+    const { error: repointError } = await supabase
+      .from("custom_step23_line_defs")
+      .update({ merged_into: win })
+      .in("code", followers);
+
+    if (repointError) {
+      console.error(`Failed to re-point redirects from ${losing} to ${win}:`, repointError);
+      throw new Error(
+        `Merged ${losing} into ${win}, but failed to re-point its existing redirects (${followers.join(", ")}): ${repointError.message}`
+      );
+    }
   }
 
   return mapCustomStep23LineDefRow(data);

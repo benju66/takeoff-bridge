@@ -24,15 +24,17 @@ import { getCustomStep23LineDefs, createCustomStep23LineDef } from "../db";
 
 beforeEach(() => vi.clearAllMocks());
 
-const COLUMNS = "code, label, unit, procore_code, source";
+const COLUMNS = "code, label, unit, procore_code, source, status, merged_into";
 
 describe("getCustomStep23LineDefs", () => {
-  it("queries all defs ordered by code and maps the rows", async () => {
+  it("queries all defs ordered by code and maps the rows (incl. lifecycle status + merged_into)", async () => {
     mockOrder.mockResolvedValueOnce({
       data: [
-        { code: "01-0410.002", label: "Night Superintendent", unit: "HR", procore_code: "1-10410.000", source: "manual" },
-        { code: "02-4100.003", label: "Demolition - Openings in CMU", unit: "EA", procore_code: null, source: "import_gate" },
-        // unit can come back null from a raw row — mapped to "".
+        { code: "01-0410.002", label: "Night Superintendent", unit: "HR", procore_code: "1-10410.000", source: "manual", status: "active", merged_into: null },
+        // merged → carries a winner; mapped to mergedInto.
+        { code: "02-4100.003", label: "Demolition - Openings in CMU", unit: "EA", procore_code: null, source: "import_gate", status: "merged", merged_into: "01-0410.002" },
+        // unit can come back null from a raw row — mapped to ""; status/merged_into
+        // absent on the row default to 'active' / null (the mapper's safety net).
         { code: "02-9530.002", label: "Fence Wash", unit: null, procore_code: null, source: "import_gate" },
       ],
       error: null,
@@ -44,9 +46,9 @@ describe("getCustomStep23LineDefs", () => {
     expect(mockSelect).toHaveBeenCalledWith(COLUMNS);
     expect(mockOrder).toHaveBeenCalledWith("code", { ascending: true });
     expect(out).toEqual([
-      { code: "01-0410.002", label: "Night Superintendent", unit: "HR", procoreCode: "1-10410.000", source: "manual" },
-      { code: "02-4100.003", label: "Demolition - Openings in CMU", unit: "EA", procoreCode: null, source: "import_gate" },
-      { code: "02-9530.002", label: "Fence Wash", unit: "", procoreCode: null, source: "import_gate" },
+      { code: "01-0410.002", label: "Night Superintendent", unit: "HR", procoreCode: "1-10410.000", source: "manual", status: "active", mergedInto: null },
+      { code: "02-4100.003", label: "Demolition - Openings in CMU", unit: "EA", procoreCode: null, source: "import_gate", status: "merged", mergedInto: "01-0410.002" },
+      { code: "02-9530.002", label: "Fence Wash", unit: "", procoreCode: null, source: "import_gate", status: "active", mergedInto: null },
     ]);
   });
 
@@ -66,6 +68,8 @@ describe("createCustomStep23LineDef", () => {
     unit: "EA",
     procore_code: null,
     source: "import_gate",
+    status: "active",
+    merged_into: null,
   };
 
   it("rejects a non-deterministic code shape WITHOUT touching the db", async () => {
@@ -131,6 +135,8 @@ describe("createCustomStep23LineDef", () => {
       unit: "EA",
       procoreCode: null,
       source: "import_gate",
+      status: "active",
+      mergedInto: null,
     });
   });
 
