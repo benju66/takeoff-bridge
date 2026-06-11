@@ -30,6 +30,7 @@ import { validateAssignInput } from "@/lib/assignCode";
 import { getCatalogItems } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { getDivisionCode } from "@/lib/division";
+import { RESOLVED_BY } from "@/lib/resolvedBy";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, getProjects, saveProject, saveEstimate, createEstimateSnapshot,
@@ -74,10 +75,19 @@ export default function ImportPastEstimatePage() {
    * rows always save exactly as bid.
    */
   const [uomOverrides, setUomOverrides] = useState<Map<string, string>>(new Map());
-  /** Working rows = original enriched rows + current acceptances + UOM edits. */
+  /**
+   * The estimator's per-line "combined" marks (database fidelity Phase 2):
+   * rowIds whose price lumps several scopes. Same escape-hatch pattern as
+   * `accepted`/`uomOverrides` — revertible any time before save, and the save
+   * is NEVER gated on it. A marked line saves with
+   * `data_fidelity='macro_lump_sum'` and its training write goes in tagged;
+   * read-side reports exclude it, nothing is discarded.
+   */
+  const [lumpMarks, setLumpMarks] = useState<Set<string>>(new Set());
+  /** Working rows = original enriched rows + acceptances + UOM edits + combined marks. */
   const rows = useMemo(
-    () => (parsed ? applyAcceptedMappings(parsed.rows, accepted, uomOverrides) : []),
-    [parsed, accepted, uomOverrides]
+    () => (parsed ? applyAcceptedMappings(parsed.rows, accepted, uomOverrides, lumpMarks) : []),
+    [parsed, accepted, uomOverrides, lumpMarks]
   );
 
   /**
@@ -206,6 +216,7 @@ export default function ImportPastEstimatePage() {
     setParsed(null);
     setAccepted(new Map());
     setUomOverrides(new Map());
+    setLumpMarks(new Set());
     setStep23Uom(new Map());
     setStep23Assignments(new Map());
     setMintForKey(null);
@@ -359,6 +370,20 @@ export default function ImportPastEstimatePage() {
     setMintForKey(null);
   };
 
+  /**
+   * Toggle one row's "combined" mark (one price lumping several scopes).
+   * Fully revertible before save; never gates the save. The mark only tags
+   * the saved line + its training write — dollars and the tie never move.
+   */
+  const toggleLumpMark = (rowId: string) => {
+    setLumpMarks((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  };
+
   /** Withdraw a confirmation — the row returns to its suggested/pending state. */
   const unacceptMapping = (rowId: string) => {
     setError(null);
@@ -419,10 +444,17 @@ export default function ImportPastEstimatePage() {
       await saveImportedStep23Lines(id, applyStep23Corrections(step23Payload, step23Corrections));
 
       // Confirmed mappings feed the recurring-bid memory (Phase 3 consumes
-      // classification_history). Training data: fire-and-forget.
+      // classification_history). Training data: fire-and-forget. A line marked
+      // "combined" records its pairing TAGGED (resolvedBy.ts vocabulary) so
+      // suggestion ranking and price mining skip it — recorded, never discarded.
       for (const r of rows) {
         if (r.itemId && parsed.suggestions.has(r.id)) {
-          recordClassificationResolution(r.description, r.itemId, id, "user").catch(() => {});
+          recordClassificationResolution(
+            r.description,
+            r.itemId,
+            id,
+            r.dataFidelity === "macro_lump_sum" ? RESOLVED_BY.USER_LUMP : RESOLVED_BY.USER
+          ).catch(() => {});
         }
       }
 
@@ -579,6 +611,7 @@ export default function ImportPastEstimatePage() {
                     <Wand2 size={13} className="text-blue-500" /> Code mapping review
                     <span className="font-normal normal-case text-slate-500">
                       {acceptedCount}/{reviewRows.length} confirmed
+                      {lumpMarks.size > 0 && ` · ${lumpMarks.size} combined`}
                     </span>
                   </h3>
                   <button
@@ -592,6 +625,8 @@ export default function ImportPastEstimatePage() {
                 <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
                   This bid uses legacy cost codes. Confirm a current code for each line — dollars never change,
                   only the code. Anything you skip still saves and stays flagged in the workspace Flags worklist.
+                  Tick <strong>Combined</strong> when one line&apos;s price lumps several scopes: it saves and ties
+                  exactly the same, but its price is kept out of the price history and future suggestions.
                 </p>
                 <div className="max-h-96 overflow-y-auto border border-grid-border rounded-lg">
                   <table className="w-full text-xs">
@@ -602,6 +637,12 @@ export default function ImportPastEstimatePage() {
                         <th className="px-3 py-2 font-bold text-center">UOM</th>
                         <th className="px-3 py-2 font-bold">Suggested code</th>
                         <th className="px-3 py-2 font-bold">Confirm</th>
+                        <th
+                          className="px-3 py-2 font-bold text-center"
+                          title="One price lumping several scopes — saved and tied as bid, but excluded from price history and suggestions"
+                        >
+                          Combined
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -613,9 +654,11 @@ export default function ImportPastEstimatePage() {
                           disabled={saving}
                           uomEdited={uomOverrides.has(r.id)}
                           asBidUom={originalUomById.get(r.id) ?? ""}
+                          lumpMarked={lumpMarks.has(r.id)}
                           onAccept={(itemId) => acceptMapping(r.id, itemId)}
                           onUnaccept={() => unacceptMapping(r.id)}
                           onUomChange={(value) => setUomOverride(r.id, value)}
+                          onToggleLump={() => toggleLumpMark(r.id)}
                         />
                       ))}
                     </tbody>
@@ -900,9 +943,11 @@ function ReviewRow({
   disabled,
   uomEdited,
   asBidUom,
+  lumpMarked,
   onAccept,
   onUnaccept,
   onUomChange,
+  onToggleLump,
 }: {
   row: ProcessedTakeoffRow;
   suggestion: MappingSuggestion;
@@ -911,10 +956,14 @@ function ReviewRow({
   uomEdited: boolean;
   /** The bid's ORIGINAL unit (pre-correction), for the cue + revert hint. */
   asBidUom: string;
+  /** True when this line is marked "combined" (lump) — revertible any time. */
+  lumpMarked: boolean;
   onAccept: (itemId: string) => void;
   onUnaccept: () => void;
   /** Commit a UOM correction; empty input restores the bid's own value. */
   onUomChange: (value: string) => void;
+  /** Flip this line's "combined" mark on/off. */
+  onToggleLump: () => void;
 }) {
   const [freeEntry, setFreeEntry] = useState("");
   const [entryError, setEntryError] = useState<string | null>(null);
@@ -957,6 +1006,25 @@ function ReviewRow({
       )}
     </td>
   );
+  // The "combined" mark (database fidelity Phase 2): a deliberate, revertible
+  // tag — same escape hatch as the UOM box. Saving is never gated on it.
+  const combinedCell = (
+    <td className="px-3 py-2 text-center">
+      <input
+        type="checkbox"
+        checked={lumpMarked}
+        disabled={disabled}
+        onChange={onToggleLump}
+        className="accent-amber-600 cursor-pointer disabled:cursor-not-allowed"
+        aria-label={`Mark "${row.description}" as a combined line`}
+        title={
+          lumpMarked
+            ? "Marked combined — saves and ties exactly as bid, but this price is kept out of the price history and suggestions. Uncheck to revert."
+            : "Tick when this line's price lumps several scopes into one number. It still saves and ties as bid; only the pricing database ignores it."
+        }
+      />
+    </td>
+  );
 
   const assignFreeEntry = () => {
     const result = validateAssignInput(freeEntry);
@@ -991,6 +1059,7 @@ function ReviewRow({
             </button>
           </span>
         </td>
+        {combinedCell}
       </tr>
     );
   }
@@ -1075,6 +1144,7 @@ function ReviewRow({
           {entryError && <span className="text-[10px] text-rose-600 dark:text-rose-400">{entryError}</span>}
         </div>
       </td>
+      {combinedCell}
     </tr>
   );
 }

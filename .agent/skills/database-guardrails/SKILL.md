@@ -60,7 +60,7 @@ Execute these enforcement checks whenever a proposed modification touches Supaba
 * **Append-Only**: The `classification_history` table is an immutable training data store. Agents must NEVER issue `UPDATE` or `DELETE` statements against this table. Each row is a permanent observation.
 * **Write Path**: All inserts MUST route through `recordClassificationResolution()` in `db.ts`. Direct `.from('classification_history').insert()` calls outside `db.ts` are forbidden.
 * **Fire-and-Forget**: All calls to `recordClassificationResolution()` from hooks MUST include `.catch(() => {})`. Training data loss is non-critical and must never block user workflows or cause unhandled promise rejections.
-* **Resolution Sources**: The `resolved_by` column MUST be one of: `'user'` (manual itemId edit), `'global'` (global registry resolution), `'seed'` (CSV import auto-mapping), `'ai'` (future AI classification).
+* **Resolution Sources**: The `resolved_by` vocabulary is defined in ONE module — `src/lib/resolvedBy.ts` — and `recordClassificationResolution()` is typed against it. Current values: `'user'` (manual itemId edit / import-review confirm), `'global'` (global registry resolution), `'seed'` (CSV import auto-mapping), `'ai'` (future AI classification), `'user_lump'` (import-review confirm on a line marked "combined" — recorded but excluded from suggestion ranking and price mining via the `TRUSTED_RESOLVED_BY` allowlist). New phases MUST extend that module, never write ad-hoc tag strings.
 
 ## 9. Snapshot Immutability
 

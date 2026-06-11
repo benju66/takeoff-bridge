@@ -490,6 +490,38 @@ describe("acceptance map â€” confirm, change, withdraw (architect escape ha
     expect(filled.uom).toBe("LS");
   });
 
+  it("combined marks tag dataFidelity, layer with other edits, and are fully revertible (fidelity Phase 2)", async () => {
+    const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
+    const originals = enrichImportedRows(extracted);
+    const trusses = originals.find((r) => r.description === "Shop-Fabricated Wood Trusses")!;
+    const mystery = originals.find((r) => r.description === "Mystery Scope")!;
+
+    // A mark tags ONLY the marked row — and layers over an acceptance + UOM
+    // correction on the same row without disturbing either.
+    const marked = applyAcceptedMappings(
+      originals,
+      new Map([[trusses.id, "06-1753.001"]]),
+      new Map([[trusses.id, "EA"]]),
+      new Set([trusses.id])
+    );
+    const lumped = marked.find((r) => r.id === trusses.id)!;
+    expect(lumped.dataFidelity).toBe("macro_lump_sum");
+    expect(lumped.itemId).toBe("06-1753.001");
+    expect(lumped.uom).toBe("EA");
+    // A pure tag: the dollars (and therefore the tie-out) cannot move.
+    expect(lumped.unitPrice).toBe(trusses.unitPrice);
+    expect(lumped.matchedQty).toBe(trusses.matchedQty);
+    expect(lumped.total).toBe(trusses.total);
+    // Unmarked rows are untouched (no fidelity tag → saves as discrete_unit).
+    expect(marked.find((r) => r.id === mystery.id)!.dataFidelity).toBeUndefined();
+
+    // Removing the mark restores the row exactly; originals are never mutated.
+    const reverted = applyAcceptedMappings(originals, new Map(), new Map(), new Set())
+      .find((r) => r.id === trusses.id)!;
+    expect(reverted.dataFidelity).toBeUndefined();
+    expect(trusses.dataFidelity).toBeUndefined();
+  });
+
   it("refuses a linked code already claimed by an acceptance or a born-linked row", async () => {
     const extracted = await extractEstimateFromBuffer(await buildLegacyPastBidTemplateBuffer());
     const originals = enrichImportedRows(extracted);

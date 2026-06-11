@@ -5,6 +5,7 @@ import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normaliz
 import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus } from "./catalogLifecycle";
 import { isBuiltInCatalogCode } from "./catalog";
 import { isValidProcoreCode } from "./procoreValidCodes";
+import { TRUSTED_RESOLVED_BY, type ResolvedBy } from "./resolvedBy";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -633,12 +634,17 @@ export async function saveProjectLockedCells(
  * Records a classification → cost code resolution event.
  * Each call inserts an immutable training observation.
  * Fire-and-forget callers should swallow errors — training data loss is non-critical.
+ *
+ * THE single write path to `resolved_by` (database fidelity Phase 2): the
+ * parameter is typed against the documented vocabulary in resolvedBy.ts, so a
+ * tag this module doesn't define cannot be written. Extend the vocabulary
+ * there, never here.
  */
 export async function recordClassificationResolution(
   classification: string,
   resolvedCode: string,
   projectId: string | null,
-  resolvedBy: 'user' | 'global' | 'seed' | 'ai',
+  resolvedBy: ResolvedBy,
   confidence: number = 1.0
 ): Promise<void> {
   const { error } = await supabase.from("classification_history").insert({
@@ -658,6 +664,8 @@ export async function recordClassificationResolution(
 /**
  * Retrieves all historical resolutions for a classification string.
  * Groups by resolved_code with count for AI confidence scoring.
+ * Trusted observations only (resolvedBy.ts): lump-tagged rows stay recorded
+ * but never feed a suggestion.
  */
 export async function getClassificationHistory(
   classification: string
@@ -666,6 +674,7 @@ export async function getClassificationHistory(
     .from("classification_history")
     .select("resolved_code, resolved_by, confidence")
     .eq("classification", classification)
+    .in("resolved_by", TRUSTED_RESOLVED_BY)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -704,6 +713,9 @@ export async function getClassificationHistory(
  * (deterministic ties). Classifications with no history are simply absent.
  * READ-only; the table stays append-only. Callers treat history as advisory
  * (fail-soft) — an empty map must leave the import flow working unchanged.
+ * Counts only TRUSTED observations (resolvedBy.ts allowlist): a `user_lump`
+ * confirmation is a combined line's pairing, recorded forever but never ranked
+ * into suggestions (record everything, tagged — architect-locked).
  */
 export async function getClassificationHistoryBulk(
   classifications: readonly string[]
@@ -720,7 +732,8 @@ export async function getClassificationHistoryBulk(
     const { data, error } = await supabase
       .from("classification_history")
       .select("classification, resolved_code")
-      .in("classification", unique.slice(i, i + CHUNK));
+      .in("classification", unique.slice(i, i + CHUNK))
+      .in("resolved_by", TRUSTED_RESOLVED_BY);
     if (error) {
       console.error("Failed to fetch bulk classification history:", error);
       throw new Error(`Failed to fetch bulk classification history: ${error.message}`);
@@ -750,13 +763,19 @@ export async function getClassificationHistoryBulk(
  * `source='imported'` (prices kept verbatim at import) joined to their project
  * context. READ-only fuel for the /rates price-history report — aggregation
  * lives in the pure priceHistory.ts; nothing here or there writes a rate.
+ * Lines marked "combined" at the import gate (`data_fidelity='macro_lump_sum'`,
+ * fidelity Phase 2) are excluded: one price lumping several scopes is not a
+ * unit-price observation. The rows stay in the database untouched — the filter
+ * is read-side only. (Column is NOT NULL with a default, so `neq` drops
+ * nothing it shouldn't.)
  */
 export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
   const { data, error } = await supabase
     .from("estimate_line_items")
     .select("item_id, unit_price, uom, projects(name, bid_date, market_sector)")
     .eq("source", "imported")
-    .neq("item_id", "");
+    .neq("item_id", "")
+    .neq("data_fidelity", "macro_lump_sum");
 
   if (error) {
     console.error("Failed to fetch imported price history:", error);

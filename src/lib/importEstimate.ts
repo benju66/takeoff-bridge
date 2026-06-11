@@ -490,11 +490,21 @@ export function overrideMapFromIntents(intents: readonly LumpOverrideIntent[]): 
  * "I approved the wrong one" escape hatch. A UOM correction is applied AFTER
  * the mapping, so it wins over both the as-bid value and a catalog blank-fill;
  * UOM is non-financial, so dollars and the tie-out never move.
+ *
+ * `lumpMarks` (database fidelity Phase 2) is the same escape hatch for the
+ * per-line "combined" toggle: a marked row carries
+ * `dataFidelity='macro_lump_sum'` into the save — one price lumping several
+ * scopes, excluded from price history and suggestion ranking on the READ side
+ * but never discarded. Removing the mark restores the row untouched BY
+ * CONSTRUCTION: the originals are enriched import rows, which never carry a
+ * fidelity tag, so an unmarked row needs no clearing. A pure tag: dollars and
+ * the tie-out cannot move, and the save is never gated on it.
  */
 export function applyAcceptedMappings(
   originals: readonly ProcessedTakeoffRow[],
   accepted: ReadonlyMap<string, string>,
-  uomOverrides?: ReadonlyMap<string, string>
+  uomOverrides?: ReadonlyMap<string, string>,
+  lumpMarks?: ReadonlySet<string>
 ): ProcessedTakeoffRow[] {
   return originals.map((r) => {
     const itemId = accepted.get(r.id);
@@ -502,6 +512,9 @@ export function applyAcceptedMappings(
     const uom = uomOverrides?.get(r.id);
     if (uom && uom !== row.uom) {
       row = { ...row, uom };
+    }
+    if (lumpMarks?.has(r.id)) {
+      row = { ...row, dataFidelity: "macro_lump_sum" };
     }
     return row;
   });

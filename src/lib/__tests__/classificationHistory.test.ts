@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mock Supabase client — intercepts all db.ts calls
+// Read chain: .select(...).eq(...).in("resolved_by", ...).order(...) → promise
 // ---------------------------------------------------------------------------
 const mockInsert = vi.fn();
 const mockEq = vi.fn();
+const mockInTrusted = vi.fn();
 const mockOrder = vi.fn();
 
 vi.mock("../supabase", () => ({
@@ -13,7 +15,6 @@ vi.mock("../supabase", () => ({
       insert: mockInsert,
       select: vi.fn(() => ({
         eq: mockEq,
-        order: mockOrder,
       })),
     })),
   },
@@ -23,6 +24,14 @@ import {
   recordClassificationResolution,
   getClassificationHistory,
 } from "../db";
+import { RESOLVED_BY, TRUSTED_RESOLVED_BY } from "../resolvedBy";
+
+/** Wires the read chain: eq → in → order (order resolves the given payload). */
+function mockReadChain(payload: { data: unknown; error: unknown }) {
+  mockOrder.mockResolvedValueOnce(payload);
+  mockInTrusted.mockReturnValueOnce({ order: mockOrder });
+  mockEq.mockReturnValueOnce({ in: mockInTrusted });
+}
 
 describe("Classification History — recordClassificationResolution", () => {
   beforeEach(() => {
@@ -68,6 +77,21 @@ describe("Classification History — recordClassificationResolution", () => {
     );
   });
 
+  it("records a combined-line confirmation TAGGED as user_lump (fidelity Phase 2: recorded, never discarded)", async () => {
+    mockInsert.mockResolvedValueOnce({ error: null });
+
+    await recordClassificationResolution(
+      "Doors/Frames/Hardware (combined)",
+      "08-1100.001",
+      "project-1",
+      RESOLVED_BY.USER_LUMP
+    );
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ resolved_by: "user_lump" })
+    );
+  });
+
   it("defaults confidence to 1.0 when omitted", async () => {
     mockInsert.mockResolvedValueOnce({ error: null });
 
@@ -106,36 +130,39 @@ describe("Classification History — getClassificationHistory", () => {
       { resolved_code: "04-0000.001", resolved_by: "user", confidence: 1.0 },
     ];
 
-    mockOrder.mockResolvedValueOnce({ data: mockData, error: null });
-    mockEq.mockReturnValueOnce({ order: mockOrder });
+    mockReadChain({ data: mockData, error: null });
 
     const result = await getClassificationHistory("Slab on Grade");
 
     expect(result).toHaveLength(2);
-    
+
     const group03 = result.find((r) => r.resolvedCode === "03-3000.001");
     expect(group03).toBeDefined();
     expect(group03!.count).toBe(2);
-    
+
     const group04 = result.find((r) => r.resolvedCode === "04-0000.001");
     expect(group04).toBeDefined();
     expect(group04!.count).toBe(1);
   });
 
+  it("reads TRUSTED observations only — lump-tagged rows are filtered at the query", async () => {
+    mockReadChain({ data: [], error: null });
+
+    await getClassificationHistory("Slab on Grade");
+
+    expect(mockInTrusted).toHaveBeenCalledWith("resolved_by", [...TRUSTED_RESOLVED_BY]);
+    expect(mockInTrusted.mock.calls[0][1]).not.toContain(RESOLVED_BY.USER_LUMP);
+  });
+
   it("returns empty array when no history exists", async () => {
-    mockOrder.mockResolvedValueOnce({ data: [], error: null });
-    mockEq.mockReturnValueOnce({ order: mockOrder });
+    mockReadChain({ data: [], error: null });
 
     const result = await getClassificationHistory("Unknown Classification");
     expect(result).toEqual([]);
   });
 
   it("throws on Supabase error", async () => {
-    mockOrder.mockResolvedValueOnce({
-      data: null,
-      error: { message: "Network error" },
-    });
-    mockEq.mockReturnValueOnce({ order: mockOrder });
+    mockReadChain({ data: null, error: { message: "Network error" } });
 
     await expect(
       getClassificationHistory("Test")
