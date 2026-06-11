@@ -762,17 +762,20 @@ export async function getClassificationHistoryBulk(
  * Every AS-BID unit price on record (Phase 3 Slice 2): saved line items with
  * `source='imported'` (prices kept verbatim at import) joined to their project
  * context. READ-only fuel for the /rates price-history report — aggregation
- * lives in the pure priceHistory.ts; nothing here or there writes a rate.
+ * lives in the pure historyTrust.ts; nothing here or there writes a rate.
  * Lines marked "combined" at the import gate (`data_fidelity='macro_lump_sum'`,
  * fidelity Phase 2) are excluded: one price lumping several scopes is not a
  * unit-price observation. The rows stay in the database untouched — the filter
  * is read-side only. (Column is NOT NULL with a default, so `neq` drops
- * nothing it shouldn't.)
+ * nothing it shouldn't.) The RULE itself is owned by
+ * historyTrust.observationExclusion (fidelity Phase 3) — the `neq` here is
+ * only a fetch-size optimization, and qty + data_fidelity ride each
+ * observation so the trust module can judge every row it receives.
  */
 export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
   const { data, error } = await supabase
     .from("estimate_line_items")
-    .select("item_id, unit_price, uom, projects(name, bid_date, market_sector)")
+    .select("item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)")
     .eq("source", "imported")
     .neq("item_id", "")
     .neq("data_fidelity", "macro_lump_sum");
@@ -793,6 +796,10 @@ export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
       projectName: project?.name ?? "",
       bidDate: project?.bid_date ?? "",
       marketSector: project?.market_sector ?? "",
+      // NOT NULL with defaults in the schema; `|| 0` / `?? ""` only guard a
+      // malformed payload. A 0 qty is then excluded by the trust screen.
+      qty: Number(row.matched_qty) || 0,
+      dataFidelity: (row.data_fidelity as string) ?? "",
     };
   });
 }

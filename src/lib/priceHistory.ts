@@ -24,6 +24,13 @@ export interface PriceObservation {
   /** "YYYY-MM-DD" bid date of the source project ("" when unset). */
   bidDate: string;
   marketSector: string;
+  /** As-bid quantity (fidelity Phase 3) — fuel for historyTrust's zero-qty
+   *  rule. OPTIONAL: undefined means the producer had no quantity context;
+   *  the trust screen then cannot judge it and lets the row pass. */
+  qty?: number;
+  /** The line's data_fidelity flag (fidelity Phase 3) — fuel for
+   *  historyTrust's combined-line rule ('macro_lump_sum' is excluded). */
+  dataFidelity?: string;
 }
 
 /** Report for one (itemId, uom) group. */
@@ -49,6 +56,12 @@ export function median(values: readonly number[]): number {
 /**
  * Groups observations into per-(itemId, uom) stats, keyed by itemId. Within an
  * item, groups are ordered by count (desc) so the dominant unit reads first.
+ *
+ * SUPERSEDED for app reporting by historyTrust.aggregateTrustedHistory
+ * (fidelity Phase 3) — every consumer now flows through the trust module.
+ * This function stays as the pre-trust REFERENCE implementation: the
+ * equivalence test proves the trust pipeline reports identical numbers for
+ * already-clean data by comparing against it.
  */
 export function aggregatePriceHistory(
   observations: readonly PriceObservation[]

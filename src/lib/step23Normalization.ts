@@ -41,6 +41,7 @@ import {
 } from "./constants";
 import type { ImportedSheetLine, ImportedStep23Lines } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
+import { observationExclusion } from "./historyTrust";
 import {
   statusOf,
   resolveMergeTarget,
@@ -263,17 +264,16 @@ export interface Step23HistorySource {
  * and is not a %-UOM row — those carry the project base in the rate column
  * (e.g. Safety Consultant qty 0.0002 × $16,000,000), not a unit rate.
  * Zero-qty template rows merely echo that era's default and are skipped.
+ * The rules themselves live in historyTrust (fidelity Phase 3, single
+ * authority) — this is the F-B contract delegating to that one copy.
  */
 function isMinableLine(line: ImportedSheetLine): boolean {
-  const uom = (line.uom ?? "").trim();
-  // Finite guards: JSON can carry null where a number belongs (null !== 0 is
-  // true) — a corrupt payload must not mint a junk observation.
   return (
-    Number.isFinite(line.qty) &&
-    line.qty !== 0 &&
-    Number.isFinite(line.rate) &&
-    line.rate !== 0 &&
-    uom !== "%"
+    observationExclusion({
+      unitPrice: line.rate,
+      uom: line.uom ?? "",
+      qty: line.qty,
+    }) === null
   );
 }
 
@@ -308,6 +308,13 @@ export function step23Observations(
         projectName: src.projectName,
         bidDate: src.bidDate,
         marketSector: src.marketSector,
+        // Quantity rides along (fidelity Phase 3) so historyTrust can apply
+        // its zero-qty rule itself — isMinableLine already enforced it here.
+        // No dataFidelity: STEP 2/3 payload lines carry no lump marker today
+        // (the "combined" mark is a STEP 4 line-item flag). If a later phase
+        // adds one to ImportedSheetLine, surface it here or lumps would pass
+        // the trust screen on this feed.
+        qty: line.qty,
       });
     }
   }

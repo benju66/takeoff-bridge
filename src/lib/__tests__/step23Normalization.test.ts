@@ -320,6 +320,7 @@ describe("step23Observations (fork F-B: carried + priced lines only)", () => {
         itemId: "01-0410.001",
         unitPrice: 125,
         uom: "HR",
+        qty: 1818.6, // rides along so historyTrust can judge the row itself
         projectName: "CARE Relocation",
         bidDate: "2026-04-03",
         marketSector: "Healthcare",

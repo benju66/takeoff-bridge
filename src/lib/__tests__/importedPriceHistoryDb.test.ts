@@ -30,9 +30,11 @@ describe("getImportedPriceHistory", () => {
           item_id: "09-2900.001",
           unit_price: 4.25,
           uom: "sf", // legacy-saved rows may be lowercase — normalized on read
+          matched_qty: 1200,
+          data_fidelity: "discrete_unit",
           projects: { name: "CARE Relocation", bid_date: "2026-04-06", market_sector: "Healthcare" },
         },
-        { item_id: "22-0000.001", unit_price: "12.50", uom: null, projects: null },
+        { item_id: "22-0000.001", unit_price: "12.50", uom: null, matched_qty: null, data_fidelity: null, projects: null },
       ],
       error: null,
     });
@@ -40,7 +42,11 @@ describe("getImportedPriceHistory", () => {
     const out = await getImportedPriceHistory();
 
     expect(mockFrom).toHaveBeenCalledWith("estimate_line_items");
-    expect(mockSelect).toHaveBeenCalledWith("item_id, unit_price, uom, projects(name, bid_date, market_sector)");
+    // qty + data_fidelity ride along (fidelity Phase 3) so historyTrust can
+    // apply its own zero-qty / combined-line rules to every observation.
+    expect(mockSelect).toHaveBeenCalledWith(
+      "item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)"
+    );
     expect(mockEq).toHaveBeenCalledWith("source", "imported");
     expect(mockNeqItemId).toHaveBeenCalledWith("item_id", "");
     expect(out).toEqual([
@@ -51,8 +57,21 @@ describe("getImportedPriceHistory", () => {
         projectName: "CARE Relocation",
         bidDate: "2026-04-06",
         marketSector: "Healthcare",
+        qty: 1200,
+        dataFidelity: "discrete_unit",
       },
-      { itemId: "22-0000.001", unitPrice: 12.5, uom: "", projectName: "", bidDate: "", marketSector: "" },
+      {
+        itemId: "22-0000.001",
+        unitPrice: 12.5,
+        uom: "",
+        projectName: "",
+        bidDate: "",
+        marketSector: "",
+        // Malformed payload guards: a null qty reads 0 (excluded by the trust
+        // screen — never a junk observation), a null fidelity reads "".
+        qty: 0,
+        dataFidelity: "",
+      },
     ]);
   });
 

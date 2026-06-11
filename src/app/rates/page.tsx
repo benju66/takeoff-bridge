@@ -31,7 +31,11 @@ import {
   parseRateInput,
   RATE_LINE_DEFS,
 } from "@/lib/rateCardEditor";
-import { aggregatePriceHistory, type PriceHistoryStat } from "@/lib/priceHistory";
+import {
+  aggregateTrustedHistory,
+  canonicalUom,
+  type TrustedHistoryStat,
+} from "@/lib/historyTrust";
 import { RateCardEntry, CustomStep23LineDef, CatalogAddition } from "@/types/db";
 
 // ---------------------------------------------------------------------------
@@ -83,10 +87,11 @@ const currency = new Intl.NumberFormat("en-US", {
 });
 
 /**
- * One as-bid history line under a rate (shared by the catalog price report,
- * Slice 2, and the STEP 2/3 staff-rate report, Slice 3). REPORT-only; the
- * ADOPT button renders only when the bids' UOM matches this line's unit and
- * writes through the caller's audited path.
+ * One trusted-history line under a rate (shared by the catalog price report,
+ * Slice 2, and the STEP 2/3 staff-rate report, Slice 3; trust rules from
+ * historyTrust since fidelity Phase 3 — one stat per code/unit/sector group).
+ * REPORT-only; the ADOPT button renders only when the bids' canonical UOM
+ * matches this line's unit and writes through the caller's audited path.
  */
 function HistoryStatLine({
   stat,
@@ -96,7 +101,7 @@ function HistoryStatLine({
   disabled,
   onAdopt,
 }: {
-  stat: PriceHistoryStat;
+  stat: TrustedHistoryStat;
   /** The card row's code — names the ADOPT target in the button tooltip. */
   lineCode: string;
   /** The line def's unit — gates ADOPT (prices are only adoptable within a UOM). */
@@ -104,21 +109,30 @@ function HistoryStatLine({
   /** Tooltip lead-in naming the observation source. */
   sourceNote: string;
   disabled: boolean;
-  onAdopt: (stat: PriceHistoryStat) => void;
+  onAdopt: (stat: TrustedHistoryStat) => void;
 }) {
-  const uomMatches = stat.uom !== "" && stat.uom === unit.trim().toUpperCase();
+  const uomMatches = stat.uom !== "" && stat.count > 0 && stat.uom === canonicalUom(unit);
+  const groupLabel = `${stat.uom || "no UOM"}${stat.marketSector ? ` · ${stat.marketSector}` : ""}`;
   const detail = stat.observations
     .map((o) => `${o.projectName || "Unnamed"} (${o.bidDate || "no date"}${o.marketSector ? `, ${o.marketSector}` : ""}): ${currency.format(o.unitPrice)}`)
+    .join("\n");
+  // Flag-only outliers: visibly set aside in the tooltip, never deleted.
+  const outlierDetail = stat.flaggedOutliers
+    .map((o) => `OUTLIER — set aside: ${o.projectName || "Unnamed"} (${o.bidDate || "no date"}): ${currency.format(o.unitPrice)}`)
     .join("\n");
   return (
     <div
       className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-violet-700 dark:text-violet-300"
-      title={`${sourceNote} (${stat.uom || "no UOM"}):\n${detail}`}
+      title={`${sourceNote} (${groupLabel}) — ${stat.confidenceLabel}:\n${detail}${outlierDetail ? `\n${outlierDetail}` : ""}`}
     >
       <History size={10} className="shrink-0" />
       <span className="font-mono">
-        {stat.count} bid{stat.count === 1 ? "" : "s"} ({stat.uom || "no UOM"}) · med {currency.format(stat.median)}
+        {stat.count} bid{stat.count === 1 ? "" : "s"} ({groupLabel})
+        {stat.count > 0 && ` · med ${currency.format(stat.median)}`}
         {stat.count > 1 && ` · ${currency.format(stat.min)}–${currency.format(stat.max)}`}
+        {stat.confidence === "low" && " · low confidence"}
+        {stat.flaggedOutliers.length > 0 &&
+          ` · ${stat.flaggedOutliers.length} outlier${stat.flaggedOutliers.length === 1 ? "" : "s"} set aside`}
       </span>
       {uomMatches && (
         <button
@@ -149,10 +163,11 @@ export default function RateCardDashboard() {
   const skipBlurRef = useRef(false);
   /**
    * As-bid price history per catalog itemId (Phase 3 Slice 2) — REPORT-only,
-   * aggregated per (itemId, uom) from imported bids. Fail-soft: a fetch error
-   * leaves the map empty and the page fully functional without the report.
+   * aggregated per (itemId, unit, sector) through the historyTrust rules
+   * (fidelity Phase 3). Fail-soft: a fetch error leaves the map empty and the
+   * page fully functional without the report.
    */
-  const [priceHistory, setPriceHistory] = useState<Map<string, PriceHistoryStat[]>>(new Map());
+  const [priceHistory, setPriceHistory] = useState<Map<string, TrustedHistoryStat[]>>(new Map());
   /**
    * As-bid STEP 2/3 rate history per resolved GC/Site-Ops code (Phase 3
    * Slice 3) — REPORT-only, mined from imported_step23_lines. Kept SEPARATE
@@ -160,7 +175,7 @@ export default function RateCardDashboard() {
    * observations never mix (a code like 02-4100.002 exists in both worlds).
    * Fail-soft, same as the catalog report.
    */
-  const [step23History, setStep23History] = useState<Map<string, PriceHistoryStat[]>>(new Map());
+  const [step23History, setStep23History] = useState<Map<string, TrustedHistoryStat[]>>(new Map());
   /**
    * Custom (user-minted) GC/Site-Ops defs (Catalog Manager Phase 4). A PROMOTED
    * custom code has a rate_card row but NO built-in line def, so the card join
@@ -206,7 +221,7 @@ export default function RateCardDashboard() {
     (async () => {
       try {
         const observations = await getImportedPriceHistory();
-        if (!cancelled) setPriceHistory(aggregatePriceHistory(observations));
+        if (!cancelled) setPriceHistory(aggregateTrustedHistory(observations));
       } catch (err) {
         console.error("Failed to load imported price history (report skipped):", err);
       }
@@ -228,7 +243,7 @@ export default function RateCardDashboard() {
         ]);
         if (!cancelled) {
           setCustomDefs(loadedDefs);
-          setStep23History(aggregatePriceHistory(step23Observations(sources, loadedDefs)));
+          setStep23History(aggregateTrustedHistory(step23Observations(sources, loadedDefs)));
         }
       } catch (err) {
         console.error("Failed to load imported STEP 2/3 rate history (report skipped):", err);
@@ -321,11 +336,15 @@ export default function RateCardDashboard() {
    * SAME audited admin path as a manual edit (updateRateCardEntry → stamped
    * MANUAL). Explicit human action with a confirm — never auto-applied.
    */
-  const handleAdopt = async (entry: RateCardEntry, stat: PriceHistoryStat) => {
+  const handleAdopt = async (entry: RateCardEntry, stat: TrustedHistoryStat) => {
+    // The ADOPT button only renders for count > 0 groups, but a financial
+    // write deserves its own gate: an all-outliers group's median is 0 and
+    // must never become the company default through a future render change.
+    if (stat.count === 0) return;
     const allowNegative = RATE_LINE_DEFS.get(entry.lineCode)?.kind === "catalog";
     const ok = window.confirm(
       `Set the company default for ${entry.lineCode} to the as-bid median ${currency.format(stat.median)}?\n\n` +
-        `Backed by ${stat.count} imported bid${stat.count === 1 ? "" : "s"} (${stat.uom}). ` +
+        `Backed by ${stat.count} imported bid${stat.count === 1 ? "" : "s"} (${stat.uom}${stat.marketSector ? `, ${stat.marketSector}` : ""}). ` +
         `Current default: ${currency.format(entry.rate)}. Applies to future projects only.`
     );
     if (!ok) return;
@@ -600,7 +619,7 @@ export default function RateCardDashboard() {
                                     ADOPT only where the bids' UOM matches this line's unit. */}
                                 {(priceHistory.get(entry.lineCode) ?? []).map((stat) => (
                                   <HistoryStatLine
-                                    key={`catalog-${stat.uom || "(none)"}`}
+                                    key={`catalog-${stat.uom || "(none)"}-${stat.marketSector || "(none)"}`}
                                     stat={stat}
                                     lineCode={entry.lineCode}
                                     unit={def?.unit ?? ""}
@@ -614,7 +633,7 @@ export default function RateCardDashboard() {
                                     GC/Site-Ops line detail (resolved codes). */}
                                 {(step23History.get(entry.lineCode) ?? []).map((stat) => (
                                   <HistoryStatLine
-                                    key={`step23-${stat.uom || "(none)"}`}
+                                    key={`step23-${stat.uom || "(none)"}-${stat.marketSector || "(none)"}`}
                                     stat={stat}
                                     lineCode={entry.lineCode}
                                     unit={def?.unit ?? ""}
