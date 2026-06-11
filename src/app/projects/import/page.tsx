@@ -159,11 +159,17 @@ export default function ImportPastEstimatePage() {
       cancelled = true;
     };
   }, []);
-  /** Advisory near-matches (normalized name + bid-date grade); never blocks. */
+  /** Advisory near-matches (normalized name + bid-date grade); never blocks.
+   *  Checks the SAME name the save will use (projectFromExtract's fallback),
+   *  so an unnamed bid is still compared against past unnamed imports. */
   const duplicateMatches = useMemo(
     () =>
       parsed
-        ? findLikelyDuplicateImports(parsed.extracted.inputs.projectName, bidDate, existingProjects)
+        ? findLikelyDuplicateImports(
+            parsed.extracted.inputs.projectName || "Imported Estimate",
+            bidDate,
+            existingProjects
+          )
         : [],
     [parsed, bidDate, existingProjects]
   );
@@ -204,6 +210,14 @@ export default function ImportPastEstimatePage() {
     setStep23Assignments(new Map());
     setMintForKey(null);
     setStep23Open(null);
+    // Project metadata belongs to ONE bid — a different file must never inherit
+    // the previous bid's answers (a stale 'won' on the wrong project is exactly
+    // the silent corruption the capture fields exist to prevent).
+    setLocation("");
+    setMarketSector("");
+    setBidDate("");
+    setBidOutcome("unknown");
+    setDeliveryMethod("unknown");
     setParsing(true);
     try {
       const buffer = await file.arrayBuffer();
