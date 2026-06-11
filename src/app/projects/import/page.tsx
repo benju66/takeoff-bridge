@@ -26,7 +26,7 @@ import {
 } from "@/lib/step23Normalization";
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 import { validateAssignInput } from "@/lib/assignCode";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { getDivisionCode } from "@/lib/division";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
@@ -569,7 +569,7 @@ export default function ImportPastEstimatePage() {
                 {/* One shared datalist backs every row's free-entry box: type a code
                     OR part of a name and the browser narrows the choices. */}
                 <datalist id="import-code-options">
-                  {Object.values(ESTIMATE_ITEMS_MASTER)
+                  {Object.values(getCatalogItems())
                     .sort((a, b) => a.itemId.localeCompare(b.itemId, undefined, { numeric: true }))
                     .map((i) => (
                       <option key={i.itemId} value={i.itemId}>
@@ -792,7 +792,7 @@ function chipFor(suggestion: MappingSuggestion): { label: string; cls: string; i
 }
 
 /** Catalog name for a code ("" when uncatalogued — e.g. a linked division row). */
-const codeName = (itemId: string) => ESTIMATE_ITEMS_MASTER[itemId]?.description ?? "";
+const codeName = (itemId: string) => getCatalogItems()[itemId]?.description ?? "";
 
 function ReviewRow({
   row,

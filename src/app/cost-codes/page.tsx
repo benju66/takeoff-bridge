@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   AlertTriangle,
 } from "lucide-react";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import { getCostCodeMap, updateCostCodeMapping } from "@/lib/db";
 import { primeCostCodeResolver } from "@/lib/costCodeResolver";
@@ -126,8 +126,9 @@ export default function CostCodeMappingDashboard() {
     if (!entries) return [];
     const query = searchQuery.trim().toLowerCase();
     if (!query) return entries;
+    const catalog = getCatalogItems();
     return entries.filter((e) => {
-      const internalDescription = ESTIMATE_ITEMS_MASTER[e.internalCode]?.description || "";
+      const internalDescription = catalog[e.internalCode]?.description || "";
       const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(e.procoreCode) || "";
       return (
         e.internalCode.toLowerCase().includes(query) ||
@@ -145,7 +146,7 @@ export default function CostCodeMappingDashboard() {
   const catalogCodesMissingFromMap = useMemo(() => {
     if (!entries || entries.length === 0) return [];
     const mapped = new Set(entries.map((e) => e.internalCode));
-    return Object.keys(ESTIMATE_ITEMS_MASTER).filter((id) => !mapped.has(id)).sort();
+    return Object.keys(getCatalogItems()).filter((id) => !mapped.has(id)).sort();
   }, [entries]);
 
   if (!isLoaded || entries === null) {
@@ -293,7 +294,7 @@ export default function CostCodeMappingDashboard() {
                     </tr>
                   ) : (
                     filteredEntries.map((entry) => {
-                      const internalDescription = ESTIMATE_ITEMS_MASTER[entry.internalCode]?.description || "—";
+                      const internalDescription = getCatalogItems()[entry.internalCode]?.description || "—";
                       const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(entry.procoreCode);
                       const badge = SOURCE_BADGES[entry.source] || SOURCE_BADGES.template;
                       const isLegacyCode = !isValidProcoreCode(entry.procoreCode);

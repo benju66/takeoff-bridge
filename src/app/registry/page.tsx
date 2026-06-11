@@ -14,7 +14,7 @@ import {
   Save,
   Menu
 } from "lucide-react";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { DIVISION_NAMES } from "@/lib/constants";
 import { getGlobalRegistry, saveGlobalRegistry, deleteGlobalRegistry } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
@@ -149,10 +149,11 @@ export default function GlobalRegistryDashboard() {
   const processedRows: RegistryRow[] = React.useMemo(() => {
     if (!registry) return [];
 
+    const catalog = getCatalogItems();
     return Object.entries(registry)
       .filter(([classification]) => !classification.startsWith("__"))
       .map(([classification, itemId]) => {
-      const masterItem = ESTIMATE_ITEMS_MASTER[itemId];
+      const masterItem = catalog[itemId];
       const divisionCode = getDivisionCode(itemId);
       
       return {
@@ -190,7 +191,7 @@ export default function GlobalRegistryDashboard() {
     );
   }
 
-  const totalMappableItems = Object.keys(ESTIMATE_ITEMS_MASTER).length;
+  const totalMappableItems = Object.keys(getCatalogItems()).length;
   const harvestedCount = Object.keys(registry).length;
 
   return (

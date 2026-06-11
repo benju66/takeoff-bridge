@@ -12,7 +12,7 @@ import {
   ColumnFiltersState,
   Table,
 } from "@tanstack/react-table";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
@@ -309,9 +309,10 @@ export function useTakeoffWorkbook(
   // Initialize default rows
   // ---------------------------------------------------------------------------
   const initializeDefaultEstimateRows = (): ProcessedTakeoffRow[] => {
-    const sortedKeys = Object.keys(ESTIMATE_ITEMS_MASTER).sort();
+    const catalog = getCatalogItems();
+    const sortedKeys = Object.keys(catalog).sort();
     return sortedKeys.map((key) => {
-      const item = ESTIMATE_ITEMS_MASTER[key];
+      const item = catalog[key];
       return {
         id: `row-${item.itemId}`,
         classification: "",
@@ -831,7 +832,7 @@ export function useTakeoffWorkbook(
               const meta = info.table.options.meta!;
               const linked = getLinkedRowState(row);
               const isCellHardLocked = !!meta.lockedCells[`${row.id}::itemId`] || (!!linked && !linked.stray);
-              const suggestions = getFuzzySuggestions(row.classification, ESTIMATE_ITEMS_MASTER);
+              const suggestions = getFuzzySuggestions(row.classification, getCatalogItems());
 
               const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "itemId";
               const isEditing = isSelected && meta.selection.isEditing;

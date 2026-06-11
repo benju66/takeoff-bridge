@@ -1,4 +1,4 @@
-import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
+import { InternalEstimateItem } from "@/types";
 
 export interface SuggestionItem {
   itemId: string;
@@ -36,11 +36,11 @@ function levenshteinDistance(a: string, b: string): number {
 }
 
 /**
- * Returns fuzzy suggestion matches from ESTIMATE_ITEMS_MASTER for a given input.
+ * Returns fuzzy suggestion matches from the passed catalog for a given input.
  */
 export function getFuzzySuggestions(
   input: string,
-  masterItems: typeof ESTIMATE_ITEMS_MASTER,
+  masterItems: Record<string, InternalEstimateItem>,
   limit = 3
 ): SuggestionItem[] {
   if (!input) return [];

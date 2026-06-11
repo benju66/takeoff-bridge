@@ -24,7 +24,7 @@
  *    independent — see src/lib/cascade.ts). Procore rollup sums them into one code.
  */
 
-import type { ProcessedTakeoffRow, EstimateOverrideMap } from "@/types";
+import type { ProcessedTakeoffRow, EstimateOverrideMap, InternalEstimateItem } from "@/types";
 import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines, ImportedSheetLine } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
@@ -32,7 +32,7 @@ import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines, I
 // drag ExcelJS into its static bundle and crash the Turbopack compile worker.
 import type { ExtractedEstimate, ExtractedLineItem, ExtractedProjectInputs } from "./templateExtractor";
 import type { LinkedDivisionTotal, TakeoffSummary } from "./calculations";
-import { ESTIMATE_ITEMS_MASTER } from "./mock-data";
+import { getCatalogItems } from "./catalog";
 import { resolveProcoreCode } from "./costCodeResolver";
 import { resolveStep23Line, type Step23LineDef } from "./step23Normalization";
 import { getFuzzySuggestions, type SuggestionItem } from "./similarity";
@@ -63,7 +63,7 @@ function importRowId(it: ExtractedLineItem): string {
  * (non-conforming) lines carry `needsReview` so the override surface flags them.
  */
 function enrichOne(it: ExtractedLineItem): ProcessedTakeoffRow {
-  const master = ESTIMATE_ITEMS_MASTER[it.itemId];
+  const master = getCatalogItems()[it.itemId];
   const procoreCode = it.itemId ? resolveProcoreCode(it.itemId) : "";
 
   // Catalogued code → take its Procore parent / costType; otherwise carry
@@ -156,7 +156,7 @@ export type ClassificationHistoryMap = ReadonlyMap<string, { resolvedCode: strin
  * the bridge and the resolver can never disagree about a degraded session.
  */
 export function catalogCostCodeEntries(): Pick<CostCodeMapEntry, "internalCode" | "procoreCode">[] {
-  return Object.values(ESTIMATE_ITEMS_MASTER).map((i) => ({
+  return Object.values(getCatalogItems()).map((i) => ({
     internalCode: i.itemId,
     procoreCode: i.procoreCode,
   }));
@@ -183,7 +183,7 @@ const LINKED_BY_DESC = new Map(LINKED_DIVISION_ROWS.map((l) => [normalizeDesc(l.
 
 /** SuggestionItem for an internal code, catalog description when known. */
 function asCandidate(itemId: string): SuggestionItem {
-  return { itemId, description: ESTIMATE_ITEMS_MASTER[itemId]?.description ?? itemId };
+  return { itemId, description: getCatalogItems()[itemId]?.description ?? itemId };
 }
 
 /**
@@ -207,6 +207,7 @@ export function suggestMapping(
 ): MappingSuggestion {
   const rowId = importRowId(item);
   const base = { rowId, procoreCode: "", candidates: [] as SuggestionItem[] };
+  const catalog = getCatalogItems();
 
   const bridgedProcore = item.rawCode ? bridge.get(item.rawCode) : undefined;
   const family = bridgedProcore ? reverse.get(bridgedProcore) ?? [] : [];
@@ -223,7 +224,7 @@ export function suggestMapping(
   // must still be assignable TODAY (catalogued or a linked division row) — the
   // catalog evolves, and a stale confirmation must not become a suggestion.
   const past = (history?.get(item.description) ?? []).filter(
-    (h) => ESTIMATE_ITEMS_MASTER[h.resolvedCode] !== undefined || isLinkedDivisionRow(h.resolvedCode)
+    (h) => catalog[h.resolvedCode] !== undefined || isLinkedDivisionRow(h.resolvedCode)
   );
   if (past.length > 0) {
     return {
@@ -238,8 +239,8 @@ export function suggestMapping(
   if (bridgedProcore && family.length > 1) {
     // Ambiguous bridge family — rank its members by description similarity.
     const subMaster = Object.fromEntries(
-      family.map((id) => [id, ESTIMATE_ITEMS_MASTER[id] ?? { itemId: id, description: id }])
-    ) as typeof ESTIMATE_ITEMS_MASTER;
+      family.map((id) => [id, catalog[id] ?? { itemId: id, description: id }])
+    ) as Record<string, InternalEstimateItem>;
     const ranked = getFuzzySuggestions(item.description, subMaster, family.length);
     const candidates = ranked.length > 0 ? ranked : family.map(asCandidate);
     return {
@@ -251,7 +252,7 @@ export function suggestMapping(
     };
   }
 
-  const fuzzy = item.description ? getFuzzySuggestions(item.description, ESTIMATE_ITEMS_MASTER, 3) : [];
+  const fuzzy = item.description ? getFuzzySuggestions(item.description, catalog, 3) : [];
   if (fuzzy.length > 0) {
     return { ...base, confidence: "similar", itemId: fuzzy[0].itemId, candidates: fuzzy };
   }
@@ -286,7 +287,7 @@ export function suggestImportMappings(
  * `needsReview` removes it from Flags.
  */
 export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): ProcessedTakeoffRow {
-  const master = ESTIMATE_ITEMS_MASTER[itemId];
+  const master = getCatalogItems()[itemId];
   const procoreCode = resolveProcoreCode(itemId);
   return {
     ...row,
@@ -309,7 +310,7 @@ export function applyImportMapping(row: ProcessedTakeoffRow, itemId: string): Pr
  * later in the grid like any cell).
  */
 export function uomMismatch(row: ProcessedTakeoffRow): { bid: string; catalog: string } | null {
-  const catalog = ESTIMATE_ITEMS_MASTER[row.itemId]?.targetUom?.trim().toUpperCase() ?? "";
+  const catalog = getCatalogItems()[row.itemId]?.targetUom?.trim().toUpperCase() ?? "";
   const bid = row.uom.trim().toUpperCase();
   return bid && catalog && bid !== catalog ? { bid, catalog } : null;
 }

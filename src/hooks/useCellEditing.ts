@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { ProcessedTakeoffRow, WorkbookCommand, EditCellCommand } from "@/types";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { resolveProcoreCode } from "@/lib/costCodeResolver";
 import { resolveCatalogPrice } from "@/lib/rateResolver";
 import { applyImportMapping } from "@/lib/importEstimate";
@@ -99,7 +99,7 @@ export function useCellEditing(
     if (field === "itemId") {
       const newCode = String(value).trim();
       row.itemId = newCode;
-      const targetItem = ESTIMATE_ITEMS_MASTER[newCode];
+      const targetItem = getCatalogItems()[newCode];
 
       if (classification && classification !== "MANUAL ENTRY") {
         newRegistry = { ...currentRegistry, [classification]: newCode };

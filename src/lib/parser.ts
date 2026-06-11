@@ -1,5 +1,6 @@
 import { TogalRowPayload, ProcessedTakeoffRow } from "@/types";
-import { ESTIMATE_ITEMS_MASTER, INITIAL_MAPPING_REGISTRY } from "./mock-data";
+import { INITIAL_MAPPING_REGISTRY } from "./mock-data";
+import { getCatalogItems } from "./catalog";
 import { resolveProcoreCode } from "./costCodeResolver";
 import { resolveCatalogPrice } from "./rateResolver";
 import { evaluateDataFidelity } from "./calculations";
@@ -129,6 +130,8 @@ export function parseTogalCSV(
     ? globalRegistry["__config_keywords"].split(",").map(k => k.trim())
     : ["LS", "SUM", "ALLW", "LUMP"];
 
+  const catalog = getCatalogItems();
+
   return rawRows.map((row, index): ProcessedTakeoffRow | null => {
     // Normalize all row keys once for O(1) column access (Deep Review E1: explicit cast)
     const normalizedRow = normalizeRowKeys(row as unknown as Record<string, unknown>);
@@ -149,7 +152,7 @@ export function parseTogalCSV(
     // 3. INITIAL_MAPPING_REGISTRY exact match
     // 4. Normalized fallback (case-insensitive)
     let itemId = "";
-    if (embeddedCode && ESTIMATE_ITEMS_MASTER[embeddedCode]) {
+    if (embeddedCode && catalog[embeddedCode]) {
       itemId = embeddedCode;
     } else {
       itemId = userRegistry[classification] || globalRegistry[classification] || INITIAL_MAPPING_REGISTRY[classification] || "";
@@ -161,7 +164,7 @@ export function parseTogalCSV(
       itemId = userMap.get(normalizedClassification) || globalMap.get(normalizedClassification) || initialMap.get(normalizedClassification) || "";
     }
 
-    const masterItem = itemId ? ESTIMATE_ITEMS_MASTER[itemId] : null;
+    const masterItem = itemId ? catalog[itemId] : null;
 
     // Normalize Togal wide columns into accessible lookup blocks. parseUsNumber honors
     // accounting/trailing-minus negatives and FLAGS ambiguous numbers instead of guessing

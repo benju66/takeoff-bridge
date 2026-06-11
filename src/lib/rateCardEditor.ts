@@ -9,7 +9,7 @@ import {
   DIVISION_NAMES,
 } from "./constants";
 import { getDivisionCode } from "./division";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { RateCardEntry, CustomStep23LineDef } from "@/types/db";
 import { statusOf, type CatalogLifecycleStatus } from "./catalogLifecycle";
 
@@ -80,7 +80,7 @@ const GC_SITE_OPS_SECTIONS: { id: string; label: string }[] = [
  */
 function buildCatalogDivisionSections(): { id: string; label: string }[] {
   const divisions = new Set<string>();
-  for (const item of Object.values(ESTIMATE_ITEMS_MASTER)) {
+  for (const item of Object.values(getCatalogItems())) {
     const div = getDivisionCode(item.itemId);
     if (div !== "") divisions.add(div);
   }
@@ -132,7 +132,7 @@ function buildLineDefs(): Map<string, RateLineDef> {
   );
 
   // Catalog (STEP 4 unit prices, Slice 2) — added last so it wins on key overlap.
-  Object.values(ESTIMATE_ITEMS_MASTER).forEach((item) =>
+  Object.values(getCatalogItems()).forEach((item) =>
     add({
       code: item.itemId,
       label: item.description,

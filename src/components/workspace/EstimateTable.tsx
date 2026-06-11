@@ -8,7 +8,7 @@ import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag } from "lucide-react";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
 import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/constants";
@@ -1114,9 +1114,9 @@ export function EstimateTable({
 
       {/* Hidden Option Datalist */}
       <datalist id="estimate-items-options">
-        {Object.keys(ESTIMATE_ITEMS_MASTER).map((key) => (
+        {Object.entries(getCatalogItems()).map(([key, item]) => (
           <option key={key} value={key}>
-            {ESTIMATE_ITEMS_MASTER[key].description}
+            {item.description}
           </option>
         ))}
       </datalist>

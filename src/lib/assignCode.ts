@@ -15,7 +15,7 @@
  * by `commandCapture.test.ts`; this slice does NOT re-test it.
  */
 
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 import { getFuzzySuggestions, SuggestionItem } from "@/lib/similarity";
 
 /** Result of validating a free-entry code against the estimate-items master. */
@@ -35,13 +35,14 @@ export function validateAssignInput(code: string): AssignValidation {
   if (trimmed === "") {
     return { ok: false, error: "Enter a code to assign." };
   }
+  const catalog = getCatalogItems();
   // Fast path: the catalog is keyed by itemId.
-  const direct = ESTIMATE_ITEMS_MASTER[trimmed];
+  const direct = catalog[trimmed];
   if (direct) {
     return { ok: true, itemId: direct.itemId };
   }
   // Robust path: a value whose itemId matches (guards against key ≠ itemId drift).
-  const match = Object.values(ESTIMATE_ITEMS_MASTER).find((item) => item.itemId === trimmed);
+  const match = Object.values(catalog).find((item) => item.itemId === trimmed);
   if (match) {
     return { ok: true, itemId: match.itemId };
   }
@@ -58,5 +59,5 @@ export function suggestCodesForClassification(
   classification: string,
   limit = 3
 ): SuggestionItem[] {
-  return getFuzzySuggestions(classification, ESTIMATE_ITEMS_MASTER, limit);
+  return getFuzzySuggestions(classification, getCatalogItems(), limit);
 }

@@ -1,5 +1,5 @@
 import { CostCodeMapEntry } from "@/types/db";
-import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import { getCatalogItems } from "@/lib/catalog";
 
 // ---------------------------------------------------------------------------
 // resolveProcoreCode — the SINGLE chokepoint for deriving a row's granular
@@ -41,7 +41,7 @@ export function primeCostCodeResolverFromCatalog(): void {
     "costCodeResolver: priming from static catalog (cost_code_map unavailable) — mappings may be stale until reload."
   );
   resolverMap = new Map(
-    Object.values(ESTIMATE_ITEMS_MASTER).map((item) => [item.itemId, item.procoreCode])
+    Object.values(getCatalogItems()).map((item) => [item.itemId, item.procoreCode])
   );
 }
 
