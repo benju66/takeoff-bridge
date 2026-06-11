@@ -121,6 +121,32 @@ tsc + next build clean. Branch NOT merged to main, nothing pushed.
 2. Merge `import-past-bids-slice-3` → main (fast-forward); push when ready.
 3. **Start the backlog imports** (CARE + McKenna + everything) — the pipeline is finished.
 
-## Carried forward (unchanged)
-Granular GC rollup / export-of-imports; lump-override mining; archive & comparison; catalog
-manager; Permits section; master-template follow-up for the 6 manual codes.
+## Import-module roadmap — ARCHITECT-ORDERED (2026-06-10, post-build)
+1. **STEP 2/3 review at import** (NEXT import session): preview the captured GC/Site-Ops
+   lines during import, correct a wrong unit before it enters the rate history, manually
+   assign a code to an unmapped line (today the lines import silently; first sight is
+   post-save on the workspace panels). Users expect the STEP 4-style review gate here.
+   Patterns to reuse: the STEP 4 review table, editable-UOM override layer
+   (`applyAcceptedMappings`), and the Slice 3A resolver for pre-save match preview.
+2. **Past vs active import distinction**: a way to identify whether an imported project is
+   a PAST bid (archive/history) or a CURRENT estimate imported to keep working on — users
+   may import active estimates going forward. Today a single `projects.is_imported` flag
+   treats every import as frozen history (export blocked, GC/SO read-only); an active
+   import likely needs export eventually, so this gates/reshapes export-of-imports.
+3. **Housekeeping**: add the 6 manually-created catalog codes to
+   `templates/Company_Estimate_Template.xlsx` STEP 4 + `npm run sync-codes`; lump-override
+   mining (revisit once backlog volume exists); push to origin when the architect says so.
+4. **Catalog Manager**: in-app screen to ADD a new suffix cost code (name, unit, and the
+   Procore BLI it rolls up to, chosen from the valid list) — /cost-codes can re-point but
+   not add; the CARE 6-code batch via direct DB writes is the evidence of need.
+5. **Fork-a-past-bid (replaces "re-drive")**: ARCHITECT DECISION — past bids are never
+   edited; instead, optionally DUPLICATE one as a new active project. Re-driving imported
+   GC/Site-Ops through the calculators is dropped as a concept.
+
+None of 1–5 block the backlog imports: everything imports verbatim today, unmapped lines
+stay visible, and all five work retroactively on already-imported bids.
+
+## Carried forward (outside the import module)
+Archive & comparison ([[estimate-versions-feature]] — has fuel once the backlog lands);
+fuzzy history matching for the suggestion tier (only if exact-match hit-rate disappoints on
+real backlog data); Permits section; market-sector rate overlays.
