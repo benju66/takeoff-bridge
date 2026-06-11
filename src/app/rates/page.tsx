@@ -19,6 +19,7 @@ import {
   updateRateCardEntry,
   getImportedPriceHistory,
   getImportedStep23History,
+  getCustomStep23LineDefs,
 } from "@/lib/db";
 import { step23Observations } from "@/lib/step23Normalization";
 import { primeRateCard } from "@/lib/rateResolver";
@@ -28,7 +29,7 @@ import {
   RATE_LINE_DEFS,
 } from "@/lib/rateCardEditor";
 import { aggregatePriceHistory, type PriceHistoryStat } from "@/lib/priceHistory";
-import { RateCardEntry } from "@/types/db";
+import { RateCardEntry, CustomStep23LineDef } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Company Rate Card editor (Rate-card slice 1 Phase C + slice 2 Phase C) — twin
@@ -184,8 +185,19 @@ export default function RateCardDashboard() {
     // As-bid STEP 2/3 rate history (Slice 3) — same fail-soft independence.
     (async () => {
       try {
-        const sources = await getImportedStep23History();
-        if (!cancelled) setStep23History(aggregatePriceHistory(step23Observations(sources)));
+        // Custom (user-minted) defs overlay the built-ins so assigned/auto-
+        // matching lines file under their minted code (gate Phase 2). History
+        // under a custom code is REPORT-only by construction: no rate_card row
+        // → no card row here → no ADOPT. A defs outage degrades to built-ins
+        // only — the report still renders.
+        const [sources, customDefs] = await Promise.all([
+          getImportedStep23History(),
+          getCustomStep23LineDefs().catch((err) => {
+            console.error("Failed to load custom GC/Site-Ops codes (mining with built-ins only):", err);
+            return [] as CustomStep23LineDef[];
+          }),
+        ]);
+        if (!cancelled) setStep23History(aggregatePriceHistory(step23Observations(sources, customDefs)));
       } catch (err) {
         console.error("Failed to load imported STEP 2/3 rate history (report skipped):", err);
       }

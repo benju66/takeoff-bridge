@@ -6,9 +6,9 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 15 (added estimate_overrides — Phase 4 Override + Audit Model)
+-- Tables: 16 (added custom_step23_line_defs — import STEP 2/3 review gate Phase 2)
 -- RPC Functions: 2 (save_estimate_line_items, save_estimate)
--- RLS Policies: 22
+-- RLS Policies: 24
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -19,9 +19,9 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-09 (Phase 4 Override + Audit Model: added the append-only
--- estimate_overrides table + its tenant-scoped SELECT/INSERT RLS, mirroring the
--- classification_history / estimate_snapshots immutable-audit pattern)
+-- Last updated: 2026-06-10 (import STEP 2/3 review gate Phase 2: added
+-- custom_step23_line_defs — user-minted GC/Site-Ops line definitions the
+-- step23Normalization resolver overlays on the built-in constants.ts defs)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -921,4 +921,62 @@ CREATE POLICY "estimate_overrides_insert_policy" ON estimate_overrides
     WHERE p.id = estimate_overrides.project_id
     AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
   ));
+
+-- ─────────────────────────────────────────────────
+-- Table 14: custom_step23_line_defs (import STEP 2/3 review gate, Phase 2)
+-- ─────────────────────────────────────────────────
+--
+-- User-minted GC/Site-Ops line DEFINITIONS (architect-locked 2026-06-10: new-code
+-- creation happens at the import gate, not the future Catalog Manager). When no
+-- built-in constants.ts line fits an imported bid's STEP 2/3 line, the estimator
+-- mints a deterministic code here (e.g. '02-4100.003' "Demolition - Openings in
+-- CMU"). The step23Normalization resolver overlays these rows on the built-in
+-- defs AT RENDER TIME, so a minted code labels the matching line in every stored
+-- bid — past and future — with no re-import.
+--
+-- A custom code may NEVER shadow a built-in one: db.ts/createCustomStep23LineDef
+-- rejects collisions against the static STEP23_LINE_DEFS at mint time, and the
+-- resolver prefers the built-in if constants.ts later ships the same code (the
+-- conflict surfaces in the UI as the built-in label; renumbering tooling is
+-- Catalog Manager scope). label drives description auto-resolution (it defaults
+-- to the minted line's as-bid description). procore_code is nullable — optional
+-- at mint; Catalog Manager fills it in later. These are labels, resolver targets,
+-- and /rates mining keys ONLY: no rate_card row, no calculator line, no ADOPT.
+--
+-- source provenance: 'import_gate' (minted at the import review gate — the sole
+-- write path this phase), 'manual' (future Catalog Manager edits).
+
+CREATE TABLE custom_step23_line_defs (
+  code         TEXT PRIMARY KEY
+               CHECK (code ~ '^\d{2}-\d{4}\.\d{3}$'),  -- deterministic NN-NNNN.NNN only
+  label        TEXT NOT NULL
+               CHECK (btrim(label) <> ''),             -- the auto-resolution key
+  unit         TEXT NOT NULL DEFAULT '',               -- as-bid UOM ('' when the bid had none)
+  procore_code TEXT,                                   -- nullable; Catalog Manager backfills
+  source       TEXT NOT NULL DEFAULT 'import_gate'
+               CHECK (source IN ('import_gate', 'manual')),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE custom_step23_line_defs ENABLE ROW LEVEL SECURITY;
+
+-- Read: corporate data, consistent with cost_code_map / rate_card.
+CREATE POLICY "custom_step23_line_defs_select_policy" ON custom_step23_line_defs
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Write: INSERT-only, required by the import review gate's mint form (db.ts/
+-- createCustomStep23LineDef — validates shape + built-in/custom collisions before
+-- the write; the CHECK constraints above are the server-side backstop). NO
+-- UPDATE/DELETE policy → minted codes are immutable from the browser; editing/
+-- retiring them is Catalog Manager scope (roadmap item 4).
+-- FOLLOW-UP (deferred, same note as cost_code_map / rate_card): move writes
+-- server-side (service-role only) to fully close the "any authenticated user can
+-- mint a code" exposure — accepted for a single-company tool (plan §Risks).
+CREATE POLICY "custom_step23_line_defs_insert_policy" ON custom_step23_line_defs
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
 

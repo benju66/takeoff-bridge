@@ -1,6 +1,7 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { Step23HistorySource } from "./step23Normalization";
+import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -1334,6 +1335,114 @@ export async function updateRateCardEntry(
   }
 
   return mapRateCardRow(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Custom GC/Site-Ops line definitions (import STEP 2/3 review gate, Phase 2)
+// ═══════════════════════════════════════════════════════════════════
+
+const CUSTOM_STEP23_LINE_DEF_COLUMNS = "code, label, unit, procore_code, source";
+
+function mapCustomStep23LineDefRow(row: Record<string, unknown>): CustomStep23LineDef {
+  return {
+    code: row.code as string,
+    label: row.label as string,
+    unit: (row.unit as string) || "",
+    procoreCode: (row.procore_code as string | null) ?? null,
+    source: row.source as CustomStep23LineDef["source"],
+  };
+}
+
+/**
+ * Every user-minted GC/Site-Ops line def (custom_step23_line_defs table), the
+ * overlay the step23Normalization resolver layers on the built-in defs.
+ * Consumers (ImportedStep23Panel, /rates, the import review gate) load these
+ * FAIL-SOFT: an outage degrades to built-ins only, never blocks a workflow.
+ */
+export async function getCustomStep23LineDefs(): Promise<CustomStep23LineDef[]> {
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .order("code", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch custom GC/Site-Ops line defs:", error);
+    throw new Error(`Failed to fetch custom GC/Site-Ops line defs: ${error.message}`);
+  }
+
+  return (data || []).map(mapCustomStep23LineDefRow);
+}
+
+/**
+ * Mints one custom GC/Site-Ops line def (the import review gate's "create new
+ * code" path — the SOLE write path this phase; editing/retiring is Catalog
+ * Manager scope). Validates before the write, mirroring the table's CHECK
+ * constraints so no invalid def ever leaves the browser:
+ *  - code must be deterministic (NN-NNNN.NNN);
+ *  - code may never shadow a BUILT-IN def (collision rule, locked 2026-06-10);
+ *  - code may not duplicate an existing custom row (pre-checked for a clean
+ *    message; the PK is the authoritative gate — a same-moment race surfaces
+ *    as the same "already exists" error via 23505);
+ *  - label must be non-empty (it is the auto-resolution key).
+ * unit/procoreCode are normalized to the payload contracts (trim+uppercase
+ * UOM; blank Procore code stored as NULL). Stamps source='import_gate' via the
+ * column default. NOT a financial write: a def is a label, resolver target,
+ * and mining key — it carries no rate and moves no dollar.
+ */
+export async function createCustomStep23LineDef(input: {
+  code: string;
+  label: string;
+  unit?: string;
+  procoreCode?: string | null;
+}): Promise<CustomStep23LineDef> {
+  const code = input.code.trim();
+  const label = input.label.trim();
+  const unit = (input.unit ?? "").trim().toUpperCase();
+  const procoreCode = (input.procoreCode ?? "").trim() || null;
+
+  if (!isStep23DeterministicCode(code)) {
+    throw new Error(
+      `Invalid custom GC/Site-Ops code "${input.code}": must be deterministic NN-NNNN.NNN (e.g. 02-4100.003)`
+    );
+  }
+  if (label === "") {
+    throw new Error(`Custom code ${code} needs a non-empty name — the name is what auto-resolves matching lines`);
+  }
+  if (isBuiltInStep23Code(code)) {
+    throw new Error(`Code ${code} is already a built-in GC/Site-Ops line — pick the next free suffix instead`);
+  }
+
+  const { data: existing, error: existsError } = await supabase
+    .from("custom_step23_line_defs")
+    .select("code")
+    .eq("code", code)
+    .maybeSingle();
+
+  if (existsError) {
+    console.error(`Failed to check custom code ${code} for collisions:`, existsError);
+    throw new Error(`Failed to check custom code ${code} for collisions: ${existsError.message}`);
+  }
+  if (existing) {
+    throw new Error(`Custom code ${code} already exists`);
+  }
+
+  const { data, error } = await supabase
+    .from("custom_step23_line_defs")
+    .insert({ code, label, unit, procore_code: procoreCode })
+    .select(CUSTOM_STEP23_LINE_DEF_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    // 23505 = unique_violation: a concurrent mint won the PK race after our
+    // pre-check — same outcome as the pre-check, same clean message.
+    if (error?.code === "23505") {
+      throw new Error(`Custom code ${code} already exists`);
+    }
+    console.error(`Failed to create custom GC/Site-Ops code ${code}:`, error);
+    throw new Error(`Failed to create custom GC/Site-Ops code ${code}: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapCustomStep23LineDefRow(data);
 }
 
 

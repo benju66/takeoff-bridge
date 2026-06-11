@@ -77,19 +77,63 @@ export const STEP23_LINE_DEFS: Step23LineDef[] = [
   ...SITE_OPS_MANUAL_DEFAULTS.map((s) => ({ code: s.code, label: s.label })),
 ];
 
-const defsByCode = new Map<string, Step23LineDef>(STEP23_LINE_DEFS.map((d) => [d.code, d]));
+/** True when a code has the deterministic GC/Site-Ops shape (NN-NNNN.NNN). */
+export function isStep23DeterministicCode(code: string): boolean {
+  return DETERMINISTIC_RE.test(code);
+}
 
-const defsByBase = (() => {
+/** True when a code is one of the app's built-in GC/Site-Ops lines — the
+ *  codes a custom def may never shadow (db.ts rejects them at mint time). */
+export function isBuiltInStep23Code(code: string): boolean {
+  return builtInLookups.byCode.has(code);
+}
+
+interface Step23DefLookups {
+  byCode: Map<string, Step23LineDef>;
+  byBase: Map<string, Step23LineDef[]>;
+}
+
+function buildLookups(defs: readonly Step23LineDef[]): Step23DefLookups {
+  const byCode = new Map<string, Step23LineDef>();
   const byBase = new Map<string, Step23LineDef[]>();
-  for (const def of STEP23_LINE_DEFS) {
+  for (const def of defs) {
+    if (byCode.has(def.code)) continue; // first claim wins (built-ins precede customs)
+    byCode.set(def.code, def);
     const m = DETERMINISTIC_RE.exec(def.code);
     if (!m) continue;
     const list = byBase.get(m[1]) ?? [];
     list.push(def);
     byBase.set(m[1], list);
   }
-  return byBase;
-})();
+  return { byCode, byBase };
+}
+
+const builtInLookups = buildLookups(STEP23_LINE_DEFS);
+
+/**
+ * Memoized built-in + custom overlay (gate Phase 2). Custom defs join BOTH
+ * lookup paths — assigned/deterministic codes AND base/description matching —
+ * which is what makes a minted code label matching lines in every stored bid
+ * retroactively. Collision rule (locked): a custom code that duplicates a
+ * built-in is IGNORED here — the built-in def wins, so if constants.ts later
+ * ships a code a user already minted, every line shows the built-in label (the
+ * conflict surfaces, nothing silently merges). Malformed custom codes resolve
+ * nothing. NOTE a custom def under a previously 1:1 base makes that base
+ * SHARED — its lines then need an exact description match, same as any shared
+ * base (the resolver never guesses between two claims).
+ */
+const overlayCache = new WeakMap<readonly Step23LineDef[], Step23DefLookups>();
+
+function lookupsFor(extraDefs?: readonly Step23LineDef[]): Step23DefLookups {
+  if (!extraDefs || extraDefs.length === 0) return builtInLookups;
+  let lookups = overlayCache.get(extraDefs);
+  if (!lookups) {
+    const usable = extraDefs.filter((d) => DETERMINISTIC_RE.test(d.code));
+    lookups = buildLookups([...STEP23_LINE_DEFS, ...usable]);
+    overlayCache.set(extraDefs, lookups);
+  }
+  return lookups;
+}
 
 /**
  * Resolves one imported STEP 2/3 line (as-bid code + description) to the
@@ -99,24 +143,31 @@ const defsByBase = (() => {
  * locked 2026-06-10) WINS over description matching — but only when it names
  * a known def; a stale assignment (e.g. a def later removed) falls through to
  * normal resolution rather than fabricating a line.
+ *
+ * `extraDefs` (gate Phase 2) overlays user-minted custom defs on the built-ins
+ * — see `lookupsFor` for the collision rule (built-in always beats custom).
+ * Pure: same inputs, same answer; the overlay is merely memoized per array.
  */
 export function resolveStep23Line(
   code: string,
   description: string,
-  assignedCode?: string
+  assignedCode?: string,
+  extraDefs?: readonly Step23LineDef[]
 ): Step23LineDef | null {
+  const { byCode, byBase } = lookupsFor(extraDefs);
+
   if (assignedCode) {
-    const assigned = defsByCode.get(assignedCode.trim());
+    const assigned = byCode.get(assignedCode.trim());
     if (assigned) return assigned;
   }
 
   const trimmed = code.trim();
 
   // Already deterministic and known → itself (future re-imports of app exports).
-  if (DETERMINISTIC_RE.test(trimmed)) return defsByCode.get(trimmed) ?? null;
+  if (DETERMINISTIC_RE.test(trimmed)) return byCode.get(trimmed) ?? null;
 
   if (!BARE_RE.test(trimmed)) return null;
-  const candidates = defsByBase.get(trimmed);
+  const candidates = byBase.get(trimmed);
   if (!candidates) return null;
   if (candidates.length === 1) return candidates[0];
 
@@ -168,8 +219,15 @@ function isMinableLine(line: ImportedSheetLine): boolean {
  * that doesn't resolve has no code to file under and is skipped — it stays
  * visible in the panel instead). Feed the result to `aggregatePriceHistory`;
  * REPORT-only, same as the catalog price history.
+ *
+ * `extraDefs` (gate Phase 2): lines resolving to a custom code file under it —
+ * report-only by construction, since a custom code has no rate_card row and
+ * therefore no ADOPT surface on /rates.
  */
-export function step23Observations(sources: readonly Step23HistorySource[]): PriceObservation[] {
+export function step23Observations(
+  sources: readonly Step23HistorySource[],
+  extraDefs?: readonly Step23LineDef[]
+): PriceObservation[] {
   const out: PriceObservation[] = [];
   for (const src of sources) {
     const lines = [...src.payload.step2Lines, ...src.payload.step3Lines];
@@ -177,7 +235,7 @@ export function step23Observations(sources: readonly Step23HistorySource[]): Pri
       if (!isMinableLine(line)) continue;
       // Assignment = resolution (locked 2026-06-10): an assigned line files
       // its observations under the assigned code, same minable filter.
-      const resolved = resolveStep23Line(line.code, line.description, line.assignedCode);
+      const resolved = resolveStep23Line(line.code, line.description, line.assignedCode, extraDefs);
       if (!resolved) continue;
       out.push({
         itemId: resolved.code,

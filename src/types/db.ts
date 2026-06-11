@@ -242,3 +242,25 @@ export interface RateCardEntry {
   source: 'seed' | 'manual';
 }
 
+/**
+ * A user-minted GC/Site-Ops line definition (custom_step23_line_defs table,
+ * import STEP 2/3 review gate Phase 2). Minted at the import gate when no
+ * built-in constants.ts line fits; the step23Normalization resolver overlays
+ * these on the built-in defs at render time, so a minted code labels matching
+ * lines in every stored bid retroactively. Structurally a Step23LineDef
+ * (code + label) plus the mint-form extras. A label, resolver target, and
+ * /rates mining key ONLY — no rate_card row, no calculator line, no ADOPT.
+ */
+export interface CustomStep23LineDef {
+  /** Deterministic code, e.g. "02-4100.003" — may never shadow a built-in. */
+  code: string;
+  /** Display name; drives description auto-resolution (defaults to the minted
+   *  line's as-bid description at the gate). */
+  label: string;
+  /** As-bid UOM at mint time ("" when the bid had none). */
+  unit: string;
+  /** Optional Procore Budget Line Item; null until Catalog Manager fills it. */
+  procoreCode: string | null;
+  source: 'import_gate' | 'manual';
+}
+

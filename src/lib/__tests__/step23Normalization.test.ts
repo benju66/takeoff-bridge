@@ -8,8 +8,11 @@ import { describe, it, expect } from "vitest";
 import {
   resolveStep23Line,
   step23Observations,
+  isStep23DeterministicCode,
+  isBuiltInStep23Code,
   STEP23_LINE_DEFS,
   type Step23HistorySource,
+  type Step23LineDef,
 } from "../step23Normalization";
 import type { ImportedSheetLine, ImportedStep23Lines } from "@/types/db";
 
@@ -110,6 +113,86 @@ describe("resolveStep23Line", () => {
     expect(new Set(codes).size).toBe(codes.length);
     expect(codes).toContain("01-0410.001");
     expect(codes).toContain("02-9530.001");
+  });
+});
+
+describe("custom def overlay (extra defs parameter, gate Phase 2)", () => {
+  // A user-minted code for CARE's hand-inserted scope line, plus a second
+  // custom under a base that is 1:1 among the built-ins (01-0410).
+  const CUSTOM: Step23LineDef[] = [
+    { code: "02-4100.003", label: "Demolition - Openings in CMU" },
+    { code: "01-0410.002", label: "Night Superintendent" },
+  ];
+
+  it("an assigned CUSTOM code resolves like any known def", () => {
+    expect(resolveStep23Line("02-4100", "whatever the bid says", "02-4100.003", CUSTOM)).toEqual({
+      code: "02-4100.003",
+      label: "Demolition - Openings in CMU",
+    });
+    // Without the overlay the same assignment is stale and falls through.
+    expect(resolveStep23Line("02-4100", "whatever the bid says", "02-4100.003")).toBeNull();
+  });
+
+  it("a minted code auto-resolves matching lines RETROACTIVELY (bare base + description)", () => {
+    // CARE's real case: unresolvable before the mint, labeled after — no re-import.
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", undefined, CUSTOM)?.code).toBe(
+      "02-4100.003"
+    );
+    // Deterministic pass-through works for customs too (future re-imports).
+    expect(resolveStep23Line("02-4100.003", "anything", undefined, CUSTOM)?.code).toBe("02-4100.003");
+    // The built-in shared-base splits are untouched by the overlay.
+    expect(resolveStep23Line("02-4100", "Demolition", undefined, CUSTOM)?.code).toBe("02-4100.001");
+    expect(resolveStep23Line("02-4100", "Demolition - Sawcutting", undefined, CUSTOM)?.code).toBe("02-4100.002");
+  });
+
+  it("a BUILT-IN def always beats a colliding custom (conflict surfaces as the built-in label)", () => {
+    const hijack: Step23LineDef[] = [{ code: "02-4100.001", label: "Hijacked Label" }];
+    // Assignment to the contested code resolves to the BUILT-IN def.
+    expect(resolveStep23Line("02-4100", "x", "02-4100.001", hijack)).toMatchObject({
+      code: "02-4100.001",
+      label: "Demolition",
+    });
+    // The custom label never becomes a resolution target (no silent merge).
+    expect(resolveStep23Line("02-4100", "Hijacked Label", undefined, hijack)).toBeNull();
+  });
+
+  it("a malformed custom code resolves nothing (db gate backstop)", () => {
+    const malformed: Step23LineDef[] = [{ code: "02-4100", label: "Bare Code" }];
+    expect(resolveStep23Line("02-4100", "Bare Code", undefined, malformed)).toBeNull();
+    expect(resolveStep23Line("02-4100", "x", "02-4100", malformed)).toBeNull();
+  });
+
+  it("a custom under a previously 1:1 base makes it SHARED — description now required", () => {
+    // 01-0410 is 1:1 among the built-ins (mechanical resolution)…
+    expect(resolveStep23Line("01-0410", "any description at all")?.code).toBe("01-0410.001");
+    // …but with a second claim the resolver never guesses between them.
+    expect(resolveStep23Line("01-0410", "Sr Superintendent", undefined, CUSTOM)?.code).toBe("01-0410.001");
+    expect(resolveStep23Line("01-0410", "Night Superintendent", undefined, CUSTOM)?.code).toBe("01-0410.002");
+    expect(resolveStep23Line("01-0410", "any description at all", undefined, CUSTOM)).toBeNull();
+  });
+
+  it("an empty overlay is EXACTLY the built-in behavior", () => {
+    expect(resolveStep23Line("01-0410", "any description at all", undefined, [])?.code).toBe("01-0410.001");
+    expect(resolveStep23Line("02-4100", "Demolition - Openings in CMU", undefined, [])).toBeNull();
+  });
+
+  it("step23Observations files lines under a minted code (report-only mining)", () => {
+    const cmu = line({ code: "02-4100", description: "Demolition - Openings in CMU", qty: 82, rate: 3419.44, uom: "EA" });
+    // Without the overlay the line is unresolved and skipped…
+    expect(step23Observations([source([], [cmu])])).toEqual([]);
+    // …with it, the observation files under the custom code (no rate_card row
+    // for 02-4100.003 → no ADOPT surface on /rates, by construction).
+    const out = step23Observations([source([], [cmu])], CUSTOM);
+    expect(out.map((o) => o.itemId)).toEqual(["02-4100.003"]);
+    expect(out[0].unitPrice).toBe(3419.44);
+  });
+
+  it("exposes the validation helpers db.ts mints against", () => {
+    expect(isStep23DeterministicCode("02-4100.003")).toBe(true);
+    expect(isStep23DeterministicCode("02-4100")).toBe(false);
+    expect(isStep23DeterministicCode("2-4100.003")).toBe(false);
+    expect(isBuiltInStep23Code("02-4100.001")).toBe(true);
+    expect(isBuiltInStep23Code("02-4100.003")).toBe(false);
   });
 });
 

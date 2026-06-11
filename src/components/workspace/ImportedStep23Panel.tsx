@@ -19,11 +19,12 @@
  * and no dollar moves.
  */
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { FileSpreadsheet, Info, AlertTriangle } from "lucide-react";
-import type { ImportedStep23Lines, ImportedSheetLine } from "@/types/db";
+import type { ImportedStep23Lines, ImportedSheetLine, CustomStep23LineDef } from "@/types/db";
 import type { LinkedDivisionTotal } from "@/lib/calculations";
 import { getDivisionCode } from "@/lib/division";
+import { getCustomStep23LineDefs } from "@/lib/db";
 import { resolveStep23Line } from "@/lib/step23Normalization";
 import { RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 
@@ -47,6 +48,23 @@ export function ImportedStep23Panel({
   linkedTotals: LinkedDivisionTotal[];
 }) {
   const meta = STEP_META[step];
+  // User-minted custom defs (gate Phase 2) overlay the built-ins at render
+  // time — a code minted at any import review labels matching lines here
+  // retroactively. FAIL-SOFT: an outage degrades to built-ins only.
+  const [customDefs, setCustomDefs] = useState<CustomStep23LineDef[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getCustomStep23LineDefs()
+      .then((defs) => {
+        if (!cancelled) setCustomDefs(defs);
+      })
+      .catch((err) => {
+        console.error("Failed to load custom GC/Site-Ops codes (resolving with built-ins only):", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const lines: ImportedSheetLine[] = payload?.[meta.linesKey] ?? [];
   const lineSum = lines.reduce((s, l) => s + l.total, 0);
   const sectionLinkedTotal = linkedTotals
@@ -101,7 +119,7 @@ export function ImportedStep23Panel({
             </thead>
             <tbody>
               {lines.map((l) => {
-                const resolved = resolveStep23Line(l.code, l.description, l.assignedCode);
+                const resolved = resolveStep23Line(l.code, l.description, l.assignedCode, customDefs);
                 const isAssigned = resolved !== null && resolved.code === l.assignedCode?.trim();
                 return (
                 <tr key={`${l.rowNumber}`} className="border-t border-grid-border">
