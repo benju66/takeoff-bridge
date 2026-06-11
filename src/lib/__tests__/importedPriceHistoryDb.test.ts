@@ -27,6 +27,7 @@ describe("getImportedPriceHistory", () => {
     mockNeqFidelity.mockResolvedValueOnce({
       data: [
         {
+          project_id: "care-1",
           item_id: "09-2900.001",
           unit_price: 4.25,
           uom: "sf", // legacy-saved rows may be lowercase — normalized on read
@@ -34,7 +35,7 @@ describe("getImportedPriceHistory", () => {
           data_fidelity: "discrete_unit",
           projects: { name: "CARE Relocation", bid_date: "2026-04-06", market_sector: "Healthcare" },
         },
-        { item_id: "22-0000.001", unit_price: "12.50", uom: null, matched_qty: null, data_fidelity: null, projects: null },
+        { project_id: "p2", item_id: "22-0000.001", unit_price: "12.50", uom: null, matched_qty: null, data_fidelity: null, projects: null },
       ],
       error: null,
     });
@@ -42,15 +43,20 @@ describe("getImportedPriceHistory", () => {
     const out = await getImportedPriceHistory();
 
     expect(mockFrom).toHaveBeenCalledWith("estimate_line_items");
-    // qty + data_fidelity ride along (fidelity Phase 3) so historyTrust can
-    // apply its own zero-qty / combined-line rules to every observation.
+    // project_id rides along for the Estimate Versioning supersede rule
+    // (getBidPriceHistory drops a project's imported observations once it has
+    // a submitted version); qty + data_fidelity ride along (fidelity Phase 3)
+    // so historyTrust can apply its own zero-qty / combined-line rules to
+    // every observation. PriceObservation is a structural subset of each
+    // returned object.
     expect(mockSelect).toHaveBeenCalledWith(
-      "item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)"
+      "project_id, item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)"
     );
     expect(mockEq).toHaveBeenCalledWith("source", "imported");
     expect(mockNeqItemId).toHaveBeenCalledWith("item_id", "");
     expect(out).toEqual([
       {
+        projectId: "care-1",
         itemId: "09-2900.001",
         unitPrice: 4.25,
         uom: "SF",
@@ -61,6 +67,7 @@ describe("getImportedPriceHistory", () => {
         dataFidelity: "discrete_unit",
       },
       {
+        projectId: "p2",
         itemId: "22-0000.001",
         unitPrice: 12.5,
         uom: "",

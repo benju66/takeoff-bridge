@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { Step23HistorySource } from "./step23Normalization";
 import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
@@ -759,6 +759,58 @@ export async function getClassificationHistoryBulk(
 }
 
 /**
+ * Unwraps a PostgREST `projects(...)` join cell (object, or array on older
+ * client versions) into the observation's project context. Shared by the
+ * imported and submitted-version price-history pools so the two can never
+ * normalize the join differently.
+ */
+function mapObservationProjectContext(
+  projects: unknown
+): { name?: string; bid_date?: string; market_sector?: string } | null {
+  return (Array.isArray(projects) ? projects[0] : projects) as
+    | { name?: string; bid_date?: string; market_sector?: string }
+    | null;
+}
+
+/**
+ * Imported observations WITH their source project id — the internal shape the
+ * Estimate Versioning supersede rule needs (getBidPriceHistory drops a
+ * project's imported observations once it has a SUBMITTED version). Shared by
+ * getImportedPriceHistory, whose public PriceObservation[] contract is
+ * unchanged (the extra projectId field is a structural superset).
+ */
+async function fetchImportedPriceObservations(): Promise<(PriceObservation & { projectId: string })[]> {
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .select("project_id, item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)")
+    .eq("source", "imported")
+    .neq("item_id", "")
+    .neq("data_fidelity", "macro_lump_sum");
+
+  if (error) {
+    console.error("Failed to fetch imported price history:", error);
+    throw new Error(`Failed to fetch imported price history: ${error.message}`);
+  }
+
+  return (data || []).map((row) => {
+    const project = mapObservationProjectContext(row.projects);
+    return {
+      projectId: (row.project_id as string) || "",
+      itemId: row.item_id as string,
+      unitPrice: Number(row.unit_price) || 0,
+      uom: ((row.uom as string) || "").trim().toUpperCase(),
+      projectName: project?.name ?? "",
+      bidDate: project?.bid_date ?? "",
+      marketSector: project?.market_sector ?? "",
+      // NOT NULL with defaults in the schema; `|| 0` / `?? ""` only guard a
+      // malformed payload. A 0 qty is then excluded by the trust screen.
+      qty: Number(row.matched_qty) || 0,
+      dataFidelity: (row.data_fidelity as string) ?? "",
+    };
+  });
+}
+
+/**
  * Every AS-BID unit price on record (Phase 3 Slice 2): saved line items with
  * `source='imported'` (prices kept verbatim at import) joined to their project
  * context. READ-only fuel for the /rates price-history report — aggregation
@@ -773,35 +825,7 @@ export async function getClassificationHistoryBulk(
  * observation so the trust module can judge every row it receives.
  */
 export async function getImportedPriceHistory(): Promise<PriceObservation[]> {
-  const { data, error } = await supabase
-    .from("estimate_line_items")
-    .select("item_id, unit_price, uom, matched_qty, data_fidelity, projects(name, bid_date, market_sector)")
-    .eq("source", "imported")
-    .neq("item_id", "")
-    .neq("data_fidelity", "macro_lump_sum");
-
-  if (error) {
-    console.error("Failed to fetch imported price history:", error);
-    throw new Error(`Failed to fetch imported price history: ${error.message}`);
-  }
-
-  return (data || []).map((row) => {
-    const project = (Array.isArray(row.projects) ? row.projects[0] : row.projects) as
-      | { name?: string; bid_date?: string; market_sector?: string }
-      | null;
-    return {
-      itemId: row.item_id as string,
-      unitPrice: Number(row.unit_price) || 0,
-      uom: ((row.uom as string) || "").trim().toUpperCase(),
-      projectName: project?.name ?? "",
-      bidDate: project?.bid_date ?? "",
-      marketSector: project?.market_sector ?? "",
-      // NOT NULL with defaults in the schema; `|| 0` / `?? ""` only guard a
-      // malformed payload. A 0 qty is then excluded by the trust screen.
-      qty: Number(row.matched_qty) || 0,
-      dataFidelity: (row.data_fidelity as string) ?? "",
-    };
-  });
+  return fetchImportedPriceObservations();
 }
 
 /**
@@ -938,6 +962,227 @@ export async function getSnapshotDetail(
       ? (data.summary as Record<string, number>)
       : {},
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Estimate Versions (Estimate Versioning module)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Named frozen versions of the live working copy (estimate_versions table).
+// Payloads are immutable after creation (DB freeze-guard trigger); the only
+// mutable state is the submission flag, and at most ONE version per project
+// carries it (partial-unique index). Cost history is derived AT READ TIME
+// from the submitted version (getBidPriceHistory) — no history table is ever
+// written, so withdraw/replace follows submission automatically and
+// double-counting is impossible by construction.
+
+const ESTIMATE_VERSION_META_COLUMNS =
+  "id, project_id, version_number, title, summary, is_submitted, submitted_at, created_at, created_by";
+
+function mapEstimateVersionMetaFromRow(row: Record<string, unknown>): EstimateVersionMeta {
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    versionNumber: Number(row.version_number) || 0,
+    title: (row.title as string) || "",
+    summary: (row.summary != null && typeof row.summary === "object" && !Array.isArray(row.summary))
+      ? (row.summary as Record<string, number>)
+      : {},
+    isSubmitted: row.is_submitted === true,
+    submittedAt: (row.submitted_at as string | null) ?? null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    createdBy: (row.created_by as string | null) ?? null,
+  };
+}
+
+/**
+ * Freezes the current working copy as the next numbered version via the
+ * create_estimate_version RPC (per-project numbering assigned atomically
+ * server-side). The line-item payload reuses buildLineItemPayload — the exact
+ * frozen shape the save_estimate pipeline writes — and `summary` is the
+ * engine's TakeoffSummary copied verbatim (calculations.ts stays the sole
+ * financial authority; nothing here derives a dollar). A user-facing action,
+ * not fire-and-forget: THROWS on failure.
+ */
+export async function createEstimateVersion(
+  projectId: string,
+  title: string,
+  rows: ProcessedTakeoffRow[],
+  summary: Record<string, number>
+): Promise<EstimateVersionMeta> {
+  const { data, error } = await supabase.rpc("create_estimate_version", {
+    p_project_id: projectId,
+    p_title: title.trim(),
+    p_line_items: buildLineItemPayload(rows),
+    p_summary: summary,
+  });
+
+  if (error || !data) {
+    console.error(`Failed to create estimate version for project ${projectId}:`, error);
+    throw new Error(`Failed to create estimate version: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapEstimateVersionMetaFromRow(data as Record<string, unknown>);
+}
+
+/**
+ * Lightweight version list for a project (no frozen line_items — use
+ * getEstimateVersionDetail for those), newest version first.
+ */
+export async function getEstimateVersions(projectId: string): Promise<EstimateVersionMeta[]> {
+  const { data, error } = await supabase
+    .from("estimate_versions")
+    .select(ESTIMATE_VERSION_META_COLUMNS)
+    .eq("project_id", projectId)
+    .order("version_number", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch estimate versions for project ${projectId}`, error);
+    throw new Error(`Failed to fetch estimate versions: ${error.message}`);
+  }
+
+  return (data || []).map(mapEstimateVersionMetaFromRow);
+}
+
+/**
+ * One version's full frozen payload. Line items are mapped back through the
+ * standard mapper (precedent: getSnapshotDetail), so the compare view diffs
+ * the same ProcessedTakeoffRow shape the workbook renders.
+ */
+export async function getEstimateVersionDetail(
+  versionId: string
+): Promise<EstimateVersionDetail | null> {
+  const { data, error } = await supabase
+    .from("estimate_versions")
+    .select(`${ESTIMATE_VERSION_META_COLUMNS}, line_items`)
+    .eq("id", versionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`Failed to fetch estimate version ${versionId}`, error);
+    throw new Error(`Failed to fetch estimate version: ${error.message}`);
+  }
+
+  if (!data) return null;
+
+  const rawItems = Array.isArray(data.line_items) ? data.line_items : [];
+  return {
+    ...mapEstimateVersionMetaFromRow(data),
+    lineItems: rawItems.map((item: Record<string, unknown>) => mapLineItemFromRow(item)),
+  };
+}
+
+/**
+ * Marks one version as the project's OFFICIAL BID — the one and only doorway
+ * into cost history. The submit_estimate_version RPC clears the previously
+ * submitted version (if any) and sets the target in a single transaction, so
+ * the old observations withdraw exactly when the new ones take their place.
+ * THROWS on failure (financial intent must never vanish quietly).
+ */
+export async function submitEstimateVersion(
+  projectId: string,
+  versionId: string
+): Promise<void> {
+  const { error } = await supabase.rpc("submit_estimate_version", {
+    p_project_id: projectId,
+    p_version_id: versionId,
+  });
+
+  if (error) {
+    console.error(`Failed to submit estimate version ${versionId} for project ${projectId}:`, error);
+    throw new Error(`Failed to submit estimate version: ${error.message}`);
+  }
+}
+
+/**
+ * Withdraws the project's submitted version with no replacement (the company
+ * pulled out of the bid entirely): the project has no official record and its
+ * observations leave cost history until something else is submitted. A single
+ * flag flip — the DB freeze-guard trigger confines it to the submission pair.
+ * A no-op when nothing is submitted. THROWS on failure.
+ */
+export async function withdrawSubmittedVersion(projectId: string): Promise<void> {
+  const { error } = await supabase
+    .from("estimate_versions")
+    .update({ is_submitted: false, submitted_at: null })
+    .eq("project_id", projectId)
+    .eq("is_submitted", true);
+
+  if (error) {
+    console.error(`Failed to withdraw submitted version for project ${projectId}:`, error);
+    throw new Error(`Failed to withdraw submitted version: ${error.message}`);
+  }
+}
+
+/**
+ * EVERY bid price observation on record — the /rates price-history source
+ * (replaces the imported-only read). Two pools merge at read time:
+ *
+ *  1. SUBMITTED VERSIONS: each submitted version's frozen lines with a
+ *     non-empty item_id AND total ≠ 0 (user-locked rule: only lines that
+ *     actually carried dollars in the official bid count — untouched template
+ *     scaffold rows at default prices never poison the medians).
+ *  2. IMPORTED BIDS: the existing source='imported' observations, MINUS any
+ *     project that now has a submitted version — the in-app official bid
+ *     supersedes the imported record, so nothing double-counts. The supersede
+ *     keys off the submitted version's EXISTENCE, not its observation yield.
+ *
+ * READ-only on both pools; aggregation stays in the pure priceHistory.ts.
+ */
+export async function getBidPriceHistory(): Promise<PriceObservation[]> {
+  const [submittedRows, importedObservations] = await Promise.all([
+    (async () => {
+      const { data, error } = await supabase
+        .from("estimate_versions")
+        .select("project_id, line_items, projects(name, bid_date, market_sector)")
+        .eq("is_submitted", true);
+
+      if (error) {
+        console.error("Failed to fetch submitted-version price history:", error);
+        throw new Error(`Failed to fetch submitted-version price history: ${error.message}`);
+      }
+      return data || [];
+    })(),
+    fetchImportedPriceObservations(),
+  ]);
+
+  const submittedProjectIds = new Set<string>();
+  const observations: PriceObservation[] = [];
+
+  for (const row of submittedRows) {
+    submittedProjectIds.add(row.project_id as string);
+    const project = mapObservationProjectContext(row.projects);
+    const items = Array.isArray(row.line_items) ? row.line_items : [];
+    for (const item of items as Record<string, unknown>[]) {
+      const itemId = (item.item_id as string) || "";
+      const total = Number(item.total) || 0;
+      // Only lines that carried dollars in the official bid are observations.
+      if (!itemId || total === 0) continue;
+      observations.push({
+        itemId,
+        unitPrice: Number(item.unit_price) || 0,
+        uom: ((item.uom as string) || "").trim().toUpperCase(),
+        projectName: project?.name ?? "",
+        bidDate: project?.bid_date ?? "",
+        marketSector: project?.market_sector ?? "",
+        // qty + data_fidelity ride the frozen payload (buildLineItemPayload)
+        // so historyTrust judges submitted lines by the SAME rules as imports
+        // (zero-qty / combined-line exclusion — fidelity Phase 3).
+        qty: Number(item.matched_qty) || 0,
+        dataFidelity: (item.data_fidelity as string) ?? "",
+      });
+    }
+  }
+
+  for (const obs of importedObservations) {
+    if (submittedProjectIds.has(obs.projectId)) continue;
+    // Drop only the internal projectId; qty + dataFidelity stay on the
+    // observation so the trust screen keeps judging imported rows.
+    const { projectId: _projectId, ...observation } = obs;
+    observations.push(observation);
+  }
+
+  return observations;
 }
 
 // ═══════════════════════════════════════════════════════════════════

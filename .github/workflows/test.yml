@@ -17,7 +17,9 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 18
+        # Toolchain floor: next@16 needs >=20.9, vite@7 needs ^20.19 || >=22.12,
+        # supabase-js@2.106 needs >=20 — Node 18 fails vitest startup (ERR_REQUIRE_ESM).
+        node-version: 22
         cache: 'npm'
 
     - name: Install Dependencies

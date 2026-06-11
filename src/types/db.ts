@@ -312,6 +312,36 @@ export interface CatalogAddition {
   source: 'catalog_manager' | 'manual';
 }
 
+/**
+ * One named frozen version of a project's estimate (estimate_versions table,
+ * Estimate Versioning module) — list-view shape WITHOUT the frozen line items
+ * (use EstimateVersionDetail for those). The team edits one live working copy;
+ * "Save Version" freezes it here with a title. At most ONE version per project
+ * has isSubmitted=true (partial-unique index) — that version is the official
+ * bid, and the ONLY estimate state cost history reads (db.ts
+ * getBidPriceHistory derives observations from it at read time).
+ */
+export interface EstimateVersionMeta {
+  id: string;
+  projectId: string;
+  /** Per-project sequence (1, 2, 3…) assigned by the create RPC. */
+  versionNumber: number;
+  title: string;
+  /** TakeoffSummary numbers copied verbatim from the engine at freeze time. */
+  summary: Record<string, number>;
+  isSubmitted: boolean;
+  /** ISO timestamp; null unless isSubmitted. */
+  submittedAt: string | null;
+  createdAt: string;
+  /** auth.uid() of who saved it; null if that user was later removed. */
+  createdBy: string | null;
+}
+
+/** A version's full frozen payload: meta plus the frozen line items. */
+export interface EstimateVersionDetail extends EstimateVersionMeta {
+  lineItems: ProcessedTakeoffRow[];
+}
+
 export interface CustomStep23LineDef {
   /** Deterministic code, e.g. "02-4100.003" — may never shadow a built-in. */
   code: string;
