@@ -55,8 +55,11 @@ sector with confidence labels); both /rates history reports flow through
   `flaggedOutliers` + confidence labels), tunable constants
   (`OUTLIER_*`, `LOW_CONFIDENCE_BELOW`). The price-jump detector belongs in
   dataHealth (it's an audit finding, not a report rule) but should consume
-  the same `PriceObservation` streams: `getImportedPriceHistory` (db.ts, now
-  carries `qty` + `dataFidelity`) and `step23Observations`
+  the same `PriceObservation` streams: `getBidPriceHistory` (db.ts — POST-MERGE
+  NOTE 2026-06-11: the Estimate Versioning merge, `d991f44`, made this the
+  full observation pool: imported bids + submitted estimate versions with the
+  supersede rule applied; `getImportedPriceHistory` still exists but is the
+  imported-only subset. Both carry `qty` + `dataFidelity`) and `step23Observations`
   (step23Normalization.ts, carries `qty`; no lump marker exists on STEP 2/3
   lines today — comment at the producer explains).
 - **Grouping is by POST-MERGE resolved code** everywhere; `resolveStep23Line`
