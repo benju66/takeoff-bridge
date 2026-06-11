@@ -39,6 +39,7 @@ import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
 import { ExportOverrideModal } from "@/components/workspace/ExportOverrideModal";
+import { VersionsPanel } from "@/components/workspace/VersionsPanel";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -563,6 +564,19 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             cancelImport={cancelImport}
             reParseWithSheet={reParseWithSheet}
             handleProjectParamChange={handleProjectParamChange as (field: string, value: string | number) => void}
+          />
+        </ErrorBoundary>
+      )}
+
+      {/* Estimate Versioning: freeze/submit/compare always works over the FULL
+          unfiltered row set + summary — a saved version must never be a
+          filtered partial (same rule as the export gate, Amendment F). */}
+      {activeTab === "versions" && (
+        <ErrorBoundary>
+          <VersionsPanel
+            projectId={projectId}
+            rows={rows}
+            summary={fullTakeoffSummary}
           />
         </ErrorBoundary>
       )}

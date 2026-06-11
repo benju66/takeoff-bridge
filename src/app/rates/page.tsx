@@ -18,7 +18,7 @@ import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
   getRateCard,
   updateRateCardEntry,
-  getImportedPriceHistory,
+  getBidPriceHistory,
   getImportedStep23History,
   getCustomStep23LineDefs,
   getCatalogAdditions,
@@ -201,14 +201,16 @@ export default function RateCardDashboard() {
         }
       }
     })();
-    // As-bid price history (report-only, advisory) — loaded independently so a
-    // history outage can never block the rate card itself.
+    // Bid price history (report-only, advisory) — loaded independently so a
+    // history outage can never block the rate card itself. Observations come
+    // from imported bids AND submitted estimate versions (a project's
+    // submitted version supersedes its imported record — no double-counting).
     (async () => {
       try {
-        const observations = await getImportedPriceHistory();
+        const observations = await getBidPriceHistory();
         if (!cancelled) setPriceHistory(aggregatePriceHistory(observations));
       } catch (err) {
-        console.error("Failed to load imported price history (report skipped):", err);
+        console.error("Failed to load bid price history (report skipped):", err);
       }
     })();
     // As-bid STEP 2/3 rate history (Slice 3) — same fail-soft independence.

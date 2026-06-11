@@ -23,12 +23,13 @@ describe("getImportedPriceHistory", () => {
     mockNeq.mockResolvedValueOnce({
       data: [
         {
+          project_id: "care-1",
           item_id: "09-2900.001",
           unit_price: 4.25,
           uom: "sf", // legacy-saved rows may be lowercase — normalized on read
           projects: { name: "CARE Relocation", bid_date: "2026-04-06", market_sector: "Healthcare" },
         },
-        { item_id: "22-0000.001", unit_price: "12.50", uom: null, projects: null },
+        { project_id: "p2", item_id: "22-0000.001", unit_price: "12.50", uom: null, projects: null },
       ],
       error: null,
     });
@@ -36,11 +37,16 @@ describe("getImportedPriceHistory", () => {
     const out = await getImportedPriceHistory();
 
     expect(mockFrom).toHaveBeenCalledWith("estimate_line_items");
-    expect(mockSelect).toHaveBeenCalledWith("item_id, unit_price, uom, projects(name, bid_date, market_sector)");
+    // project_id rides along for the Estimate Versioning supersede rule
+    // (getBidPriceHistory drops a project's imported observations once it has
+    // a submitted version); the PriceObservation contract is a structural
+    // subset of each returned object.
+    expect(mockSelect).toHaveBeenCalledWith("project_id, item_id, unit_price, uom, projects(name, bid_date, market_sector)");
     expect(mockEq).toHaveBeenCalledWith("source", "imported");
     expect(mockNeq).toHaveBeenCalledWith("item_id", "");
     expect(out).toEqual([
       {
+        projectId: "care-1",
         itemId: "09-2900.001",
         unitPrice: 4.25,
         uom: "SF",
@@ -48,7 +54,7 @@ describe("getImportedPriceHistory", () => {
         bidDate: "2026-04-06",
         marketSector: "Healthcare",
       },
-      { itemId: "22-0000.001", unitPrice: 12.5, uom: "", projectName: "", bidDate: "", marketSector: "" },
+      { projectId: "p2", itemId: "22-0000.001", unitPrice: 12.5, uom: "", projectName: "", bidDate: "", marketSector: "" },
     ]);
   });
 
