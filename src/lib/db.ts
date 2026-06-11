@@ -1,8 +1,9 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { Step23HistorySource } from "./step23Normalization";
 import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
 import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus } from "./catalogLifecycle";
+import { isBuiltInCatalogCode } from "./catalog";
 import { isValidProcoreCode } from "./procoreValidCodes";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
@@ -1691,4 +1692,250 @@ export async function promoteCustomStep23LineDef(
   }
 
   return mapRateCardRow(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Catalog additions (Catalog Manager Phase 6 — STEP 4 runtime overlay)
+// ═══════════════════════════════════════════════════════════════════
+//
+// In-app STEP 4 catalog codes (catalog_additions table). Self-contained: a row
+// carries its OWN procore_code + default_unit_price, so the catalog chokepoint
+// (catalog.ts) and BOTH resolvers overlay it with NO cost_code_map / rate_card
+// widening. The price reaches a row only at birth (freeze-at-birth) — editing an
+// addition never retro-moves a saved row's stored unit_price.
+
+const CATALOG_ADDITION_COLUMNS =
+  "item_id, description, target_uom, default_unit_price, cost_type, procore_code, status, source";
+
+const CATALOG_ADDITION_COST_TYPES = ["L", "M", "S"];
+
+function mapCatalogAdditionRow(row: Record<string, unknown>): CatalogAddition {
+  return {
+    itemId: row.item_id as string,
+    description: row.description as string,
+    targetUom: (row.target_uom as string) || "",
+    defaultUnitPrice: Number(row.default_unit_price),
+    costType: row.cost_type as string,
+    procoreCode: row.procore_code as string,
+    // status is NOT NULL DEFAULT 'active'; the ?? is a safety net for narrower
+    // projections. source is likewise always present.
+    status: (row.status as CatalogAdditionStatus) ?? "active",
+    source: row.source as CatalogAddition["source"],
+  };
+}
+
+/**
+ * Every in-app catalog addition (catalog_additions table), ordered by itemId —
+ * the overlay the catalog chokepoint + both resolvers layer on the built-ins.
+ * Consumers load these FAIL-SOFT (`.catch(() => [])` at the prime site): an
+ * outage degrades to built-ins only, never blocks a workflow.
+ */
+export async function getCatalogAdditions(): Promise<CatalogAddition[]> {
+  const { data, error } = await supabase
+    .from("catalog_additions")
+    .select(CATALOG_ADDITION_COLUMNS)
+    .order("item_id", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch catalog additions:", error);
+    throw new Error(`Failed to fetch catalog additions: ${error.message}`);
+  }
+
+  return (data || []).map(mapCatalogAdditionRow);
+}
+
+/**
+ * Validates a Procore-destination code against the Importer list and returns it
+ * trimmed (shared by create + update). A non-empty value MUST be on Procore's
+ * Importer Data Fields list (AGENTS.md — no unvalidated mappings); '' is rejected
+ * (an addition must name a valid destination at birth — the column is NOT NULL).
+ */
+function normalizeAdditionProcoreCode(input: string): string {
+  const procoreCode = input.trim();
+  if (procoreCode === "") {
+    throw new Error("A catalog addition needs a Procore Budget Line Item (it names where the code's dollars land)");
+  }
+  if (!isValidProcoreCode(procoreCode)) {
+    throw new Error(`Procore code ${procoreCode} is not on the Importer Data Fields list — pick a valid Budget Line Item`);
+  }
+  return procoreCode;
+}
+
+/** Shape/range checks shared by create + update for default_unit_price (a finite
+ *  number; a negative deduction is legitimate, e.g. an allowance credit). */
+function validateAdditionPrice(price: number): void {
+  if (typeof price !== "number" || !Number.isFinite(price)) {
+    throw new Error(`Invalid catalog unit price ${price}: must be a finite number`);
+  }
+}
+
+/** L/M/S guard shared by create + update (returns the uppercased value). */
+function normalizeAdditionCostType(input: string): string {
+  const costType = input.trim().toUpperCase();
+  if (!CATALOG_ADDITION_COST_TYPES.includes(costType)) {
+    throw new Error(`Invalid cost type "${input}": must be L (Labor), M (Materials), or S (Subcontract)`);
+  }
+  return costType;
+}
+
+/**
+ * Creates one in-app STEP 4 catalog code (the /catalog Add-code UI's sole write
+ * path — Phase 7). Validates before the write, mirroring the table's CHECK
+ * constraints so no invalid addition ever leaves the browser:
+ *  - itemId must be a deterministic catalog code (NN-NNNN.NNN);
+ *  - description must be non-empty (the import-match / display label);
+ *  - cost type must be L/M/S; default unit price must be finite (negatives ok);
+ *  - procore_code must be on Procore's Importer list (a valid destination);
+ *  - itemId may NEVER shadow a BUILT-IN catalog code (a built-in always wins the
+ *    overlay — collision is rejected with a clean message);
+ *  - itemId may not duplicate an existing addition (pre-checked for a clean
+ *    message; the PK is the authoritative gate — a same-moment race surfaces as
+ *    the same "already exists" error via 23505).
+ * Stamps source='catalog_manager' + status='active' via the column defaults.
+ */
+export async function createCatalogAddition(input: {
+  itemId: string;
+  description: string;
+  targetUom?: string;
+  defaultUnitPrice?: number;
+  costType?: string;
+  procoreCode: string;
+}): Promise<CatalogAddition> {
+  const itemId = input.itemId.trim();
+  const description = input.description.trim();
+  const targetUom = (input.targetUom ?? "").trim().toUpperCase();
+  const defaultUnitPrice = input.defaultUnitPrice ?? 0;
+
+  if (!isStep23DeterministicCode(itemId)) {
+    throw new Error(
+      `Invalid catalog code "${input.itemId}": must be deterministic NN-NNNN.NNN (e.g. 11-5000.010)`
+    );
+  }
+  if (description === "") {
+    throw new Error(`Catalog code ${itemId} needs a non-empty description — it is the import-match and display label`);
+  }
+  const costType = normalizeAdditionCostType(input.costType ?? "M");
+  validateAdditionPrice(defaultUnitPrice);
+  const procoreCode = normalizeAdditionProcoreCode(input.procoreCode);
+
+  if (isBuiltInCatalogCode(itemId)) {
+    throw new Error(`Code ${itemId} is already a built-in STEP 4 catalog code — a built-in always wins, so an addition can't shadow it`);
+  }
+
+  const { data: existing, error: existsError } = await supabase
+    .from("catalog_additions")
+    .select("item_id")
+    .eq("item_id", itemId)
+    .maybeSingle();
+
+  if (existsError) {
+    console.error(`Failed to check catalog code ${itemId} for collisions:`, existsError);
+    throw new Error(`Failed to check catalog code ${itemId} for collisions: ${existsError.message}`);
+  }
+  if (existing) {
+    throw new Error(`Catalog code ${itemId} already exists`);
+  }
+
+  const { data, error } = await supabase
+    .from("catalog_additions")
+    .insert({
+      item_id: itemId,
+      description,
+      target_uom: targetUom,
+      default_unit_price: defaultUnitPrice,
+      cost_type: costType,
+      procore_code: procoreCode,
+    })
+    .select(CATALOG_ADDITION_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    // 23505 = unique_violation: a concurrent create won the PK race after our
+    // pre-check — same outcome, same clean message.
+    if (error?.code === "23505") {
+      throw new Error(`Catalog code ${itemId} already exists`);
+    }
+    console.error(`Failed to create catalog code ${itemId}:`, error);
+    throw new Error(`Failed to create catalog code ${itemId}: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapCatalogAdditionRow(data);
+}
+
+/**
+ * Edits an addition (description / UOM / unit price / cost type / Procore BLI)
+ * and/or marks it landed (status → 'landed', the Phase 7 harvest-reconciliation
+ * one-click). Only the supplied fields change; each is validated with the same
+ * rules as create. The item_id (PK) is never touched. updated_at is owned by the
+ * touch trigger (not set here). NOT a retro-financial write — editing the price
+ * affects only FUTURE row births (freeze-at-birth; saved rows keep their price).
+ */
+export async function updateCatalogAddition(input: {
+  itemId: string;
+  description?: string;
+  targetUom?: string;
+  defaultUnitPrice?: number;
+  costType?: string;
+  procoreCode?: string;
+  status?: CatalogAdditionStatus;
+}): Promise<CatalogAddition> {
+  const itemId = input.itemId.trim();
+
+  const patch: {
+    description?: string;
+    target_uom?: string;
+    default_unit_price?: number;
+    cost_type?: string;
+    procore_code?: string;
+    status?: CatalogAdditionStatus;
+  } = {};
+
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    if (description === "") {
+      throw new Error(`Catalog code ${itemId} needs a non-empty description — it is the import-match and display label`);
+    }
+    patch.description = description;
+  }
+
+  if (input.targetUom !== undefined) {
+    patch.target_uom = input.targetUom.trim().toUpperCase();
+  }
+
+  if (input.defaultUnitPrice !== undefined) {
+    validateAdditionPrice(input.defaultUnitPrice);
+    patch.default_unit_price = input.defaultUnitPrice;
+  }
+
+  if (input.costType !== undefined) {
+    patch.cost_type = normalizeAdditionCostType(input.costType);
+  }
+
+  if (input.procoreCode !== undefined) {
+    patch.procore_code = normalizeAdditionProcoreCode(input.procoreCode);
+  }
+
+  if (input.status !== undefined) {
+    if (input.status !== "active" && input.status !== "landed") {
+      throw new Error(`Invalid catalog addition status "${input.status}": must be 'active' or 'landed'`);
+    }
+    patch.status = input.status;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error(`Nothing to update on catalog code ${itemId} — provide a field to change`);
+  }
+
+  const { data, error } = await supabase
+    .from("catalog_additions")
+    .update(patch)
+    .eq("item_id", itemId)
+    .select(CATALOG_ADDITION_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to update catalog code ${itemId}:`, error);
+    throw new Error(`Failed to update catalog code ${itemId}: ${error?.message ?? "no row returned"}`);
+  }
+  return mapCatalogAdditionRow(data);
 }

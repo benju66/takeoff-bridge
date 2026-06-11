@@ -1,4 +1,5 @@
 import { InternalEstimateItem } from "@/types";
+import { CatalogAddition } from "@/types/db";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 
 // ---------------------------------------------------------------------------
@@ -46,4 +47,33 @@ export function getCatalogItems(): Record<string, InternalEstimateItem> {
   const merged: Record<string, InternalEstimateItem> = {};
   for (const add of primedAdditions) merged[add.itemId] = add;
   return Object.assign(merged, ESTIMATE_ITEMS_MASTER);
+}
+
+/**
+ * True when itemId is a HARVESTED BUILT-IN STEP 4 code — the codes an addition
+ * may never shadow (a built-in always wins the overlay). Checks the built-ins
+ * ONLY (ESTIMATE_ITEMS_MASTER), never the primed additions; db.ts rejects an
+ * addition whose itemId collides with one at create time.
+ */
+export function isBuiltInCatalogCode(itemId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(ESTIMATE_ITEMS_MASTER, itemId);
+}
+
+/**
+ * Project a DB CatalogAddition row to the InternalEstimateItem the catalog +
+ * resolver overlays consume (primeCatalogAdditions / primeCostCodeAdditions /
+ * primeCatalogPriceAdditions). procoreParentCode mirrors the granular procoreCode:
+ * an addition carries no separate coarse parent, and the parent is a
+ * non-authoritative back-compat fallback (the exporter groups by procoreCode).
+ */
+export function catalogAdditionToItem(a: CatalogAddition): InternalEstimateItem {
+  return {
+    itemId: a.itemId,
+    procoreParentCode: a.procoreCode,
+    procoreCode: a.procoreCode,
+    description: a.description,
+    targetUom: a.targetUom,
+    defaultUnitPrice: a.defaultUnitPrice,
+    costType: a.costType,
+  };
 }

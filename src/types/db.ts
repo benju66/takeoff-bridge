@@ -252,6 +252,50 @@ export interface RateCardEntry {
  * (code + label) plus the mint-form extras. A label, resolver target, and
  * /rates mining key ONLY — no rate_card row, no calculator line, no ADOPT.
  */
+/**
+ * Lifecycle/reconciliation state of an in-app catalog addition (catalog_additions
+ * table, Catalog Manager Phase 6). 'active' = a live overlay row layered on the
+ * built-in catalog; 'landed' = the addition's code now ships in a fresh harvest
+ * (estimate-catalog.json), so the built-in wins the overlay by construction and
+ * the row remains only as the audit/provenance + reconciliation record.
+ */
+export type CatalogAdditionStatus = 'active' | 'landed';
+
+/**
+ * An in-app STEP 4 catalog addition (catalog_additions table, Catalog Manager
+ * Phase 6 — the runtime catalog overlay). A brand-new catalog code created on
+ * /catalog (Phase 7 UI) that works everywhere immediately — pickers, import
+ * matching, row birth, mapping, rates — with no redeploy. The catalog chokepoint
+ * (src/lib/catalog.ts) overlays these on the harvested built-ins at render time;
+ * a built-in ALWAYS wins a code collision.
+ *
+ * SELF-CONTAINED: the row carries its OWN procoreCode + defaultUnitPrice, so
+ * cost_code_map / rate_card get NO widening — the cost-code resolver overlays
+ * procoreCode and the catalog-price resolver overlays defaultUnitPrice for
+ * addition itemIds. Structurally an InternalEstimateItem (minus procoreParentCode,
+ * which mirrors procoreCode for additions) plus status/source provenance.
+ *
+ * FREEZE-AT-BIRTH: defaultUnitPrice reaches a row only at birth; a saved row
+ * persists its own unitPrice, so editing an addition never retro-moves it.
+ */
+export interface CatalogAddition {
+  /** Deterministic catalog code, e.g. "11-5000.010" — may never shadow a built-in. */
+  itemId: string;
+  /** Import-match / display label (non-empty). */
+  description: string;
+  /** Target UOM ("" when the addition has none). */
+  targetUom: string;
+  /** Birth-time unit price (may be a negative deduction). */
+  defaultUnitPrice: number;
+  /** Cost type: 'L' (Labor) | 'M' (Materials) | 'S' (Subcontract). */
+  costType: string;
+  /** Granular Procore Budget Line Item — required at birth, validated against
+   *  the Importer list (PROCORE_VALID_CODES) app-side. */
+  procoreCode: string;
+  status: CatalogAdditionStatus;
+  source: 'catalog_manager' | 'manual';
+}
+
 export interface CustomStep23LineDef {
   /** Deterministic code, e.g. "02-4100.003" — may never shadow a built-in. */
   code: string;

@@ -1,4 +1,5 @@
 import { RateCardEntry } from "@/types/db";
+import { InternalEstimateItem } from "@/types";
 
 // ---------------------------------------------------------------------------
 // rateResolver — the SINGLE chokepoint for the COMPANY-DEFAULT rate layer
@@ -30,9 +31,29 @@ import { RateCardEntry } from "@/types/db";
 
 let rateCardMap: Map<string, number> | null = null;
 
+// Catalog-additions price overlay (Catalog Manager Phase 6). A SEPARATE slot from
+// the rate_card-primed rateCardMap so the workspace's re-prime from the table never
+// wipes it: additions are self-contained and carry their OWN default_unit_price, so
+// rate_card gets NO widening. Consulted ONLY by resolveCatalogPrice (the STEP 4
+// birth path) — never resolveCompanyRate (GC/Site-Ops); the disjoint addition
+// itemId keys would not collide with line codes anyway. rate_card wins a collision.
+let additionsPriceMap: Map<string, number> | null = null;
+
 /** Prime the company-rate cache from rate_card rows (workspace mount / re-focus). */
 export function primeRateCard(entries: RateCardEntry[]): void {
   rateCardMap = new Map(entries.map((e) => [e.lineCode, e.rate]));
+}
+
+/**
+ * Prime the catalog-additions price overlay (Phase 6). Each addition carries its
+ * own default_unit_price; this overlays it for the addition's itemId. An empty
+ * list clears the overlay (identity — nothing primed).
+ */
+export function primeCatalogPriceAdditions(additions: InternalEstimateItem[]): void {
+  additionsPriceMap =
+    additions.length > 0
+      ? new Map(additions.map((a) => [a.itemId, a.defaultUnitPrice]))
+      : null;
 }
 
 /**
@@ -55,7 +76,15 @@ export function resolveCompanyRate(code: string, fallback: number): number {
  * JSON default), so day-one behavior is byte-identical to the hard-coded read.
  */
 export function resolveCatalogPrice(itemId: string, fallback: number): number {
-  return resolveCompanyRate(itemId, fallback);
+  // Layering: rate_card (company default / built-in) wins; then an addition's
+  // self-contained default_unit_price (Phase 6 overlay); else the caller's
+  // fallback (constants/JSON default). A primed 0 / negative deduction is a REAL
+  // value, never confused with "no entry" (explicit `undefined` checks).
+  const carded = rateCardMap?.get(itemId);
+  if (carded !== undefined) return carded;
+  const added = additionsPriceMap?.get(itemId);
+  if (added !== undefined) return added;
+  return fallback;
 }
 
 /**
@@ -69,7 +98,8 @@ export function snapshotRateCard(): Record<string, number> | null {
   return Object.fromEntries(rateCardMap);
 }
 
-/** Test-only: clear the module-level cache. */
+/** Test-only: clear the module-level caches (rate card + additions overlay). */
 export function resetRateCard(): void {
   rateCardMap = null;
+  additionsPriceMap = null;
 }

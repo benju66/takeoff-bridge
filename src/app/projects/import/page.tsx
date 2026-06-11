@@ -26,13 +26,15 @@ import {
 } from "@/lib/step23Normalization";
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 import { validateAssignInput } from "@/lib/assignCode";
-import { getCatalogItems } from "@/lib/catalog";
+import { getCatalogItems, primeCatalogAdditions, catalogAdditionToItem } from "@/lib/catalog";
 import { getDivisionCode } from "@/lib/division";
-import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
+import { primeCostCodeResolver, primeCostCodeResolverFromCatalog, primeCostCodeAdditions } from "@/lib/costCodeResolver";
+import { primeCatalogPriceAdditions } from "@/lib/rateResolver";
 import {
   getCostCodeMap, saveProject, saveEstimate, createEstimateSnapshot,
   recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
   getClassificationHistoryBulk, getCustomStep23LineDefs, createCustomStep23LineDef,
+  getCatalogAdditions,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
 import type { CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
@@ -177,6 +179,16 @@ export default function ImportPastEstimatePage() {
       const buffer = await file.arrayBuffer();
       const wb = await loadTemplateWorkbook(buffer);
       const extracted = extractEstimate(wb); // throws if not a template-shape workbook
+
+      // Prime the STEP 4 catalog-additions overlay BEFORE the cost-code prime so
+      // the degraded catalog-fallback path (and the catalog read used for import
+      // matching) already includes additions. Self-contained — additions carry
+      // their own procore_code + default_unit_price — so the catalog item overlay
+      // + BOTH resolvers carry them; cost_code_map / rate_card untouched. FAIL-SOFT.
+      const additionItems = (await getCatalogAdditions().catch(() => [])).map(catalogAdditionToItem);
+      primeCatalogAdditions(additionItems);
+      primeCostCodeAdditions(additionItems);
+      primeCatalogPriceAdditions(additionItems);
 
       // Prime the granular-code resolver the same way the workspace mount does;
       // the same entries (reversed) feed the bridge's procore→internal lookup.

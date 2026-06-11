@@ -1,4 +1,5 @@
 import { CostCodeMapEntry } from "@/types/db";
+import { InternalEstimateItem } from "@/types";
 import { getCatalogItems } from "@/lib/catalog";
 
 // ---------------------------------------------------------------------------
@@ -25,9 +26,29 @@ import { getCatalogItems } from "@/lib/catalog";
 
 let resolverMap: Map<string, string> | null = null;
 
+// Catalog-additions overlay (Catalog Manager Phase 6). A SEPARATE slot from the
+// cost_code_map-primed resolverMap so the workspace's re-prime from the table
+// never wipes it: additions are self-contained and carry their OWN procore_code,
+// so cost_code_map gets NO widening. resolveProcoreCode consults resolverMap
+// FIRST — a built-in (cost_code_map) always wins a code collision; the additions
+// overlay only answers addition itemIds the map never carries.
+let additionsProcoreMap: Map<string, string> | null = null;
+
 /** Prime the resolver from cost_code_map rows (workspace mount / re-focus). */
 export function primeCostCodeResolver(entries: CostCodeMapEntry[]): void {
   resolverMap = new Map(entries.map((e) => [e.internalCode, e.procoreCode]));
+}
+
+/**
+ * Prime the catalog-additions procore-code overlay (Phase 6). Each addition
+ * carries its own granular procore_code; this overlays it for the addition's
+ * itemId. An empty list clears the overlay (identity — nothing primed).
+ */
+export function primeCostCodeAdditions(additions: InternalEstimateItem[]): void {
+  additionsProcoreMap =
+    additions.length > 0
+      ? new Map(additions.map((a) => [a.itemId, a.procoreCode]))
+      : null;
 }
 
 /**
@@ -45,12 +66,17 @@ export function primeCostCodeResolverFromCatalog(): void {
   );
 }
 
-/** Resolve an internal itemId to its granular Procore code ("" on miss/unprimed). */
+/**
+ * Resolve an internal itemId to its granular Procore code ("" on miss/unprimed).
+ * cost_code_map (built-in) wins; an addition's self-contained procore_code is the
+ * fallback for addition itemIds the map never carries (no cost_code_map widening).
+ */
 export function resolveProcoreCode(itemId: string): string {
-  return resolverMap?.get(itemId) ?? "";
+  return resolverMap?.get(itemId) ?? additionsProcoreMap?.get(itemId) ?? "";
 }
 
-/** Test-only: clear the module-level cache. */
+/** Test-only: clear the module-level caches (resolver + additions overlay). */
 export function resetCostCodeResolver(): void {
   resolverMap = null;
+  additionsProcoreMap = null;
 }

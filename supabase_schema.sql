@@ -6,11 +6,11 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 16 (added custom_step23_line_defs — import STEP 2/3 review gate Phase 2)
+-- Tables: 17 (added catalog_additions — Catalog Manager Phase 6 STEP 4 overlay)
 -- RPC Functions: 2 (save_estimate_line_items, save_estimate)
--- Trigger Functions: 2 (custom_step23_line_defs lifecycle guard + updated_at touch
---   — Catalog Manager Phase 2; the FIRST triggers in this schema)
--- RLS Policies: 25 (added custom_step23_line_defs UPDATE — Catalog Manager Phase 2)
+-- Trigger Functions: 3 (custom_step23_line_defs lifecycle guard + updated_at touch
+--   — Catalog Manager Phase 2; catalog_additions updated_at touch — Phase 6)
+-- RLS Policies: 28 (added catalog_additions SELECT/INSERT/UPDATE — Catalog Manager Phase 6)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -21,10 +21,11 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-11 (Catalog Manager Phase 2: custom_step23_line_defs gains
--- the lifecycle layer — status + merged_into columns, a transition-enforcing guard
--- trigger, an updated_at touch trigger, and the deliberate UPDATE policy widening
--- that lets the browser edit/retire/merge minted GC/Site-Ops codes)
+-- Last updated: 2026-06-11 (Catalog Manager Phase 6: new catalog_additions table —
+-- the runtime STEP 4 catalog overlay. Self-contained rows (own procore_code +
+-- default_unit_price) layered on the harvested built-ins at the catalog chokepoint
+-- and both resolvers; cost_code_map / rate_card get NO widening. SELECT/INSERT/
+-- UPDATE policies modeled on Table 14, plus an updated_at touch trigger)
 -- ═════════════════════════════════════════════════════════════════════
 
 -- ─────────────────────────────────────────────────
@@ -1104,4 +1105,100 @@ CREATE POLICY "custom_step23_line_defs_update_policy" ON custom_step23_line_defs
   TO authenticated
   USING (true)
   WITH CHECK (true);
+
+-- ─────────────────────────────────────────────────
+-- Table 15: catalog_additions (Catalog Manager Phase 6 — STEP 4 runtime overlay)
+-- ─────────────────────────────────────────────────
+--
+-- In-app additions to the STEP 4 catalog: a brand-new catalog code an estimator
+-- creates on /catalog (Phase 7 UI) that works everywhere immediately — pickers,
+-- import matching, row birth, mapping, rates — with no redeploy and no agent
+-- session. The catalog chokepoint (src/lib/catalog.ts) overlays these rows on the
+-- harvested built-ins (ESTIMATE_ITEMS_MASTER) at render time; a built-in ALWAYS
+-- wins a code collision (the harvested template is the source of truth).
+--
+-- SELF-CONTAINED (architect-locked 2026-06-11): an addition carries its OWN
+-- procore_code and default_unit_price, so cost_code_map / rate_card get NO policy
+-- widening for adds. The cost-code resolver overlays this procore_code and the
+-- catalog-price resolver overlays this default_unit_price for addition itemIds.
+--
+-- status: 'active' (live overlay) | 'landed' (its code now ships in a fresh
+-- estimate-catalog.json harvest — the built-in wins the overlay by construction;
+-- the row stays as the audit/provenance + reconciliation record).
+--
+-- source provenance: 'catalog_manager' (created via the /catalog Add-code UI —
+-- the sole write path) | 'manual' (reserved for future tooling).
+--
+-- FREEZE-AT-BIRTH: default_unit_price reaches a row ONLY at birth (template init /
+-- import / itemId change resolve through the catalog-price overlay). A saved row
+-- persists its own unit_price, so editing an addition never retro-moves it.
+
+CREATE TABLE catalog_additions (
+  item_id            TEXT PRIMARY KEY
+                     CHECK (item_id ~ '^\d{2}-\d{4}\.\d{3}$'),  -- catalog code shape NN-NNNN.NNN
+  description        TEXT NOT NULL
+                     CHECK (btrim(description) <> ''),          -- import-match / display label
+  target_uom         TEXT NOT NULL DEFAULT '',                  -- '' when the addition has none
+  default_unit_price NUMERIC NOT NULL DEFAULT 0,                -- birth-time price (may be a negative deduction)
+  cost_type          TEXT NOT NULL DEFAULT 'M'
+                     CHECK (cost_type IN ('L', 'M', 'S')),      -- Labor / Materials / Subcontract
+  procore_code       TEXT NOT NULL                              -- names a valid Procore BLI at birth (app-validated
+                     CHECK (btrim(procore_code) <> ''),         --   against the Importer list; shape varies, no regex)
+  status             TEXT NOT NULL DEFAULT 'active'
+                     CHECK (status IN ('active', 'landed')),
+  source             TEXT NOT NULL DEFAULT 'catalog_manager'
+                     CHECK (source IN ('catalog_manager', 'manual')),
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE catalog_additions ENABLE ROW LEVEL SECURITY;
+
+-- Read: corporate data, consistent with cost_code_map / rate_card / template_config.
+-- (SELECT USING(true) is intentionally NOT flagged by the rls_policy_always_true linter.)
+CREATE POLICY "catalog_additions_select_policy" ON catalog_additions
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Write: INSERT (create a STEP 4 code, /catalog Add-code UI) + UPDATE (edit +
+-- mark-landed). db.ts validates shape + built-in/addition collision + Procore-list
+-- membership before the write; the CHECK constraints are the server-side backstop.
+-- No DELETE policy → an addition's row is never removed (audit/provenance + the
+-- landed reconciliation record). THE deliberate widening for this new table — adds
+-- two expected rls_policy_always_true advisor WARNs (INSERT WITH CHECK true; UPDATE
+-- USING/WITH CHECK true), mirroring the rate_card / custom_step23_line_defs precedent.
+-- FOLLOW-UP (deferred, same CONSOLIDATED note shared by cost_code_map / rate_card /
+-- custom_step23_line_defs): move writes server-side (service-role only) to fully
+-- close the "any authenticated user can add/edit a catalog code" exposure — accepted
+-- for a single-company tool (plan §Risks; flagged at the Phase 6 gate).
+CREATE POLICY "catalog_additions_insert_policy" ON catalog_additions
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+CREATE POLICY "catalog_additions_update_policy" ON catalog_additions
+  FOR UPDATE
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
+-- updated_at touch (BEFORE UPDATE), mirroring the custom_step23_line_defs pattern.
+-- SET search_path = '' pins schema resolution (only pg_catalog built-ins referenced)
+-- — keeps the function_search_path_mutable advisor clean. SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION touch_catalog_additions_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER catalog_additions_touch_updated_at_trg
+  BEFORE UPDATE ON catalog_additions
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_catalog_additions_updated_at();
 

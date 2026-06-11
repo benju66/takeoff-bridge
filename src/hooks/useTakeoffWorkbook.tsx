@@ -12,7 +12,7 @@ import {
   ColumnFiltersState,
   Table,
 } from "@tanstack/react-table";
-import { getCatalogItems } from "@/lib/catalog";
+import { getCatalogItems, primeCatalogAdditions, catalogAdditionToItem } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
@@ -21,7 +21,7 @@ import { SelectCellInput } from "@/components/workspace/SelectCellInput";
 import { RowProvenanceGlyph } from "@/components/workspace/RowProvenanceGlyph";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
-import { Project, DivisionLayout } from "@/types/db";
+import { Project, DivisionLayout, CatalogAddition } from "@/types/db";
 import {
   getEstimateLineItems,
   getProjectRegistry,
@@ -31,13 +31,15 @@ import {
   getTemplateConfig,
   getCostCodeMap,
   getRateCard,
+  getCatalogAdditions,
 } from "@/lib/db";
 import {
   primeCostCodeResolver,
   primeCostCodeResolverFromCatalog,
+  primeCostCodeAdditions,
   resolveProcoreCode,
 } from "@/lib/costCodeResolver";
-import { primeRateCard, resolveCatalogPrice } from "@/lib/rateResolver";
+import { primeRateCard, primeCatalogPriceAdditions, resolveCatalogPrice } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
@@ -346,8 +348,10 @@ export function useTakeoffWorkbook(
 
     (async () => {
       try {
-        // Load all data sources in parallel
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard] =
+        // Load all data sources in parallel. Catalog additions are FAIL-SOFT
+        // (`.catch(() => [])`) so an additions outage degrades to built-ins only
+        // and never rejects the whole mount batch.
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard, savedCatalogAdditions] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
@@ -357,9 +361,22 @@ export function useTakeoffWorkbook(
             getTemplateConfig(MASTER_TEMPLATE_NAME),
             getCostCodeMap(MASTER_TEMPLATE_NAME),
             getRateCard(MASTER_TEMPLATE_NAME),
+            getCatalogAdditions().catch(() => [] as CatalogAddition[]),
           ]);
 
         if (cancelled) return;
+
+        // Prime the STEP 4 catalog-additions overlay BEFORE any row init AND
+        // before the cost-code/rate primes below (the degraded
+        // primeCostCodeResolverFromCatalog path reads getCatalogItems(), which
+        // must already include additions). Additions are self-contained — they
+        // carry their own procore_code + default_unit_price — so the catalog item
+        // overlay + BOTH resolvers carry them; cost_code_map / rate_card untouched.
+        // An empty list is a no-op identity (nothing primed).
+        const additionItems = savedCatalogAdditions.map(catalogAdditionToItem);
+        primeCatalogAdditions(additionItems);
+        primeCostCodeAdditions(additionItems);
+        primeCatalogPriceAdditions(additionItems);
 
         // Prime the company-default rate chokepoint (Rate-card Phase B). On an
         // EMPTY result (unseeded DB / template-name mismatch) leave it unprimed:
