@@ -1,6 +1,7 @@
 # STEP 2/3 Review Gate at Import — Plan of Record
-_2026-06-10 · status: PHASE 1 DONE (`e8aa586`, suite 514/51) · Phases 2–3 pending
-(Phase 2 kickoff: docs/handoffs/import-step23-review-gate-phase-2-kickoff.md)_
+_2026-06-10 · status: PHASES 1–2 DONE (P1 `e8aa586` · P2 `3c647e7`, table applied
+live, suite 533/52) · Phase 3 pending
+(Phase 3 kickoff: docs/handoffs/import-step23-review-gate-phase-3-kickoff.md)_
 
 ## Goal
 When an estimator imports a past bid, the GC/Site-Ops (STEP 2/3) lines get the same

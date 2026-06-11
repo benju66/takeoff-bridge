@@ -1,5 +1,9 @@
 # Kickoff — STEP 2/3 Review Gate, Phase 2 (custom code defs: DDL ⛔ + db layer + resolver overlay)
 
+> **STATUS: EXECUTED 2026-06-10 — Phase 2 is DONE (commit `3c647e7`, table applied
+> live, suite 533/52). Do not re-run this prompt. Next session uses
+> `docs/handoffs/import-step23-review-gate-phase-3-kickoff.md`.**
+
 > Paste the prompt at the bottom as the first message of a fresh session. Workflow per
 > [[feedback-one-phase-per-fresh-session]]. Plan of record (all forks locked):
 > `docs/plans/import-step23-review-gate.md`. Do NOT chain into Phase 3 or roadmap items 2–5.
