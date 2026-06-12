@@ -20,14 +20,28 @@ estimate codes — but that workstream is out of scope here.
   history, no calibration factor. This plan only builds the Procore master list
   that future work will join against.
 - **Correcting the 67 estimate-side type mismatches.** This plan *surfaces* them
-  as an advisory; fixing the estimate catalog's `costType` values is a separate
-  data-correction effort.
+  as an advisory; fixing the estimate catalog's `costType` values belongs to the
+  follow-on reconciliation workstream (below).
 - **Extending the estimate-side type vocabulary to include Equipment.** Noted as
-  a known gap; not changed here.
+  a known gap; deferred to the follow-on reconciliation workstream.
+- **Cleaning the estimate template.** Removing the 7 dead codes from the
+  template's Importer Data Fields (so it stops emitting the 224) is the
+  golden-sensitive change and is deliberately NOT done here — it goes in the
+  follow-on workstream so it never shares a phase with the oracle flip.
 - **Inline single-code editing on the new page.** First version is
   import / export / view only. Add/edit/retire-one-code without re-importing is
   deferred.
 - **Procore API integration.** Sync is via spreadsheet import; no live API.
+
+### Follow-on workstreams (separate plans, in order)
+1. **This plan** — managed Procore list + oracle flip (drift = warn interim).
+2. **Template + Catalog Reconciliation** (the next `/plan-phases`): drive the
+   drift to zero at the source — remove the 7 dead codes from the template's
+   Importer Data Fields, correct the **67** type mismatches, repoint the **8**
+   missing-base mappings, add the **Equipment** type to the estimate side,
+   optionally split the **25** many-to-one catch-alls. This plan builds the
+   type-aware tool that workstream uses.
+3. **Actuals cost-history** — the original goal; only trustworthy after #2.
 
 ## Locked decisions
 - **New DB table is the source of truth.** A new `procore_cost_codes` table holds
@@ -38,12 +52,27 @@ estimate codes — but that workstream is out of scope here.
   (224 codes, no type, template-synced via `npm run sync-codes`) stops being the
   source of truth and becomes a cross-check against the DB. _Why: one
   authoritative list, type-aware, not silently regenerated from the template._
-- **The 7 dropped codes are resolved per-code, from a report — not auto-deleted.**
-  The new list is a strict subset of the old (217 ⊂ 224, 0 added, 0 description
-  conflicts). Phase 1 produces a reconciliation report of exactly what references
-  each of the 7; the architect decides each. _Why: at least `2-20000.000 Site
-  Operations` and `1-10440.000 General Labor` are live rollup/mapping targets —
-  blind deletion would break the $0.00 export golden._
+- **The 217 file is the COMPLETE, authoritative Procore universe** → "not in the
+  file = retire" is the correct rule. _Architect-confirmed 2026-06-12._
+- **All 7 dropped codes retire — confirmed by the Phase 1 report, all are
+  export-safe.** The Phase 1 reconciliation found all 6 of the "unused" codes have
+  **zero** references (incl. `1-10440.000 General Labor`, which the plan had
+  wrongly assumed was live). The 7th, **`2-20000.000 Site Operations`**, is also
+  export-safe: its 8 estimate mappings (`02-0000.001`…`02-9500.008`) are ALL
+  `LINKED_DIVISION_ROWS` (display-only totals) that the export already **excludes**
+  — the dollars travel on the granular STEP 3 Site Ops lines, which carry their
+  own valid Procore codes. So **no repoint to "successors" is needed**; Phase 4
+  just tombstones it and exempts linked-division rows from the validity rule.
+  _Refined 2026-06-12 via `LINKED_DIVISION_ROWS` + the export's
+  `isLinkedDivisionRow` skip._
+- **Ongoing import behavior: flag, never auto-retire.** When a re-imported file is
+  missing a code that's in the DB, it is shown as a *proposed* retirement for
+  confirmation — never auto-tombstoned. _Why: a partial/bad export file must not
+  silently nuke live codes._
+- **Drift after the flip is a WARN (interim).** The template still emits the 224,
+  so the drift check reports the 7-code delta as a known accepted delta and stays
+  green. The delta is eliminated at the source by follow-on workstream #2 — not by
+  editing the template in this plan.
 - **The oracle flip happens late, after reconciliation.** The table is built and
   managed first; export/mapping validation switches from JSON to DB only in the
   final phase. _Why: keep the golden-touching change isolated and last._
@@ -98,7 +127,8 @@ estimate codes — but that workstream is out of scope here.
     by type, search code/description), with KPI counts per type.
   - **Import**: upload the xlsx (reuse `src/lib/xlsx-reader.ts`), validate the
     3-column shape, preview a diff (added / removed / changed vs current table),
-    then apply on confirm.
+    then apply on confirm. Codes in the DB but **missing from the file are shown as
+    *proposed retirements* — never auto-tombstoned** (architect-locked rule).
   - **Export**: download the current table as the same 3-column xlsx (reuse
     `src/lib/exportUtils.ts`).
   - Nav entry alongside the other admin pages.
@@ -118,6 +148,11 @@ estimate codes — but that workstream is out of scope here.
     advisory panel/badges on `/cost-codes`: "estimate code says X, Procore says Y."
     Read-only, no auto-fix.
   - Show each Procore code's **type** in the mapping UI.
+  - **Bring the granular Site Ops Procore codes under validation.** The STEP 3
+    Site Ops lines hard-code their `procoreCode` in `constants.ts`
+    (`SITE_OPS_MANUAL_DEFAULTS`, ~72 refs) and currently bypass `cost_code_map` /
+    the oracle entirely — valid today but unguarded. Add them to the drift check
+    against `procore_cost_codes` so a bad hand-edit is caught.
 - **Approval gates:** none (additive, no DDL, no oracle change).
 - **Exit criteria:** `npm run test` green · `tsc` clean · mismatch advisory
   visible and accurate against the measured 67/8 · export still validates against
@@ -125,27 +160,46 @@ estimate codes — but that workstream is out of scope here.
 
 ### Phase 4 — Cutover (resolve the 7, flip the oracle)
 - **Scope:**
-  - Apply the architect's per-code decisions from the Phase 1 report: repoint any
-    `cost_code_map` rows off a retiring code (via existing
-    `updateCostCodeMapping`) and/or tombstone the code in `procore_cost_codes`.
+  - **Tombstone `2-20000.000` — no repoint needed.** Confirmed: all 8 estimate
+    codes mapping to it (`02-0000.001`…`02-9500.008`) are `LINKED_DIVISION_ROWS`
+    (display-only totals) that the Procore export already **excludes**
+    (`isLinkedDivisionRow` → skip; their dollars travel on the granular STEP 3
+    Site Ops lines). So retiring `2-20000.000` moves **zero** export dollars. The
+    fix is to **exempt linked-division rows from the `/cost-codes` Procore-code
+    validity rule** (extend the existing `isLinkedDivisionRow` exemption to
+    validation) so a retired `2-20000.000` doesn't flag them. Do NOT invent
+    granular successors for these summaries.
+  - **Tombstone the other 6 dropped codes** once the Phase 1 sweep confirms no
+    live mapping/line-item references them (the Phase 1 reconciliation report
+    already found all 6 unreferenced, incl. `1-10440.000`).
   - **Flip the export/mapping validation oracle** from
     `src/lib/procore-valid-codes.json` to `procore_cost_codes` (type-aware).
   - **Demote `sync-codes` / the JSON** to a drift check: repurpose
-    `src/__tests__/procore-valid-codes-sync.test.ts` to assert the DB list and the
-    JSON agree (or flag drift), rather than the JSON being canonical.
-  - Re-run the export golden and prove **$0.00**.
-- **Approval gates:** ⛔ **Oracle flip + golden** — this is the golden-touching
-  change; run the export golden and confirm $0.00 before commit. ⛔ Confirm the
-  per-code resolution of the 7 with the architect before applying repoints/
-  tombstones. No new DDL (lifecycle columns already exist from Phase 1).
-- **Exit criteria:** `npm run test` green · `tsc` clean · export golden ties
-  $0.00 · DB is the validation oracle · drift check passes · committed · handoff
-  written (and note the actuals workstream as the natural next plan).
+    `src/__tests__/procore-valid-codes-sync.test.ts` to report the known 7-code
+    template delta as an **accepted WARN** (stay green), rather than the JSON
+    being canonical. (Eliminating the delta at the source = follow-on workstream
+    #2, not here.)
+  - Re-run **both** goldens and prove **$0.00** as a sanity check — STEP 4 McKenna
+    **and** the GC/Site-Ops (STEP 2/3) export. (Expectation: neither moves, since
+    the retired code never exported; the run is to *prove* that, not to fix a
+    shift.)
+- **Approval gates:** ⛔ **Oracle flip + goldens** — golden-touching; confirm
+  $0.00 on STEP 4 *and* GC/Site-Ops before commit. ⛔ Confirm the 7 tombstones +
+  the linked-division validation exemption with the architect before applying. No
+  new DDL (lifecycle columns already exist from Phase 1).
+- **Exit criteria:** `npm run test` green · `tsc` clean · both goldens tie $0.00 ·
+  DB is the validation oracle · drift check green (warn-only on the known delta) ·
+  committed · handoff written (point to the Template + Catalog Reconciliation plan
+  as the natural next workstream).
 
-## Risks & unknowns
-- **A dropped code is a live rollup target.** Confirmed for at least
-  `2-20000.000` / `1-10440.000`. Phase 1's report is what de-risks this; Phase 4
-  must repoint before retiring or the golden breaks. _Found in: Phase 1._
+- **`2-20000.000` retirement is export-safe (resolved 2026-06-12).** All 8 estimate
+  codes mapping to it are linked-division display rows the export already excludes,
+  so no dollars move. The only real work is exempting linked-division rows from the
+  validation rule. No granular-successor repoint needed. _Confirmed via
+  `LINKED_DIVISION_ROWS` + the export's `isLinkedDivisionRow` skip._
+- **Two separate Procore-code reference sets.** `cost_code_map` (STEP 4, validated)
+  and `constants.ts` Site Ops (STEP 3, currently unvalidated). The flip must cover
+  both or the Site Ops codes silently escape the new oracle. _Addressed in Phase 3._
 - **Lifecycle/tombstone shape.** The exact column design should mirror Catalog
   Manager so the later actuals workstream and historical mappings behave
   consistently. _Settled in: Phase 1 DDL (gated)._

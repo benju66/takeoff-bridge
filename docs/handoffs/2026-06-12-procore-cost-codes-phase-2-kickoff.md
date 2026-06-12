@@ -41,15 +41,19 @@ still the live export-validation oracle. Reconciliation report committed. Suite
   4 phases, locked decisions, out-of-scope list. Phase 2 section is the spec.
 - **Reconciliation report (Phase 1 deliverable, for Phase 4):**
   `docs/plans/2026-06-12-procore-cost-codes-reconciliation.md`. Headline the
-  architect must decide in Phase 4: **only `2-20000.000` Site Operations is a
-  live export target** (8 `cost_code_map` mappings — the Division-02 codes
-  `02-0000.001`…`02-9500.008` — plus 8 saved `estimate_line_items` rows). It
-  MUST be repointed (via `updateCostCodeMapping`) before retiring, or the export
-  golden breaks. The other 6 dropped codes have ZERO references and are safe
-  retire candidates — INCLUDING `1-10440.000 General Labor`, which the plan had
-  assumed was live but the data disproves (the report carries an explicit
-  correction callout). `11-110000.000 Equipment` is a display-only
-  `procoreParentCode` for 7 Division-11 rows, not an export destination.
+  architect must decide in Phase 4: all 7 dropped codes are **export-safe**. The
+  8 `cost_code_map` mappings on `2-20000.000` (Division-02 codes
+  `02-0000.001`…`02-9500.008`) were initially flagged as live, but a later refine
+  (2026-06-12) confirmed **all 8 are `LINKED_DIVISION_ROWS`** that the Procore
+  export already EXCLUDES (`isLinkedDivisionRow` skip) — their dollars travel on
+  the granular STEP 3 Site Ops lines, which carry their own valid Procore codes.
+  So **`2-20000.000` needs NO repoint** — Phase 4 just tombstones it and exempts
+  linked-division rows from the `/cost-codes` validity rule. The other 6 dropped
+  codes have ZERO references — INCLUDING `1-10440.000 General Labor`, which the
+  plan had assumed was live but the data disproves. `11-110000.000 Equipment` is a
+  display-only `procoreParentCode` for 7 Division-11 rows, not an export
+  destination. (See the plan's refined Phase 4 + Risks sections for the
+  authoritative version.)
 - **Table shape (`supabase_schema.sql` Table 17):** `code` PK (CHECK non-empty,
   NO regex — Procore shape varies: `N-NNNNN.000` / `NN-NNNNNN.000`, different
   from the estimate-side `NN-NNNN.NNN`), `type` CHECK
