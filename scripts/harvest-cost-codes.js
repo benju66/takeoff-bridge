@@ -1,4 +1,14 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+//
+// ROLE CHANGED (Procore Cost Codes workstream, Phase 4 cutover):
+// The validation oracle for valid Procore codes is now the `procore_cost_codes`
+// DB table (see AGENTS.md > "Procore Cost Code Authority"), NOT the JSON this
+// script emits. `procore-valid-codes.json` is retained only as a cold-start
+// fallback and the drift-check baseline (procore-valid-codes-sync.test.ts).
+// Re-running this regenerates that baseline from the template's Importer Data
+// Fields sheet — it does NOT change which codes are valid. To add/retire a
+// Procore code, update the table via /procore-codes.
+//
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const path = require('path');
