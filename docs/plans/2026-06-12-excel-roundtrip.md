@@ -1,6 +1,6 @@
 # Excel Round-Trip — Plan of Record
-_2026-06-12 · status: ACTIVE — Phases 1–4 SHIPPED 2026-06-12; next: Phase 5
-(see `docs/handoffs/2026-06-12-excel-roundtrip-phase-5-kickoff.md`)_
+_2026-06-12 · status: ACTIVE — Phases 1–5 SHIPPED 2026-06-12; next: Phase 6
+(see `docs/handoffs/2026-06-12-excel-roundtrip-phase-6-kickoff.md`)_
 
 ## Context
 
