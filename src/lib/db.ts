@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -2332,4 +2332,53 @@ export async function updateCatalogAddition(input: {
     throw new Error(`Failed to update catalog code ${itemId}: ${error?.message ?? "no row returned"}`);
   }
   return mapCatalogAdditionRow(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Procore cost codes master list (Procore Cost Codes — Phase 1)
+// ═══════════════════════════════════════════════════════════════════
+//
+// The company's authoritative Procore cost-code master list (procore_cost_codes
+// table): (code, type, description) + lifecycle (status/mergedInto). The
+// type-aware source of truth for "what Procore codes exist" and the join spine
+// for the later actuals/final-cost workstream.
+//
+// UNWIRED in Phase 1: this read function exists but NO consumer flips to it yet —
+// src/lib/procore-valid-codes.json stays the live export-validation oracle until
+// Phase 4. Added now so Phase 2 (the /procore-codes page) and Phase 3 (type-aware
+// /cost-codes) have the read surface ready.
+
+const PROCORE_COST_CODE_COLUMNS = "code, type, description, status, merged_into";
+
+function mapProcoreCostCodeRow(row: Record<string, unknown>): ProcoreCostCode {
+  return {
+    code: row.code as string,
+    type: row.type as ProcoreCostCode["type"],
+    description: row.description as string,
+    // status is NOT NULL DEFAULT 'active'; the ?? is a safety net for narrower projections.
+    status: (row.status as ProcoreCostCode["status"]) ?? "active",
+    mergedInto: (row.merged_into as string | null) ?? null,
+  };
+}
+
+/**
+ * The full Procore cost-code master list (procore_cost_codes table), ordered by
+ * code — every row including retired/merged ones, so the management page and the
+ * Phase 4 reconciliation can show lifecycle state. Consumers that want only the
+ * live list filter on `status === 'active'`. Throws on error (consistent with
+ * getCatalogAdditions / getCostCodeMap); callers that must degrade gracefully wrap
+ * with `.catch(() => [])` at the call site.
+ */
+export async function getProcoreCostCodes(): Promise<ProcoreCostCode[]> {
+  const { data, error } = await supabase
+    .from("procore_cost_codes")
+    .select(PROCORE_COST_CODE_COLUMNS)
+    .order("code", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch Procore cost codes:", error);
+    throw new Error(`Failed to fetch Procore cost codes: ${error.message}`);
+  }
+
+  return (data || []).map(mapProcoreCostCodeRow);
 }

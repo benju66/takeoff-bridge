@@ -1441,3 +1441,148 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ─────────────────────────────────────────────────
+-- Table 17: procore_cost_codes (Procore Cost Codes master list — Phase 1)
+-- ─────────────────────────────────────────────────
+--
+-- The company's authoritative Procore cost-code master list: (code, type,
+-- description) for all 217 codes exported from Procore. Becomes the type-aware
+-- source of truth for "what Procore codes exist" — the join spine for the later
+-- actuals/final-cost workstream. The hard-coded src/lib/procore-valid-codes.json
+-- (224 codes, no type) is DEMOTED to a drift check in Phase 4; this phase only
+-- builds + seeds the table (JSON stays the live export-validation oracle, and no
+-- consumer reads this table yet — getProcoreCostCodes() is added unwired).
+--
+-- code: the Procore cost code (e.g. '1-10000.000', '11-110000.000'). Procore's
+-- shape varies (N-NNNNN.000 / NN-NNNNNN.000) and differs from the estimate-side
+-- NN-NNNN.NNN catalog shape — so NO regex CHECK (non-empty only), mirroring the
+-- catalog_additions.procore_code precedent.
+--
+-- type: Procore's classification — Labor / Material / Subcontract / Equipment.
+-- Equipment has no estimate-side counterpart (the estimate catalog carries L/M/S);
+-- the Phase 3 advisory surfaces that gap. Seed split (217): Material 98,
+-- Subcontract 110, Labor 8, Equipment 1.
+--
+-- LIFECYCLE (tombstone/redirect — MIRRORS custom_step23_line_defs Phase 2): a
+-- code's row is NEVER deleted. It transitions active → retired (a code Procore no
+-- longer uses; stays for the historical join) or active → merged (redirects to a
+-- WINNER named by merged_into). merged_into carries no FK (a winner is just
+-- another code string) and no regex (Procore shape varies); the guard trigger +
+-- consistency CHECK are the backstop. The 7 codes in the JSON oracle but not in
+-- this list (Phase 1 reconciliation report, docs/plans/2026-06-12-procore-cost-
+-- codes-reconciliation.md) are resolved per-code in Phase 4 — retired or merged,
+-- never blind-deleted (2-20000.000 Site Operations is a LIVE rollup target: 8
+-- cost_code_map rows + 8 saved line items point at it).
+
+CREATE TABLE procore_cost_codes (
+  code        TEXT PRIMARY KEY
+              CHECK (btrim(code) <> ''),
+  type        TEXT NOT NULL
+              CHECK (type IN ('Labor', 'Material', 'Subcontract', 'Equipment')),
+  description TEXT NOT NULL
+              CHECK (btrim(description) <> ''),
+  status      TEXT NOT NULL DEFAULT 'active'
+              CHECK (status IN ('active', 'retired', 'merged')),
+  merged_into TEXT,  -- redirect target; no FK (winner is any code string), no regex (Procore shape varies)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- merged ⇔ merged_into consistency (declarative backstop; the guard trigger
+  -- raises the clean message first on UPDATE — this also guards direct INSERTs).
+  CONSTRAINT procore_cost_codes_merge_consistency CHECK (
+    (status = 'merged' AND merged_into IS NOT NULL AND merged_into <> code)
+    OR (status <> 'merged' AND merged_into IS NULL)
+  )
+);
+
+ALTER TABLE procore_cost_codes ENABLE ROW LEVEL SECURITY;
+
+-- Read: corporate data, consistent with cost_code_map / rate_card / catalog_additions.
+CREATE POLICY "procore_cost_codes_select_policy" ON procore_cost_codes
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Write: INSERT (Phase 2 spreadsheet import-apply) + UPDATE (Phase 4 lifecycle:
+-- retire/merge). db.ts validates shape before the write; the CHECK constraints +
+-- lifecycle guard trigger are the server-side backstop. No DELETE policy → a
+-- code's row is never removed (retire/merge are tombstones/redirects). Adds the
+-- two expected rls_policy_always_true advisor WARNs (INSERT WITH CHECK true; UPDATE
+-- USING/WITH CHECK true), mirroring the catalog_additions / cost_code_map /
+-- rate_card / custom_step23_line_defs precedent — carries the same consolidated
+-- "move writes server-side (service-role only)" follow-up. Both write policies are
+-- added now so Phases 2 & 4 need no DDL.
+CREATE POLICY "procore_cost_codes_insert_policy" ON procore_cost_codes
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+CREATE POLICY "procore_cost_codes_update_policy" ON procore_cost_codes
+  FOR UPDATE
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
+-- Lifecycle guard (BEFORE UPDATE): mirrors custom_step23_line_defs_lifecycle_guard.
+-- code (PK) is immutable; only an active code may transition, and only to
+-- retired/merged; merged ⇔ non-self merged_into. SET search_path = '' pins schema
+-- resolution (only pg_catalog built-ins referenced) — keeps the security advisor
+-- clean (no function_search_path_mutable). SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION procore_cost_codes_lifecycle_guard()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.code <> OLD.code THEN
+    RAISE EXCEPTION 'Procore code is immutable (% cannot become %).', OLD.code, NEW.code;
+  END IF;
+
+  IF NEW.status <> OLD.status THEN
+    IF OLD.status <> 'active' THEN
+      RAISE EXCEPTION 'Code % is %; only active codes can be retired or merged.', OLD.code, OLD.status;
+    END IF;
+    IF NEW.status NOT IN ('retired', 'merged') THEN
+      RAISE EXCEPTION 'Cannot transition % to "%".', OLD.code, NEW.status;
+    END IF;
+  END IF;
+
+  IF NEW.status = 'merged' THEN
+    IF NEW.merged_into IS NULL OR btrim(NEW.merged_into) = '' THEN
+      RAISE EXCEPTION 'A merged code requires a winning code.';
+    END IF;
+    IF NEW.merged_into = NEW.code THEN
+      RAISE EXCEPTION 'A code cannot be merged into itself.';
+    END IF;
+  ELSIF NEW.merged_into IS NOT NULL THEN
+    RAISE EXCEPTION 'A non-merged code carries no merge target.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- updated_at touch (BEFORE UPDATE), mirroring the custom_step23_line_defs pattern.
+-- SET search_path = '' pins schema resolution. SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION touch_procore_cost_codes_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger names fire alphabetically: _lifecycle_guard_trg < _touch_updated_at_trg
+-- (guard validates, then updated_at is stamped) — mirrors custom_step23_line_defs.
+CREATE TRIGGER procore_cost_codes_lifecycle_guard_trg
+  BEFORE UPDATE ON procore_cost_codes
+  FOR EACH ROW
+  EXECUTE FUNCTION procore_cost_codes_lifecycle_guard();
+
+CREATE TRIGGER procore_cost_codes_touch_updated_at_trg
+  BEFORE UPDATE ON procore_cost_codes
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_procore_cost_codes_updated_at();
