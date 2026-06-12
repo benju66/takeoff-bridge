@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Trash, MessageSquare } from "lucide-react";
 import {
   useReactTable,
@@ -14,7 +14,7 @@ import {
 } from "@tanstack/react-table";
 import { getCatalogItems } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap, ApplyRoundTripCommand, RoundTripDialChanges } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
@@ -120,6 +120,10 @@ export interface UseTakeoffWorkbookReturn {
   handleExportExcelWorkbook: (overrideRows?: ProcessedTakeoffRow[]) => Promise<void>;
   handleUndo: () => void;
   handleRedo: () => void;
+  /** Round-trip Phase 5: pushes + applies one confirmed Excel re-upload as a
+   *  single undoable command (rows + dials). The Phase 6 confirm flow calls
+   *  this with the planner's output (src/lib/applyRoundTrip.ts). */
+  applyRoundTripCommand: (cmd: ApplyRoundTripCommand) => void;
 
   // Import modal
   pendingImport: PendingImport | null;
@@ -138,7 +142,10 @@ export function useTakeoffWorkbook(
   siteOpsCalcResult: SiteOpsCalcResult,
   // Phase 5 (INV-1): active estimator overrides, forwarded to the export handlers
   // so exported numbers match the on-screen/saved summary. `{}` = inert.
-  activeOverrides: EstimateOverrideMap = {}
+  activeOverrides: EstimateOverrideMap = {},
+  // Round-trip Phase 5: page-level applier for APPLY_ROUNDTRIP dial halves
+  // (personnel/infrastructure/project state lives above this hook).
+  applyDialChanges?: (changes: RoundTripDialChanges, direction: "forward" | "inverse") => void
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -286,13 +293,22 @@ export function useTakeoffWorkbook(
   };
 
   const {
+    applyCommandForward,
     handleUndo, handleRedo,
   } = useCommandDispatch(
     commandHistory, projectId,
     setRows, setUserRegistry, setGlobalRegistry,
     setColumnDefs, setLockedCells, setUnmappedTakeoffClassifications,
     globalRegistry,
+    applyDialChanges,
   );
+
+  // Round-trip Phase 5: one confirmed re-upload = one undoable unit.
+  const applyRoundTripCommand = useCallback((cmd: ApplyRoundTripCommand) => {
+    // pushCommand BEFORE state mutation (AGENTS.md guardrail)
+    commandHistory.pushCommand(cmd);
+    applyCommandForward(cmd);
+  }, [commandHistory, applyCommandForward]);
 
   // ---------------------------------------------------------------------------
   // Context menu outside-click dismiss
@@ -1410,5 +1426,6 @@ export function useTakeoffWorkbook(
     handleExportExcelWorkbook,
     handleUndo,
     handleRedo,
+    applyRoundTripCommand,
   };
 }

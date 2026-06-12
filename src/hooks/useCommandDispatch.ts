@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useCallback } from "react";
-import { ProcessedTakeoffRow, ColumnDefinition, WorkbookCommand } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, WorkbookCommand, RoundTripDialChanges } from "@/types";
 import { UseCommandHistoryReturn } from "./useCommandHistory";
 import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { applyMergeForward, applyMergeInverse } from "@/lib/mergeTakeoff";
+import { applyRoundTripRowsForward, applyRoundTripRowsInverse } from "@/lib/applyRoundTrip";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -32,6 +33,14 @@ export function useCommandDispatch(
   setLockedCells: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
   setUnmappedTakeoffClassifications: React.Dispatch<React.SetStateAction<string[]>>,
   globalRegistry: Record<string, string>,
+  /**
+   * Round-trip Phase 5: applies an APPLY_ROUNDTRIP command's dial half onto
+   * the page-level personnel/infrastructure/project state ("forward" = next
+   * values, "inverse" = prev values). Threaded down from page.tsx where those
+   * hooks live; optional so non-workspace consumers are unaffected. Without
+   * it an APPLY_ROUNDTRIP command still applies its row half.
+   */
+  applyDialChanges?: (changes: RoundTripDialChanges, direction: "forward" | "inverse") => void,
 ): UseCommandDispatchReturn {
 
   // ---------------------------------------------------------------------------
@@ -190,8 +199,15 @@ export function useCommandDispatch(
         setUnmappedTakeoffClassifications(cmd.nextUnmapped);
         break;
       }
+      case "APPLY_ROUNDTRIP": {
+        // One confirmed Excel re-upload: row half (pure — applyRoundTrip.ts)
+        // + dial half via the page-level applier. Same command, one redo.
+        setRows((prev) => applyRoundTripRowsForward(prev, cmd));
+        applyDialChanges?.(cmd.dialChanges, "forward");
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, applyDialChanges]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -373,8 +389,15 @@ export function useCommandDispatch(
         setUnmappedTakeoffClassifications(cmd.prevUnmapped);
         break;
       }
+      case "APPLY_ROUNDTRIP": {
+        // One Ctrl+Z reverses the WHOLE upload: row half restored (pure) +
+        // every dial back to its prev value (AGENTS.md compounding-history).
+        setRows((prev) => applyRoundTripRowsInverse(prev, cmd));
+        applyDialChanges?.(cmd.dialChanges, "inverse");
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, applyDialChanges]);
 
   // ---------------------------------------------------------------------------
   // handleUndo — Pop from undo stack and apply inverse

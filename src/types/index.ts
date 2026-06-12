@@ -267,6 +267,52 @@ export interface DeleteRowCommand {
   rowData: ProcessedTakeoffRow;
 }
 
+/**
+ * Dial-level prev/next pairs an Excel re-upload applies (round-trip Phase 5).
+ * Every record is keyed by the APP-side input key (not workbook cells): the
+ * planner (src/lib/applyRoundTrip.ts) resolves cell deltas to these; the
+ * page-level applier maps them onto the personnel/infrastructure/project
+ * setters. Direction symmetry: forward applies `next`, inverse applies `prev`.
+ */
+export interface RoundTripDialChanges {
+  /** StaffRoleConfig.key → utilization PERCENT (0–100, the hook's unit) */
+  utilizations?: Record<string, { prev: number; next: number }>;
+  /** StaffRoleConfig.key → $/hr override; prev null = corporate default was active */
+  rateOverrides?: Record<string, { prev: number | null; next: number }>;
+  /** Lump-sum dollar totals for the GC equipment trio */
+  equipment?: Partial<Record<"dumpsters" | "toilets" | "electric", { prev: number; next: number }>>;
+  /** GcManualConfig.key → typed qty or lump-sum dollars */
+  gcManualEntries?: Record<string, { prev: number; next: number }>;
+  /** SiteOpsManualConfig.key → typed qty or lump-sum dollars */
+  siteOpsQuantities?: Record<string, { prev: number; next: number }>;
+  /** "qtyRate" line key (soil borings) → typed rate */
+  siteOpsRates?: Record<string, { prev: number; next: number }>;
+  /** Project fields: squareFootage, unitCount, expectedFinish (duration
+   *  reverse-map — locked decision 7), and the 7 modifier `*Rate` columns. */
+  projectFields?: Partial<Record<string, { prev: string | number; next: string | number }>>;
+}
+
+/**
+ * One confirmed Excel re-upload applied as a SINGLE undoable unit (round-trip
+ * Phase 5): row diffs + appended/removed rows (mirrors MERGE_TAKEOFF_DATA)
+ * PLUS the dial changes. One Ctrl+Z reverses the whole upload atomically
+ * (AGENTS.md compounding-history).
+ */
+export interface ApplyRoundTripCommand {
+  type: "APPLY_ROUNDTRIP";
+  prevRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }>;
+  nextRowStates: Array<{ rowId: string; fields: Partial<ProcessedTakeoffRow> }>;
+  /** Rows born in Excel, appended into their division block. */
+  appendedRows?: ProcessedTakeoffRow[];
+  /** Grid rows the Excel file no longer carries — removed on apply,
+   *  re-added at their ORIGINAL grid index on undo (sort-order integrity:
+   *  undo must restore manual row positions exactly). */
+  removedRows?: Array<{ row: ProcessedTakeoffRow; index: number }>;
+  dialChanges: RoundTripDialChanges;
+  /** Workbook filename / exportedAt for version titling + audit. */
+  sourceLabel: string;
+}
+
 export interface UpdateColumnCommand {
   type: "UPDATE_COLUMN";
   columnId: string;
@@ -284,6 +330,7 @@ export type WorkbookCommand =
   | AddColumnCommand
   | ToggleCellLockCommand
   | MergeTakeoffDataCommand
+  | ApplyRoundTripCommand
   | UpdateColumnCommand;
 
 export interface GridSelectionState {
