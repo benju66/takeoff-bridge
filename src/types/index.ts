@@ -15,7 +15,7 @@ export interface InternalEstimateItem {
   description: string;
   targetUom: string;       // e.g., "SF", "FT", "EA"
   defaultUnitPrice: number;
-  costType: string;        // e.g., "M" (Materials), "S" (Subcontract), "L" (Labor)
+  costType: string;        // "M" (Materials), "S" (Subcontract), "L" (Labor), "E" (Equipment)
 }
 
 export interface ProcessedTakeoffRow {

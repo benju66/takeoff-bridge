@@ -61,13 +61,14 @@ function catalogMappings(): MappingForReconciliation[] {
 }
 
 describe("estimateCostTypeToProcore", () => {
-  it("maps the L/M/S vocabulary and rejects everything else", () => {
+  it("maps the L/M/S/E vocabulary and rejects everything else", () => {
     expect(estimateCostTypeToProcore("L")).toBe("Labor");
     expect(estimateCostTypeToProcore("M")).toBe("Material");
     expect(estimateCostTypeToProcore("S")).toBe("Subcontract");
     expect(estimateCostTypeToProcore(" s ")).toBe("Subcontract"); // trimmed/cased
-    expect(estimateCostTypeToProcore("E")).toBeNull();
-    expect(estimateCostTypeToProcore("Equipment")).toBeNull();
+    expect(estimateCostTypeToProcore("E")).toBe("Equipment"); // reconciliation Phase 1
+    expect(estimateCostTypeToProcore("Equipment")).toBeNull(); // letters only, not full words
+    expect(estimateCostTypeToProcore("X")).toBeNull();
     expect(estimateCostTypeToProcore("")).toBeNull();
   });
 });

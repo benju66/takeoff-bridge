@@ -2101,7 +2101,7 @@ export async function promoteCustomStep23LineDef(
 const CATALOG_ADDITION_COLUMNS =
   "item_id, description, target_uom, default_unit_price, cost_type, procore_code, status, source";
 
-const CATALOG_ADDITION_COST_TYPES = ["L", "M", "S"];
+const CATALOG_ADDITION_COST_TYPES = ["L", "M", "S", "E"];
 
 function mapCatalogAdditionRow(row: Record<string, unknown>): CatalogAddition {
   return {
@@ -2163,11 +2163,11 @@ function validateAdditionPrice(price: number): void {
   }
 }
 
-/** L/M/S guard shared by create + update (returns the uppercased value). */
+/** L/M/S/E guard shared by create + update (returns the uppercased value). */
 function normalizeAdditionCostType(input: string): string {
   const costType = input.trim().toUpperCase();
   if (!CATALOG_ADDITION_COST_TYPES.includes(costType)) {
-    throw new Error(`Invalid cost type "${input}": must be L (Labor), M (Materials), or S (Subcontract)`);
+    throw new Error(`Invalid cost type "${input}": must be L (Labor), M (Materials), S (Subcontract), or E (Equipment)`);
   }
   return costType;
 }

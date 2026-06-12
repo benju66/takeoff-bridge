@@ -303,7 +303,7 @@ export interface CatalogAddition {
   targetUom: string;
   /** Birth-time unit price (may be a negative deduction). */
   defaultUnitPrice: number;
-  /** Cost type: 'L' (Labor) | 'M' (Materials) | 'S' (Subcontract). */
+  /** Cost type: 'L' (Labor) | 'M' (Materials) | 'S' (Subcontract) | 'E' (Equipment). */
   costType: string;
   /** Granular Procore Budget Line Item — required at birth, validated against
    *  the Importer list (PROCORE_VALID_CODES) app-side. */
@@ -313,10 +313,10 @@ export interface CatalogAddition {
 }
 
 /**
- * Procore's classification of a cost code (procore_cost_codes table). Note
- * Equipment has NO estimate-side counterpart — the estimate catalog carries only
- * Labor/Materials/Subcontract (L/M/S); the type-aware mapping advisory (Phase 3)
- * surfaces that gap rather than resolving it.
+ * Procore's classification of a cost code (procore_cost_codes table). The
+ * estimate-side vocabulary mirrors all four as L/M/S/E (Equipment joined in the
+ * Template + Catalog Reconciliation workstream, Phase 1); the type-aware mapping
+ * advisory compares the two via ESTIMATE_TO_PROCORE_TYPE.
  */
 export type ProcoreCostCodeType = 'Labor' | 'Material' | 'Subcontract' | 'Equipment';
 

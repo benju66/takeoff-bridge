@@ -1155,7 +1155,7 @@ CREATE TABLE catalog_additions (
   target_uom         TEXT NOT NULL DEFAULT '',                  -- '' when the addition has none
   default_unit_price NUMERIC NOT NULL DEFAULT 0,                -- birth-time price (may be a negative deduction)
   cost_type          TEXT NOT NULL DEFAULT 'M'
-                     CHECK (cost_type IN ('L', 'M', 'S')),      -- Labor / Materials / Subcontract
+                     CHECK (cost_type IN ('L', 'M', 'S', 'E')), -- Labor / Materials / Subcontract / Equipment
   procore_code       TEXT NOT NULL                              -- names a valid Procore BLI at birth (app-validated
                      CHECK (btrim(procore_code) <> ''),         --   against the Importer list; shape varies, no regex)
   status             TEXT NOT NULL DEFAULT 'active'

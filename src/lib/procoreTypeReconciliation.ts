@@ -21,20 +21,20 @@ import type { ProcoreCostCodeType } from "@/types/db";
 import { isLinkedDivisionRow } from "@/lib/constants";
 
 /**
- * Estimate-side cost-type vocabulary (L/M/S) → Procore type. The estimate catalog
- * carries only Labor/Material/Subcontract; Procore additionally has **Equipment**,
- * which has NO estimate counterpart. That gap is intentional: an estimate code can
- * never *be* Equipment, so any estimate code mapped to an Equipment-typed Procore
- * base always reads as a mismatch here. Resolving the Equipment gap (extending the
- * estimate vocabulary) is deferred to the follow-on reconciliation workstream.
+ * Estimate-side cost-type vocabulary (L/M/S/E) → Procore type. Equipment joined
+ * the estimate vocabulary in the Template + Catalog Reconciliation workstream
+ * (Phase 1), closing the gap where an estimate code mapped to an Equipment-typed
+ * Procore base could never agree. No estimate data carries 'E' yet — the bulk
+ * type corrections that use it are the workstream's later phases.
  */
 export const ESTIMATE_TO_PROCORE_TYPE: Readonly<Record<string, ProcoreCostCodeType>> = {
   L: "Labor",
   M: "Material",
   S: "Subcontract",
+  E: "Equipment",
 };
 
-/** Map an estimate costType (L/M/S, case/space-insensitive) to a Procore type, or null. */
+/** Map an estimate costType (L/M/S/E, case/space-insensitive) to a Procore type, or null. */
 export function estimateCostTypeToProcore(costType: string): ProcoreCostCodeType | null {
   return ESTIMATE_TO_PROCORE_TYPE[(costType ?? "").trim().toUpperCase()] ?? null;
 }

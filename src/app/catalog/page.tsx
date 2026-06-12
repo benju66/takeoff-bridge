@@ -829,12 +829,14 @@ const COST_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "L", label: "Labor" },
   { value: "M", label: "Materials" },
   { value: "S", label: "Subcontract" },
+  { value: "E", label: "Equipment" },
 ];
 
 const COST_TYPE_LABELS: Record<string, string> = {
   L: "Labor",
   M: "Materials",
   S: "Subcontract",
+  E: "Equipment",
 };
 
 const additionCurrency = new Intl.NumberFormat("en-US", {
@@ -928,8 +930,8 @@ function Step4CatalogSection() {
     if (!Number.isFinite(price)) {
       return `"${draft.unitPrice}" is not a valid unit price — enter a finite number (a negative deduction is allowed).`;
     }
-    if (!["L", "M", "S"].includes(draft.costType)) {
-      return "Choose a cost type: Labor, Materials, or Subcontract.";
+    if (!["L", "M", "S", "E"].includes(draft.costType)) {
+      return "Choose a cost type: Labor, Materials, Subcontract, or Equipment.";
     }
 
     setBusyItemId(itemId);

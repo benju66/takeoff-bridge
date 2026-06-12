@@ -109,11 +109,26 @@ describe("createCatalogAddition", () => {
     expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it("rejects a cost type outside L/M/S WITHOUT touching the db", async () => {
+  it("rejects a cost type outside L/M/S/E WITHOUT touching the db", async () => {
     await expect(createCatalogAddition({ ...valid, costType: "X" })).rejects.toThrow(
-      /must be L \(Labor\), M \(Materials\), or S \(Subcontract\)/
+      /must be L \(Labor\), M \(Materials\), S \(Subcontract\), or E \(Equipment\)/
     );
     expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("accepts cost type E — Equipment (reconciliation Phase 1 vocabulary)", async () => {
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+    mockSingle.mockResolvedValueOnce({
+      data: { ...insertedRow, cost_type: "E" },
+      error: null,
+    });
+
+    const out = await createCatalogAddition({ ...valid, costType: " e " });
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ cost_type: "E" })
+    );
+    expect(out.costType).toBe("E");
   });
 
   it("rejects a non-finite unit price WITHOUT touching the db", async () => {
