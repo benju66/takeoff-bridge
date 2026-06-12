@@ -84,6 +84,32 @@ type) — NOT in the budget detail; must be captured (extends the existing `mark
   never blended. Plugs into the existing `PriceObservation` / `historyTrust.ts` pipeline
   with a new provenance tag.
 
+## Ingestion & matching (architect, 2026-06-12)
+Importing actuals to a **live estimated project** and adding actuals to an **imported past
+bid** are the SAME operation — attach a project's actuals to a `project_id`, keyed by
+Procore code. Design it once:
+- A new **actuals ingestion path** (parallel to the past-bids importer): upload a Budget
+  Detail export → parse per-code → store in a new actuals table tagged to `project_id`,
+  `actual` provenance. Attaches to ANY project (live submitted version OR imported past bid).
+- **Enrich imported past bids:** a past bid's estimate side may be rough/lump-sum, but its
+  actuals are clean (real Procore codes) — so the project still yields a trustworthy cost
+  record. The past-bids importer should allow attaching an actuals export.
+- **OPEN: project matching.** The sample Budget Detail has **no project identifier column**,
+  so linking an export to the right in-app project is likely manual (pick at upload) or via
+  Procore project ID / filename. Confirm what identifier is available.
+
+## Data strength / confidence layer (architect, 2026-06-12)
+As the pool mixes estimate-only, actual-backed, clean-vs-raw, and varying sample sizes,
+every reported number needs a **strength signal** so estimators know what they're trusting
+(extends the `historyTrust.ts` philosophy). Strength should factor:
+- **Actual-backed > estimate-only** (real actuals outweigh as-bid).
+- **Sample size & coverage** ("8 projects, 5 with actuals" > "1 estimate-only").
+- **CO-cleanliness** (CO-decomposed/normalized > raw).
+- **Recency**, **spread** (tight cluster = higher confidence), and **fidelity** (the existing
+  `discrete_unit` vs `macro_lump_sum` flag carries in).
+Surface as a tier/score on `/rates` and the concept-pricing views so a rock-solid `$/unit`
+reads differently from a single soft data point. This keeps the DB honest as it grows.
+
 ## App integration points (existing)
 - `procore_cost_codes` (workstream #1) = the join key/spine.
 - `getBidPriceHistory` / `aggregateTrustedHistory` (`historyTrust.ts`) = the read pipeline
@@ -94,9 +120,13 @@ type) — NOT in the budget detail; must be captured (extends the existing `mark
 ## Open inputs still needed before planning
 1. A sample **Procore change-order (CO) log export** (with Scope/Type/Reason).
 2. Where **project metrics** (total SF, # units, project type) live and how to capture them.
+3. What **project identifier** a Budget Detail export carries (for matching actuals → the
+   right in-app project), or confirm matching is manual at upload.
 
 ## Next step
 When workstream #2 is complete, run `/plan-phases` using THIS doc as the brief. Likely a
-multi-phase workstream: (P1) ingest + raw per-code actuals → (P2) CO decomposition / clean
-actuals → (P3) project metrics + parametric `$/SF` `$/unit` → (P4) optional derived unit
-rates + UI on `/rates`.
+multi-phase workstream: (P1) **actuals ingestion path** (attach Budget Detail → any project
+by Procore code, `actual` provenance) + raw per-code actuals → (P2) CO decomposition / clean
+actuals → (P3) project metrics + parametric `$/SF` `$/unit` → (P4) **strength/confidence
+layer** + UI on `/rates` (actual-backed vs estimate-only, coverage, CO-cleanliness) → (P5)
+optional derived unit rates. Attaching actuals to imported past bids reuses the P1 path.
