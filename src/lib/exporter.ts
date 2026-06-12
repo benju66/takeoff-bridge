@@ -1544,6 +1544,17 @@ export async function generateExcelWorkbook(
     linkedDivisionTotals.map((l) => [l.itemId, l.total])
   );
 
+  // PERMITS block (round-trip Phase 3, architect disposition 2026-06-12):
+  // three 01-* permit codes live INSIDE the Division-80 row block as a
+  // labeled PERMITS section, and 01-0230.001 (Building Permit) natively
+  // carries a LIVE col-H pull — 'STEP 1 - PROJECT DATA'!F48, the STEP 1
+  // permit-fee calculator the app does not model. Left alone, a recalc adds
+  // a phantom permit fee the app never counted. The grid's permit rows are
+  // therefore written onto their native rows as VALUES (post-loop pass
+  // below) and are never inserted as Division-01 overflow.
+  const PERMIT_HOME_CODES = new Set(["01-0230.001", "01-0250.001", "01-0260.001"]);
+  const permitGridRows = new Map<string, ProcessedTakeoffRow>();
+
   for (const div of divisions) {
     const headerRowIdx = div.headerRow + rowShift;
     const startRowIdx = div.startRow + rowShift;
@@ -1613,6 +1624,9 @@ export async function generateExcelWorkbook(
             setCellInlineString(cell, String(row.customFields?.[col.id] ?? ""));
           }
         }
+      } else if (PERMIT_HOME_CODES.has(code)) {
+        // Written onto the native PERMITS rows after the division loop
+        permitGridRows.set(code, row);
       } else {
         unmappedRows.push(row);
       }
@@ -1708,6 +1722,32 @@ export async function generateExcelWorkbook(
         setCellFormula(eCell, `SUM(I${startRowIdx}:I${endRowIdx})`);
       }
     }
+  }
+
+  // ── PHASE 2e½: PERMITS block writes (post-loop — all row shifts final) ─────
+  // Every permit home row is neutralized: grid values when the row exists in
+  // the grid, 0/0 otherwise — so the Building Permit live pull can never feed
+  // I331 a number the app didn't count.
+  for (const rowEl of getRowElements(sheetDataChildren)) {
+    const cellC = findCellInRow(rowEl, "C");
+    if (!cellC) continue;
+    const code = readCellText(cellC).trim();
+    if (!PERMIT_HOME_CODES.has(code)) continue;
+    const rowNum = getRowNum(rowEl);
+    const gridRow = permitGridRows.get(code);
+    // Ascending column order: D → F → G → H
+    if (gridRow) {
+      const dCell = getOrCreateCell(rowEl, "D", rowNum, getStyleFromRow(rowEl, "D"));
+      setCellInlineString(dCell, gridRow.description || "");
+    }
+    const fCell = getOrCreateCell(rowEl, "F", rowNum, getStyleFromRow(rowEl, "F"));
+    setCellValue(fCell, Number(gridRow?.matchedQty) || 0);
+    if (gridRow) {
+      const gCell = getOrCreateCell(rowEl, "G", rowNum, getStyleFromRow(rowEl, "G"));
+      setCellInlineString(gCell, gridRow.uom || "");
+    }
+    const hCell = getOrCreateCell(rowEl, "H", rowNum, getStyleFromRow(rowEl, "H"));
+    setCellValue(hCell, Number(gridRow?.unitPrice) || 0);
   }
 
   // ── PHASE 2f: Subtotal, Modifiers, Grand Total, Reconciliation ─────────────
