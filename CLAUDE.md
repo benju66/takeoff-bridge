@@ -7,6 +7,12 @@ with a structured web app that exports to Procore via template-mapped XLSX files
 Next.js 16 · React 19 · TypeScript · Supabase (Postgres + RLS) · TanStack Table ·
 ExcelJS · PapaParse · Vitest · Playwright
 
+## Shell & Encoding Rules
+- This is a Windows machine: always use the PowerShell tool (not Bash) for shell commands. Never mix PowerShell here-string syntax (`@'...'@`) inside the Bash tool.
+- Never use emoji in PowerShell scripts (cp1252 encoding mangles them).
+- Commit messages: write the message to a file and commit with `git commit -F <file>` to avoid quoting/encoding issues. Never put multi-line commit text inline in the shell.
+- For commands likely to exceed ~965 bytes, write a script file instead of inlining.
+
 ## Phased Workflow
 When implementing a multi-phase plan: implement the current phase, run tests until green, commit, and write handoff docs that sequence the next phase for a fresh session.
 
@@ -20,12 +26,6 @@ When implementing a multi-phase plan: implement the current phase, run tests unt
 
 ## Testing
 Always run the test suite after code changes and confirm green before committing.
-
-## Shell & Encoding Rules
-- This is a Windows environment: do NOT use emoji in PowerShell scripts (cp1252 mangles them) and do NOT mix PowerShell here-string syntax inside the Bash tool.
-- For commands likely to exceed ~965 bytes, write a script file instead of inlining.
-- Multi-line git commit messages: write the message to a temp file and commit with
-  `git commit -F <file>`. Never put multi-line commit text inline in the shell.
 
 ## Excel/XML Exports
 When generating or parsing spreadsheet XML, ensure cells are written in ascending column order to avoid corrupt files; double-check column-letter parsing.
