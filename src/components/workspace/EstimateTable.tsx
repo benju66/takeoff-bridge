@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, FileUp, ChevronDown, Search, Flag } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -138,6 +138,9 @@ interface EstimateTableProps {
   handleExportExcel: () => void;
   handleExportProcore: () => void;
   isExportingExcel: boolean;
+  /** Round-trip Phase 6: re-upload of an exported workbook (app-born projects
+   *  only — omit/undefined hides the entry entirely). */
+  onRoundTripUpload?: (file: File) => void;
 
   // Summary data
   takeoffSummary: TakeoffSummary;
@@ -216,6 +219,7 @@ export function EstimateTable({
   handleExportExcel,
   handleExportProcore,
   isExportingExcel,
+  onRoundTripUpload,
   takeoffSummary,
   divisionBreakdown,
   costTypeBreakdown,
@@ -554,6 +558,26 @@ export function EstimateTable({
         {/* Right: Export — primary full-workbook download + secondary formats menu */}
         {rows.length > 0 && (
           <div className="flex items-center gap-2 shrink-0">
+            {/* Round-trip Phase 6: re-upload an exported workbook's offline edits */}
+            {onRoundTripUpload && (
+              <label
+                title="Upload an exported estimate workbook (.xlsx) edited offline — preview the changes before they apply"
+                className="flex items-center gap-2 bg-card hover:bg-background/80 dark:bg-card dark:hover:bg-background/80 text-foreground border border-grid-border text-sm px-4 py-2.5 rounded-lg font-bold transition-all duration-300 shadow-sm cursor-pointer hover:shadow-md"
+              >
+                <FileUp size={16} className="text-emerald-600 dark:text-emerald-400" />
+                Upload Edits
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) onRoundTripUpload(file);
+                    e.target.value = ""; // re-selecting the same file re-triggers
+                  }}
+                />
+              </label>
+            )}
             <button
               onClick={() => handleExportExcelWorkbook()}
               disabled={unmappedCount > 0 || isExportingExcel}

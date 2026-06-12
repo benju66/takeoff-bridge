@@ -32,6 +32,8 @@ import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
+import { useRoundTripUpload } from "@/hooks/useRoundTripUpload";
+import type { RoundTripDialSnapshots } from "@/lib/applyRoundTrip";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
@@ -43,6 +45,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
 import { ExportOverrideModal } from "@/components/workspace/ExportOverrideModal";
 import { VersionsPanel } from "@/components/workspace/VersionsPanel";
+import { RoundTripUploadModal } from "@/components/workspace/RoundTripUploadModal";
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -131,8 +134,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         if (d) handleProjectParamChange(field as keyof Project, pick(d));
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps — handler identities are stable per render of the hooks
-    [personnel.setUtilization, personnel.handleRateChange, personnel.resetRate, personnel.handleEquipmentChange, personnel.handleManualEntryChange, infrastructure.handleLineQuantityChange, infrastructure.handleLineRateChange, handleProjectParamChange]
+    [personnel, infrastructure, handleProjectParamChange]
   );
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
@@ -151,6 +153,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     handleFileUpload, handleDrag, handleDrop,
     pendingImport, confirmImport, cancelImport, reParseWithSheet,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
+    applyRoundTripCommand,
     handleUndo, handleRedo,
     canUndo, canRedo, undoStackSize, redoStackSize,
     rowVersion,
@@ -228,6 +231,29 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       : takeoffSummary,
     [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, takeoffSummary]
   );
+
+  // Round-trip Phase 6: the Excel re-upload flow. Dial snapshots are the
+  // planner's `prev` values; versions/apply ride the FULL unfiltered state
+  // (same rule as VersionsPanel/the export gate).
+  const roundTripDials = React.useMemo<RoundTripDialSnapshots>(() => ({
+    utilizations: personnel.utilizations,
+    rateOverrides: personnel.rateOverrides,
+    equipment: personnel.equipment,
+    gcManualEntries: personnel.manualEntries,
+    siteOpsQuantities: infrastructure.quantities,
+    siteOpsRates: infrastructure.rates,
+  }), [personnel.utilizations, personnel.rateOverrides, personnel.equipment, personnel.manualEntries, infrastructure.quantities, infrastructure.rates]);
+
+  const roundTrip = useRoundTripUpload({
+    projectId,
+    project,
+    rows,
+    summary: fullTakeoffSummary,
+    gcCalcResult: personnel.calcResult,
+    siteOpsCalcResult: infrastructure.calcResult,
+    dials: roundTripDials,
+    applyRoundTripCommand,
+  });
 
   // Single source with the export gate: the same validateExportReadiness, surfaced
   // live instead of thrown away when it passes. Adds the modifier rollup → grand-total tie.
@@ -591,6 +617,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             handleExportExcel={handleExportExcel}
             handleExportProcore={handleExportProcore}
             isExportingExcel={isExportingExcel}
+            onRoundTripUpload={project && !project.isImported ? roundTrip.handleUploadFile : undefined}
             takeoffSummary={takeoffSummary}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
@@ -630,6 +657,39 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         <ErrorBoundary>
           <ProjectSettingsStep projectId={projectId} />
         </ErrorBoundary>
+      )}
+
+      {/* Round-trip Phase 6: re-upload preview modal + error/warning surfaces */}
+      {roundTrip.preview && roundTrip.plan && (
+        <ErrorBoundary>
+          <RoundTripUploadModal
+            preview={roundTrip.preview}
+            plan={roundTrip.plan}
+            acknowledged={roundTrip.acknowledged}
+            setAcknowledged={roundTrip.setAcknowledged}
+            busy={roundTrip.busy}
+            onConfirm={roundTrip.confirmApply}
+            onCancel={roundTrip.cancel}
+          />
+        </ErrorBoundary>
+      )}
+      {roundTrip.uploadError && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-xl p-4 flex items-start gap-3 text-red-700 dark:text-red-400 text-xs shadow-lg">
+          <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
+          <span>{roundTrip.uploadError}</span>
+          <button
+            onClick={roundTrip.clearUploadError}
+            className="ml-auto bg-transparent hover:text-slate-900 dark:hover:text-white font-bold uppercase text-[10px] cursor-pointer shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+      {roundTrip.postVersionWarning && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3 text-amber-700 dark:text-amber-400 text-xs shadow-lg">
+          <AlertTriangle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+          <span>{roundTrip.postVersionWarning}</span>
+        </div>
       )}
 
       {/* Export Override Modal — unmapped Procore dollars require explicit user assignment */}
