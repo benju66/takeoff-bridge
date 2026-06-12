@@ -305,8 +305,9 @@ export interface ApplyRoundTripCommand {
   /** Rows born in Excel, appended into their division block. */
   appendedRows?: ProcessedTakeoffRow[];
   /** Grid rows the Excel file no longer carries — removed on apply,
-   *  re-added on undo (full snapshots). */
-  removedRows?: ProcessedTakeoffRow[];
+   *  re-added at their ORIGINAL grid index on undo (sort-order integrity:
+   *  undo must restore manual row positions exactly). */
+  removedRows?: Array<{ row: ProcessedTakeoffRow; index: number }>;
   dialChanges: RoundTripDialChanges;
   /** Workbook filename / exportedAt for version titling + audit. */
   sourceLabel: string;

@@ -15,10 +15,12 @@ import { buildRoundTripBaseline } from "@/lib/exporter";
 import {
   planRoundTripApply,
   isWorkingCopyCaptured,
+  rowsEqualForVersionCapture,
   type RoundTripApplyPlan,
   type RoundTripDialSnapshots,
 } from "@/lib/applyRoundTrip";
-import { createEstimateVersion, getEstimateVersions } from "@/lib/db";
+import { summaryNumbers } from "@/lib/calculations";
+import { createEstimateVersion, getEstimateVersions, getEstimateVersionDetail } from "@/lib/db";
 
 // ---------------------------------------------------------------------------
 // useRoundTripUpload — the Excel re-upload confirm flow (round-trip Phase 6).
@@ -37,6 +39,11 @@ export interface RoundTripPreviewData {
   delta: RoundTripDelta;
   /** Extraction problems (su tri-cell disagreement, non-numeric cells…). */
   issues: string[];
+  /** Frozen at upload time: what the user previews is EXACTLY what confirm
+   *  applies — live dial/row identity churn must not silently re-plan
+   *  underneath the open modal. */
+  rowsSnapshot: ProcessedTakeoffRow[];
+  dialsSnapshot: RoundTripDialSnapshots;
 }
 
 export interface UseRoundTripUploadArgs {
@@ -71,16 +78,6 @@ export interface UseRoundTripUploadReturn {
   cancel: () => void;
 }
 
-/** The engine summary's numeric fields, copied verbatim for the frozen
- *  version record (same shape VersionsPanel freezes). */
-function summaryNumbers(summary: TakeoffSummary): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(summary)) {
-    if (typeof value === "number") out[key] = value;
-  }
-  return out;
-}
-
 export function useRoundTripUpload(args: UseRoundTripUploadArgs): UseRoundTripUploadReturn {
   const {
     projectId, project, rows, summary,
@@ -105,20 +102,21 @@ export function useRoundTripUpload(args: UseRoundTripUploadArgs): UseRoundTripUp
     summaryRef.current = summary;
   });
 
-  // The plan re-derives live as the user toggles conflict acknowledgment
-  // (locked decision 3: confirm requires acknowledging flags — never blocks).
+  // The plan re-derives ONLY when the user toggles conflict acknowledgment
+  // (locked decision 3) — it runs over the upload-time snapshots, so what
+  // the modal shows is what confirm applies.
   const plan = useMemo<RoundTripApplyPlan | null>(() => {
     if (!preview || !project) return null;
     return planRoundTripApply({
       delta: preview.delta,
       excel: preview.excel,
-      currentRows: rows,
-      dials,
+      currentRows: preview.rowsSnapshot,
+      dials: preview.dialsSnapshot,
       project,
       sourceLabel: preview.fileName,
       applyConflicts: acknowledged,
     });
-  }, [preview, project, rows, dials, acknowledged]);
+  }, [preview, project, acknowledged]);
 
   const handleUploadFile = useCallback(async (file: File) => {
     if (!project) return;
@@ -136,13 +134,16 @@ export function useRoundTripUpload(args: UseRoundTripUploadArgs): UseRoundTripUp
         rows, project, gcCalcResult, siteOpsCalcResult, summary.totalEstimatedCost
       );
       const delta = computeRoundTripDelta(state, stamp.baseline, current);
-      setPreview({ fileName: file.name, stamp, excel: state, delta, issues });
+      setPreview({
+        fileName: file.name, stamp, excel: state, delta, issues,
+        rowsSnapshot: rows, dialsSnapshot: dials,
+      });
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "The file could not be read as an exported estimate workbook.");
     } finally {
       setBusy(false);
     }
-  }, [project, rows, gcCalcResult, siteOpsCalcResult, summary.totalEstimatedCost]);
+  }, [project, rows, dials, gcCalcResult, siteOpsCalcResult, summary.totalEstimatedCost]);
 
   const confirmApply = useCallback(async () => {
     if (!plan || !preview || plan.isEmpty) return;
@@ -151,10 +152,22 @@ export function useRoundTripUpload(args: UseRoundTripUploadArgs): UseRoundTripUp
     try {
       // 1. Safety net BEFORE any mutation (locked decision 2): if the working
       //    copy isn't captured by the newest version, freeze it. A failure
-      //    here ABORTS the apply — never mutate without the baseline.
+      //    here ABORTS the apply — never mutate without the baseline. The
+      //    summary check is a cheap proxy; when it passes, the newest
+      //    version's frozen ROWS must also match (description/code edits
+      //    move no totals but would be unrecoverable after a reload).
       const numbers = summaryNumbers(summary);
       const versions = await getEstimateVersions(projectId);
-      if (!isWorkingCopyCaptured(versions[0], numbers)) {
+      let captured = isWorkingCopyCaptured(versions[0], numbers);
+      if (captured) {
+        try {
+          const detail = await getEstimateVersionDetail(versions[0].id);
+          captured = !!detail && rowsEqualForVersionCapture(rows, detail.lineItems);
+        } catch {
+          captured = false; // can't verify rows ⇒ create the baseline (safe)
+        }
+      }
+      if (!captured) {
         await createEstimateVersion(projectId, "Pre-upload baseline", rows, numbers);
       }
       // 2. ONE undoable command (rows + dials).

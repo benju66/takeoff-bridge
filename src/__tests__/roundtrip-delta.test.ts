@@ -80,6 +80,12 @@ const baseRow = (overrides: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow =
 });
 
 const gridRows: ProcessedTakeoffRow[] = [
+  // Blank-itemId manual row: app-only (never reaches the workbook's col-C
+  // scan) — it must NOT phantom into the delta as "deleted in Excel".
+  baseRow({
+    id: "row-manual-blank", itemId: "", classification: "MANUAL ENTRY",
+    description: "Half-typed manual line", source: "manual", isMapped: false,
+  }),
   baseRow({
     id: "row-1", itemId: "03-0000.001", procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
     description: "Cast In-Place Concrete", matchedQty: 150, unitPrice: 120, total: 18000, uom: "CY", costType: "M",
@@ -173,6 +179,13 @@ describe("round-trip stamp + extraction (Phase 4)", () => {
     expect(delta.dialDeltas).toEqual([]);
     expect(delta.isStale).toBe(false);
     expect(delta.hasConflicts).toBe(false);
+  });
+
+  it("refuses a workbook whose STEP 1 sheet is missing instead of reading dials as 0", async () => {
+    const zip = await JSZip.loadAsync(buffer);
+    zip.remove("xl/worksheets/sheet4.xml"); // STEP 1 - PROJECT DATA
+    const broken = await zip.generateAsync({ type: "arraybuffer" });
+    await expect(extractRoundTrip(broken)).rejects.toThrow(/STEP 1 - PROJECT DATA.*missing/);
   });
 
   it("refuses unstamped and foreign workbooks with typed errors", async () => {

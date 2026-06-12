@@ -144,6 +144,14 @@ describe("round-trip apply helpers (Phase 5)", () => {
     expect(addMonthsToYearMonth("garbage", 5)).toBeNull();
   });
 
+  it("addMonthsToYearMonth preserves the day component (real <input type=\"date\"> format)", () => {
+    expect(addMonthsToYearMonth("2026-01-15", 10)).toBe("2026-11-15");
+    // Day clamped to the target month's length
+    expect(addMonthsToYearMonth("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsToYearMonth("2024-01-31", 1)).toBe("2024-02-29"); // leap year
+    expect(addMonthsToYearMonth("2026-03-31", 1)).toBe("2026-04-30");
+  });
+
   it("isWorkingCopyCaptured: summary-proxy comparison", () => {
     const meta = (summary: Record<string, number>): EstimateVersionMeta => ({
       id: "v1", projectId: "p", versionNumber: 1, title: "t", summary,
@@ -273,7 +281,11 @@ describe("round-trip apply planner + atomic undo (Phase 5)", () => {
       source: "manual", isMapped: false, procoreCode: "",
     });
     expect(plan.command.removedRows).toHaveLength(1);
-    expect(plan.command.removedRows![0]).toMatchObject({ id: "row-2", itemId: "03-0000.002" });
+    // Snapshot carries the ORIGINAL grid index so undo restores position
+    expect(plan.command.removedRows![0]).toMatchObject({
+      row: { id: "row-2", itemId: "03-0000.002" },
+      index: 1,
+    });
     expect(plan.isEmpty).toBe(false);
 
     // ── Atomic undo fidelity: forward → inverse == byte-identical grid ──

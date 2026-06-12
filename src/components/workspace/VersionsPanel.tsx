@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import type { ProcessedTakeoffRow } from "@/types";
 import type { EstimateVersionMeta } from "@/types/db";
-import type { TakeoffSummary } from "@/lib/calculations";
+import { summaryNumbers, type TakeoffSummary } from "@/lib/calculations";
 import { useEstimateVersions } from "@/hooks/useEstimateVersions";
 import { getEstimateVersionDetail } from "@/lib/db";
 import { diffVersionLines, type VersionDiff, type VersionDiffEntry } from "@/lib/versionDiff";
@@ -42,16 +42,6 @@ const formatDate = (iso: string | null) =>
 
 /** Sentinel compare-picker value for the live working copy. */
 const WORKING_COPY = "__working_copy__";
-
-/** The engine summary's numeric fields, copied VERBATIM for the frozen
- *  version record (drops the non-numeric appliedOverrides audit map). */
-function summaryNumbers(summary: TakeoffSummary): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [key, value] of Object.entries(summary)) {
-    if (typeof value === "number") out[key] = value;
-  }
-  return out;
-}
 
 function versionLabel(v: EstimateVersionMeta): string {
   return `V${v.versionNumber}${v.title ? ` — ${v.title}` : ""}`;

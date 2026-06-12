@@ -5,6 +5,7 @@ import {
   STEP23_LINE_PATTERNS,
   STEP23_PATTERN_BY_CODE,
   STEP23_DIAL_CELLS,
+  STEP23_SECTION_SUBTOTALS,
   qtyFormulaFor,
   type Step23SheetName,
 } from "../lib/step23FormulaPatterns";
@@ -99,6 +100,20 @@ describe("step23FormulaPatterns ↔ committed template sync", () => {
         `${line.sheet} r${row} ${line.code}`
       ).toBe(`F${row}*H${row}`);
     }
+  });
+
+  it("every section-subtotal coordinate points at a native SUM in the template", () => {
+    // A template re-upload that inserts a row above a subtotal would shift
+    // it while the old cell still holds a SUM over the WRONG range — the
+    // exporter's "must contain SUM(" guard alone cannot catch that. Pin the
+    // exact coordinates here.
+    for (const sub of STEP23_SECTION_SUBTOTALS) {
+      const formula = formulaOf(sheets[sub.sheet], `I${sub.row}`);
+      expect(formula, `${sub.itemId} I${sub.row} on ${sub.sheet}`).toMatch(/^SUM\(/i);
+    }
+    // …and each sits adjacent to its section: the row directly above is a
+    // code-bearing or blank line, never another subtotal (sanity anchor).
+    expect(STEP23_SECTION_SUBTOTALS).toHaveLength(10);
   });
 
   it("dial cells J5/J8 carry the documented cross-sheet pulls", () => {

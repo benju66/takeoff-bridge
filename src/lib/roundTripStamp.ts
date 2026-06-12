@@ -65,6 +65,20 @@ export interface RoundTripStamp {
 }
 
 export const STAMP_SCHEMA_VERSION = 1;
+
+/**
+ * The criterion/itemId grammar that participates in round-trip row
+ * comparison. ONE definition shared by the baseline builder (exporter), the
+ * extractor, and the apply planner — rows whose itemId doesn't match (blank
+ * or non-CSI manual codes) are app-only: they never reach the workbook's
+ * col-C scan, so including them on only one side would misclassify them as
+ * "deleted in Excel" and delete them on apply.
+ */
+export const ROUNDTRIP_CODE_RE = /^\d{2}-\d{4}(\.\d{1,3})?$/;
+
+export function isRoundTripComparableCode(itemId: string): boolean {
+  return ROUNDTRIP_CODE_RE.test((itemId || "").trim());
+}
 const STAMP_NAMESPACE = "urn:takeoff-bridge:roundtrip";
 const STAMP_ROOT = "takeoffBridgeStamp";
 /** Fixed datastore GUID identifying our part among other add-ins' items. */

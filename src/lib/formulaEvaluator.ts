@@ -141,9 +141,22 @@ function parseSheetCells(sheetXml: string, sharedStrings: string[]): SheetModel 
   return cells;
 }
 
-/** Builds the evaluation model from an .xlsx buffer (all sheets). */
-export async function loadWorkbookModel(buffer: ArrayBuffer | Buffer): Promise<WorkbookModel> {
-  const zip = await JSZip.loadAsync(buffer);
+/** Builds the evaluation model from an .xlsx buffer (all sheets unless a
+ * sheet-name filter is given). */
+export async function loadWorkbookModel(
+  buffer: ArrayBuffer | Buffer,
+  sheetNames?: ReadonlySet<string>
+): Promise<WorkbookModel> {
+  return loadWorkbookModelFromZip(await JSZip.loadAsync(buffer), sheetNames);
+}
+
+/** Zip-reuse variant (the round-trip extractor opens the archive once for
+ * stamp + model). `sheetNames` skips parsing sheets nobody reads — the
+ * company template carries ~14 scenario/reference tabs beyond STEP 1–4. */
+export async function loadWorkbookModelFromZip(
+  zip: JSZip,
+  sheetNames?: ReadonlySet<string>
+): Promise<WorkbookModel> {
   const wbXml = await zip.file("xl/workbook.xml")!.async("string");
   const relsXml = await zip.file("xl/_rels/workbook.xml.rels")!.async("string");
   const sstFile = zip.file("xl/sharedStrings.xml");
@@ -157,13 +170,15 @@ export async function loadWorkbookModel(buffer: ArrayBuffer | Buffer): Promise<W
     const name = (tag.match(/name="([^"]+)"/) || [])[1];
     const rid = (tag.match(/r:id="([^"]+)"/) || [])[1];
     if (!name || !rid) continue;
+    const decodedName = decodeXmlEntities(name);
+    if (sheetNames && !sheetNames.has(decodedName)) continue;
     const rel = relsXml.match(new RegExp(`Id="${rid}"[^>]*Target="([^"]+)"`));
     if (!rel) continue;
     const target = rel[1].replace(/^\/?(xl\/)?/, "");
     const file = zip.file(`xl/${target}`);
     if (!file) continue;
     const xml = await file.async("string");
-    model.set(decodeXmlEntities(name), parseSheetCells(xml, sharedStrings));
+    model.set(decodedName, parseSheetCells(xml, sharedStrings));
   }
   return model;
 }
@@ -196,7 +211,7 @@ interface RangeValue {
 type EvalValue = CellScalar | RangeValue;
 
 interface Token {
-  type: "num" | "str" | "ref" | "range" | "func" | "op" | "lparen" | "rparen" | "comma";
+  type: "num" | "str" | "bool" | "ref" | "range" | "func" | "op" | "lparen" | "rparen" | "comma";
   text: string;
   sheet?: string; // for ref/range tokens with a sheet prefix
 }
@@ -286,7 +301,9 @@ function tokenize(formula: string): Token[] {
         continue;
       }
       if (name === "TRUE" || name === "FALSE") {
-        tokens.push({ type: "str", text: name }); // handled in primary as boolean
+        // Distinct token type: the quoted STRING literal "TRUE" must stay a
+        // string (Excel: text never equals a boolean).
+        tokens.push({ type: "bool", text: name });
         i += fnMatch[0].length;
         continue;
       }
@@ -361,6 +378,14 @@ export class FormulaEvaluator {
       const norm = (x: CellScalar): CellScalar => (x === "" ? 0 : x);
       const an = norm(a as CellScalar);
       const bn = norm(b as CellScalar);
+      // Excel never equates across types: "5"=5 is FALSE, "TRUE"=TRUE is FALSE
+      if (typeof an !== typeof bn) {
+        switch (op) {
+          case "=": return false;
+          case "<>": return true;
+          default: return fail(`Cross-type comparison "${op}"`);
+        }
+      }
       if (typeof an === "string" || typeof bn === "string") {
         const as = String(an).toUpperCase();
         const bs = String(bn).toUpperCase();
@@ -483,9 +508,11 @@ export class FormulaEvaluator {
       }
       if (t.type === "str") {
         next();
-        if (t.text === "TRUE") return true;
-        if (t.text === "FALSE") return false;
         return t.text;
+      }
+      if (t.type === "bool") {
+        next();
+        return t.text === "TRUE";
       }
       if (t.type === "ref") {
         next();

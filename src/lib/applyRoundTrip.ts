@@ -25,6 +25,7 @@ import {
 import type { Project, EstimateVersionMeta } from "@/types/db";
 import type { RoundTripDelta, DialDelta } from "./roundTrip";
 import type { RoundTripState, BaselineRow } from "./roundTripStamp";
+import { isRoundTripComparableCode } from "./roundTripStamp";
 import { STEP23_PATTERN_BY_CODE } from "./step23FormulaPatterns";
 import { evaluateDataFidelity } from "./calculations";
 import { divisionInsertIndex } from "./mergeTakeoff";
@@ -90,20 +91,63 @@ export interface RoundTripApplyPlan {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** "YYYY-MM" + n months → "YYYY-MM" (duration reverse-map, decision 7). */
+/**
+ * Start date + n months → finish date (duration reverse-map, decision 7).
+ * Accepts and PRESERVES the app's real date format: project dates come from
+ * <input type="date"> as "YYYY-MM-DD" (a "YYYY-MM" result would render the
+ * Expected Finish input blank). A day component is kept, clamped to the
+ * target month's length; "YYYY-MM" inputs stay "YYYY-MM". The inverse,
+ * getMonthsBetween (calculations.ts), reads only year+month — so
+ * getMonthsBetween(start, addMonthsToYearMonth(start, n)) === n.
+ */
 export function addMonthsToYearMonth(startStr: string, months: number): string | null {
   const parts = startStr.split("-").map(Number);
   if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null;
   const total = parts[0] * 12 + (parts[1] - 1) + Math.round(months);
   const year = Math.floor(total / 12);
   const month = total - year * 12 + 1;
-  return `${year}-${String(month).padStart(2, "0")}`;
+  const yearMonth = `${year}-${String(month).padStart(2, "0")}`;
+  if (parts.length >= 3 && Number.isFinite(parts[2])) {
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const day = Math.min(Math.max(1, Math.trunc(parts[2])), daysInMonth);
+    return `${yearMonth}-${String(day).padStart(2, "0")}`;
+  }
+  return yearMonth;
+}
+
+/**
+ * Row-level half of the baseline-capture check: summary equality alone misses
+ * changes that move no total (description edits, code reassignments,
+ * offsetting qty/price edits) — and a skipped "Pre-upload baseline" on those
+ * leaves them unrecoverable after a reload. Compares the comparable fields of
+ * the working copy against a version's frozen line items, order-sensitive.
+ */
+export function rowsEqualForVersionCapture(
+  working: ProcessedTakeoffRow[],
+  frozen: ProcessedTakeoffRow[]
+): boolean {
+  if (working.length !== frozen.length) return false;
+  for (let i = 0; i < working.length; i++) {
+    const a = working[i];
+    const b = frozen[i];
+    if (
+      (a.itemId || "").trim() !== (b.itemId || "").trim() ||
+      (a.description || "") !== (b.description || "") ||
+      (a.uom || "") !== (b.uom || "") ||
+      Math.abs((Number(a.matchedQty) || 0) - (Number(b.matchedQty) || 0)) > NUM_EPS ||
+      Math.abs((Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0)) > NUM_EPS
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
  * Locked decision 2 pre-check: is the working copy already captured by the
- * newest version? Cheap proxy — the version meta carries the engine summary
- * verbatim at freeze time; equal summaries ⇒ no "Pre-upload baseline" needed.
+ * newest version? Cheap SUMMARY proxy — callers that pass the summary gate
+ * must still confirm rows via rowsEqualForVersionCapture against the
+ * version's frozen line items before skipping the baseline.
  */
 export function isWorkingCopyCaptured(
   newest: EstimateVersionMeta | undefined,
@@ -118,17 +162,22 @@ export function isWorkingCopyCaptured(
   });
 }
 
-/** itemId#ordinal keys over the grid's comparable rows — MUST mirror
+/** itemId#ordinal keys over the grid's comparable rows, carrying each row's
+ * grid index for position-faithful undo. The comparable predicate
+ * (isRoundTripComparableCode + not-linked) MUST mirror
  * buildRoundTripBaseline's filter so delta keys resolve to the right rows. */
-function keyCurrentRows(rows: ProcessedTakeoffRow[]): Map<string, ProcessedTakeoffRow> {
+function keyCurrentRows(
+  rows: ProcessedTakeoffRow[]
+): Map<string, { row: ProcessedTakeoffRow; index: number }> {
   const seen = new Map<string, number>();
-  const out = new Map<string, ProcessedTakeoffRow>();
-  for (const row of rows) {
+  const out = new Map<string, { row: ProcessedTakeoffRow; index: number }>();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
     const itemId = (row.itemId || "").trim();
-    if (isLinkedDivisionRow(itemId)) continue;
+    if (isLinkedDivisionRow(itemId) || !isRoundTripComparableCode(itemId)) continue;
     const n = seen.get(itemId) ?? 0;
     seen.set(itemId, n + 1);
-    out.set(`${itemId}#${n}`, row);
+    out.set(`${itemId}#${n}`, { row, index: i });
   }
   return out;
 }
@@ -160,7 +209,7 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
   const prevRowStates: ApplyRoundTripCommand["prevRowStates"] = [];
   const nextRowStates: ApplyRoundTripCommand["nextRowStates"] = [];
   const appendedRows: ProcessedTakeoffRow[] = [];
-  const removedRows: ProcessedTakeoffRow[] = [];
+  const removedRows: Array<{ row: ProcessedTakeoffRow; index: number }> = [];
 
   const buildAppendedRow = (excelRow: BaselineRow): ProcessedTakeoffRow => ({
     // Mirrors insertManualRow's conformant defaults (AGENTS.md data-interface
@@ -198,13 +247,13 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
         notes.push(`Kept ${rowDelta.itemId}: deleted in Excel but edited in the app (conflicts not acknowledged)`);
         continue;
       }
-      const row = byKey.get(rowDelta.key);
-      if (!row) continue;
-      removedRows.push(deepCloneRow(row));
+      const entry = byKey.get(rowDelta.key);
+      if (!entry) continue;
+      removedRows.push({ row: deepCloneRow(entry.row), index: entry.index });
       continue;
     }
     // changed
-    const row = byKey.get(rowDelta.key);
+    const row = byKey.get(rowDelta.key)?.row;
     if (!row || !rowDelta.fields) continue;
     const prevFields: Partial<ProcessedTakeoffRow> = {};
     const nextFields: Partial<ProcessedTakeoffRow> = {};
@@ -242,17 +291,37 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
 
   // ── Dial half ──
   const dialChanges: RoundTripDialChanges = {};
+  /** Records a dial change; returns false for a no-op (prev ≈ next) so the
+   * caller can SURFACE the drop instead of silently swallowing an edit the
+   * preview showed (e.g. a rate typed onto a $0 lump-sum line). */
   const put = <K extends keyof RoundTripDialChanges>(
     bucket: K,
     key: string,
     prev: number | string | null,
     next: number | string
-  ) => {
-    if (typeof prev === "number" && typeof next === "number" && Math.abs(prev - next) <= NUM_EPS) return;
-    if (prev === next) return;
+  ): boolean => {
+    if (typeof prev === "number" && typeof next === "number" && Math.abs(prev - next) <= NUM_EPS) return false;
+    if (prev === next) return false;
     const target = (dialChanges[bucket] ?? {}) as Record<string, { prev: unknown; next: unknown }>;
     target[key] = { prev, next };
     (dialChanges as Record<string, unknown>)[bucket] = target;
+    return true;
+  };
+
+  // The receiving setters clamp (utilization 0–100, dollar/qty floors at 0).
+  // Clamp HERE too so the command payload, the preview, and the applied
+  // state cannot diverge (an unclamped `next` would re-flag as a conflict on
+  // the very next upload of the same file).
+  const clampPct = (v: number) => Math.min(100, Math.max(0, v));
+  const clamp0 = (v: number) => Math.max(0, v);
+
+  /** A lump-sum dial edit that leaves F×H unchanged (e.g. a rate typed while
+   * qty stays 0 — the workbook's own line total is still $0). */
+  const noteUnchangedAmount = (d: DialDelta, amount: number) => {
+    notes.push(
+      `${d.label}: the Excel edit leaves the line's F×H total unchanged ($${amount.toFixed(2)}) — nothing to apply. ` +
+        `To set a lump sum in Excel, give the line qty 1 and the amount as its rate.`
+    );
   };
 
   /** F×H of a line in the uploaded workbook — lump-sum dollar amount. */
@@ -271,15 +340,16 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
       const staff = STAFF_BY_CODE.get(d.code);
       if (staff) {
         if (d.field === "E") {
-          put("utilizations", staff.key, dials.utilizations[staff.key] ?? 0, (d.excel as number) * 100);
+          put("utilizations", staff.key, dials.utilizations[staff.key] ?? 0, clampPct((d.excel as number) * 100));
         } else if (d.field === "H") {
-          put("rateOverrides", staff.key, dials.rateOverrides[staff.key] ?? null, d.excel as number);
+          put("rateOverrides", staff.key, dials.rateOverrides[staff.key] ?? null, clamp0(d.excel as number));
         }
         continue;
       }
       const equip = EQUIPMENT_BY_CODE.get(d.code);
       if (equip) {
-        put("equipment", equip.key, dials.equipment[equip.key], excelAmount(d.code));
+        const amount = clamp0(excelAmount(d.code));
+        if (!put("equipment", equip.key, dials.equipment[equip.key], amount)) noteUnchangedAmount(d, amount);
         continue;
       }
       const gcManual = GC_MANUAL_BY_CODE.get(d.code);
@@ -288,14 +358,20 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
           // %-lines: F is the effective pct (intent); an H-only edit is the
           // stale basis, not an estimator entry (handoff watch-out).
           if (d.field === "F") {
-            put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, excelAmount(d.code));
+            const amount = clamp0(excelAmount(d.code));
+            if (!put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, amount)) {
+              noteUnchangedAmount(d, amount);
+            }
           } else {
             inapplicable.push(d);
           }
         } else if (gcManual.entry === "lumpSum") {
-          put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, excelAmount(d.code));
+          const amount = clamp0(excelAmount(d.code));
+          if (!put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, amount)) {
+            noteUnchangedAmount(d, amount);
+          }
         } else if (d.field === "F") {
-          put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, d.excel as number);
+          put("gcManualEntries", gcManual.key, dials.gcManualEntries[gcManual.key] ?? 0, clamp0(d.excel as number));
         } else {
           inapplicable.push(d); // qty-entry line rate: template constant
         }
@@ -304,12 +380,15 @@ export function planRoundTripApply(inputs: RoundTripApplyInputs): RoundTripApply
       const siteOps = SITE_OPS_MANUAL_BY_CODE.get(d.code);
       if (siteOps) {
         if (siteOps.entry === "lumpSum") {
-          put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, excelAmount(d.code));
+          const amount = clamp0(excelAmount(d.code));
+          if (!put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, amount)) {
+            noteUnchangedAmount(d, amount);
+          }
         } else if (siteOps.entry === "qtyRate") {
-          if (d.field === "F") put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, d.excel as number);
-          else if (d.field === "H") put("siteOpsRates", siteOps.key, dials.siteOpsRates[siteOps.key] ?? 0, d.excel as number);
+          if (d.field === "F") put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, clamp0(d.excel as number));
+          else if (d.field === "H") put("siteOpsRates", siteOps.key, dials.siteOpsRates[siteOps.key] ?? 0, clamp0(d.excel as number));
         } else if (d.field === "F") {
-          put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, d.excel as number);
+          put("siteOpsQuantities", siteOps.key, dials.siteOpsQuantities[siteOps.key] ?? 0, clamp0(d.excel as number));
         } else {
           inapplicable.push(d); // qty-entry rate: template/rate-card constant
         }
@@ -386,12 +465,13 @@ export function applyRoundTripRowsForward(
 ): ProcessedTakeoffRow[] {
   let updated = [...rows];
   if (cmd.removedRows?.length) {
-    const removeIds = new Set(cmd.removedRows.map((r) => r.id));
+    const removeIds = new Set(cmd.removedRows.map((r) => r.row.id));
     updated = updated.filter((r) => !removeIds.has(r.id));
   }
+  const indexById = new Map(updated.map((r, i) => [r.id, i]));
   for (const ns of cmd.nextRowStates) {
-    const idx = updated.findIndex((r) => r.id === ns.rowId);
-    if (idx !== -1) updated[idx] = { ...updated[idx], ...ns.fields };
+    const idx = indexById.get(ns.rowId);
+    if (idx !== undefined) updated[idx] = { ...updated[idx], ...ns.fields };
   }
   for (const row of cmd.appendedRows ?? []) {
     updated.splice(divisionInsertIndex(updated, row.itemId), 0, deepCloneRow(row));
@@ -408,12 +488,16 @@ export function applyRoundTripRowsInverse(
     const removeIds = new Set(cmd.appendedRows.map((r) => r.id));
     updated = updated.filter((r) => !removeIds.has(r.id));
   }
+  const indexById = new Map(updated.map((r, i) => [r.id, i]));
   for (const ps of cmd.prevRowStates) {
-    const idx = updated.findIndex((r) => r.id === ps.rowId);
-    if (idx !== -1) updated[idx] = { ...updated[idx], ...ps.fields };
+    const idx = indexById.get(ps.rowId);
+    if (idx !== undefined) updated[idx] = { ...updated[idx], ...ps.fields };
   }
-  for (const row of cmd.removedRows ?? []) {
-    updated.splice(divisionInsertIndex(updated, row.itemId), 0, deepCloneRow(row));
+  // Restore removed rows at their ORIGINAL grid indices (ascending, so each
+  // splice lands where the row sat before the apply — sort-order integrity).
+  const restores = [...(cmd.removedRows ?? [])].sort((a, b) => a.index - b.index);
+  for (const { row, index } of restores) {
+    updated.splice(Math.min(index, updated.length), 0, deepCloneRow(row));
   }
   return updated;
 }

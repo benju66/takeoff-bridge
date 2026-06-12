@@ -15,15 +15,17 @@
  * item 2) reuses the extraction half against finished bids.
  */
 
+import JSZip from "jszip";
 import {
-  readStamp,
+  readStampFromZip,
   RoundTripStamp,
   RoundTripState,
   BaselineRow,
   BaselineStep23Inputs,
   WrongProjectError,
+  ROUNDTRIP_CODE_RE,
 } from "./roundTripStamp";
-import { loadWorkbookModel, WorkbookModel, SheetModel } from "./formulaEvaluator";
+import { loadWorkbookModelFromZip, WorkbookModel, SheetModel } from "./formulaEvaluator";
 import {
   STEP23_LINE_PATTERNS,
   inputCellsFor,
@@ -60,7 +62,7 @@ export function assertRoundTripAllowed(stamp: RoundTripStamp, project: Project):
 
 const STEP1 = "STEP 1 - PROJECT DATA";
 const STEP4 = "STEP 4 - ESTIMATE";
-const CODE_RE = /^\d{2}-\d{4}(\.\d{1,3})?$/;
+const CODE_RE = ROUNDTRIP_CODE_RE;
 const MODIFIER_CODES = new Set(ESTIMATE_MODIFIERS.map((m) => m.code));
 
 export interface RoundTripExtract {
@@ -103,9 +105,19 @@ function codeRowsOf(sheet: SheetModel): Map<string, number[]> {
 
 /** Extracts the workbook's input state — the same shape as the stamp baseline. */
 export function extractRoundTripState(model: WorkbookModel, issues: string[]): RoundTripState {
+  // A missing sheet must REFUSE, never read-as-zero: cellNumber treats absent
+  // cells as 0 (blank input = 0), so a deleted/renamed STEP 1 tab would
+  // otherwise extract every dial and modifier rate as a clean "edited → 0".
+  for (const required of [STEP1, "STEP 2 - GCs", "STEP 3 - SITE OPS", STEP4]) {
+    if (!model.get(required)) {
+      throw new Error(
+        `Sheet "${required}" is missing from the uploaded workbook — re-upload the full exported file with all sheets intact.`
+      );
+    }
+  }
+
   // ── STEP 4 grid rows (linked + modifier rows excluded — computed/config) ──
-  const step4 = model.get(STEP4);
-  if (!step4) throw new Error(`Sheet "${STEP4}" missing from the workbook`);
+  const step4 = model.get(STEP4)!;
   const step4Rows: BaselineRow[] = [];
   const rowNums: { code: string; row: number }[] = [];
   for (const [code, rows] of codeRowsOf(step4)) {
@@ -184,10 +196,15 @@ export function extractRoundTripState(model: WorkbookModel, issues: string[]): R
   };
 }
 
-/** Reads stamp + input state from an uploaded workbook buffer. */
+/** Reads stamp + input state from an uploaded workbook buffer (the archive
+ * is opened ONCE; only the four STEP sheets are parsed). */
 export async function extractRoundTrip(buffer: ArrayBuffer | Buffer): Promise<RoundTripExtract> {
-  const stamp = await readStamp(buffer);
-  const model = await loadWorkbookModel(buffer);
+  const zip = await JSZip.loadAsync(buffer);
+  const stamp = await readStampFromZip(zip);
+  const model = await loadWorkbookModelFromZip(
+    zip,
+    new Set([STEP1, "STEP 2 - GCs", "STEP 3 - SITE OPS", STEP4])
+  );
   const issues: string[] = [];
   const state = extractRoundTripState(model, issues);
 
@@ -253,9 +270,10 @@ export interface RoundTripDelta {
 }
 
 const NUM_EPS = 1e-9;
-/** Dollars-and-cents materiality floor for born-in-Excel rows (matches the
- * exporter's RECONCILIATION_TOLERANCE without importing the exporter). */
-const DOLLARS_EPS = 0.005;
+/** Dollars-and-cents materiality floor for born-in-Excel rows. Kept EQUAL to
+ * the exporter's RECONCILIATION_TOLERANCE (0.01) by value — not imported,
+ * because this module stays free of the exporter's JSZip/XML dependencies. */
+const DOLLARS_EPS = 0.01;
 
 function valuesEqual(a: number | string, b: number | string): boolean {
   if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= NUM_EPS;

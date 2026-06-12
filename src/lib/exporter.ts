@@ -2,12 +2,13 @@ import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/ty
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS, isLinkedDivisionRow } from "./constants";
 import { computeTakeoffSummary, computeLinkedDivisionTotals, getMonthsBetween, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
-import { STEP23_PATTERN_BY_CODE, STEP1_DURATION_CELL, qtyFormulaFor, inputCellsFor } from "./step23FormulaPatterns";
+import { STEP23_PATTERN_BY_CODE, STEP23_SECTION_SUBTOTALS, STEP1_DURATION_CELL, qtyFormulaFor, inputCellsFor } from "./step23FormulaPatterns";
 import {
   writeStampParts,
   STAMP_SCHEMA_VERSION,
   RoundTripState,
   BaselineStep23Inputs,
+  isRoundTripComparableCode,
 } from "./roundTripStamp";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
@@ -776,6 +777,12 @@ function setCellFormula(cellEl: ParsedElement, formula: string, cachedValue: num
  * blank template's stale number (e.g. the STEP 2/3 section-subtotal SUMs).
  */
 function setCachedFormulaValue(cellEl: ParsedElement, cachedValue: number): void {
+  // Clear any cached-type attribute (e.g. a stale t="e" error cache in the
+  // template) — the value written is numeric, and a leftover t="e" would let
+  // the Phase 3f error-cache cleanup delete the fresh <v>.
+  if (cellEl[":@"]) {
+    delete cellEl[":@"]["@_t"];
+  }
   const children: ParsedElement[] = cellEl.c || [];
   const vNode = children.find((ch) => ch.v !== undefined);
   if (vNode) {
@@ -1107,27 +1114,14 @@ interface SheetDetailLine {
 }
 
 /**
- * STEP 2/3 section-subtotal cells ← the linked STEP 4 division rows
- * (computeLinkedDivisionTotals itemIds). Coordinates forensically verified
- * (Phase 1 findings §5.1, re-verified Phase 6); STEP 2/3 rows never shift —
- * the exporter inserts rows only on STEP 4. Round-trip Phase 2: the native
- * SUM formulas stay live (only their cached <v> is refreshed), and STEP 4
- * rows 12–24 col H carries pull formulas onto these cells — the template's
- * exact-equality col-S checks (e.g. S13: I13='STEP 2 - GCs'!I16) then tie by
- * construction, recalculated or not.
+ * STEP 2/3 section-subtotal coordinates — canonical home is the pattern
+ * module (pinned to the committed template by the sync test). Round-trip
+ * Phase 2: the native SUM formulas stay live (only their cached <v> is
+ * refreshed), and STEP 4 rows 12–24 col H carries pull formulas onto these
+ * cells — the template's exact-equality col-S checks (e.g. S13:
+ * I13='STEP 2 - GCs'!I16) then tie by construction, recalculated or not.
  */
-const STEP23_SUBTOTAL_CELLS: { itemId: string; sheet: string; row: number }[] = [
-  { itemId: "01-0400.002", sheet: "STEP 2 - GCs", row: 16 },       // Total Supervision
-  { itemId: "01-0000.001", sheet: "STEP 2 - GCs", row: 58 },       // Total Design, PM and GCs
-  { itemId: "02-0000.001", sheet: "STEP 3 - SITE OPS", row: 29 },  // Total Site Operations
-  { itemId: "02-4100.002", sheet: "STEP 3 - SITE OPS", row: 35 },  // Total Demolition
-  { itemId: "02-9005.003", sheet: "STEP 3 - SITE OPS", row: 40 },  // Total Final Cleaning
-  { itemId: "02-9070.004", sheet: "STEP 3 - SITE OPS", row: 45 },  // Total SWPPP Permit
-  { itemId: "02-9200.005", sheet: "STEP 3 - SITE OPS", row: 51 },  // Total Survey and Layout
-  { itemId: "02-9300.006", sheet: "STEP 3 - SITE OPS", row: 62 },  // Total Building and Site Services
-  { itemId: "02-9400.007", sheet: "STEP 3 - SITE OPS", row: 72 },  // Total Site Equipment
-  { itemId: "02-9500.008", sheet: "STEP 3 - SITE OPS", row: 82 },  // Total Site Special Inspections
-];
+const STEP23_SUBTOTAL_CELLS = STEP23_SECTION_SUBTOTALS;
 
 /** STEP 4 linked-row col-H pull formulas (round-trip Phase 2), e.g.
  * `'STEP 2 - GCs'!I58` — the template's own native shape, restored. */
@@ -1222,7 +1216,10 @@ export function buildRoundTripBaseline(
 
   return {
     step4Rows: rows
-      .filter((r) => !isLinkedDivisionRow(r.itemId))
+      // Same comparable predicate as extraction + apply: blank / non-CSI
+      // itemIds never reach the workbook's col-C scan, so including them
+      // here would misclassify them as "deleted in Excel" on re-upload.
+      .filter((r) => !isLinkedDivisionRow(r.itemId) && isRoundTripComparableCode(r.itemId || ""))
       .map((r) => ({
         itemId: (r.itemId || "").trim(),
         description: r.description || "",
@@ -1443,22 +1440,25 @@ export async function generateExcelWorkbook(
       const step1Wrapper = parsedStep1[0];
       const step1Children: ParsedElement[] = step1Wrapper.sheetData || [];
 
-      // Helper to write a value to a STEP 1 cell
+      // Helper to write a value to a STEP 1 cell. Returns false when the
+      // cell isn't present in the template (most STEP 1 fields are cosmetic
+      // and may skip; load-bearing dials must check the result).
       const writeStep1Cell = (
         cellAddr: string,
         value: string | number,
         type: "text" | "number"
-      ) => {
+      ): boolean => {
         const { col, row } = parseCellRef(cellAddr);
         const rowEl = findRowElement(step1Children, row);
-        if (!rowEl) return;
+        if (!rowEl) return false;
         const cellEl = findCellInRow(rowEl, col);
-        if (!cellEl) return;
+        if (!cellEl) return false;
         if (type === "text") {
           setCellInlineString(cellEl, String(value));
         } else {
           setCellValue(cellEl, Number(value) || 0);
         }
+        return true;
       };
 
       // Project metadata fields
@@ -1474,11 +1474,19 @@ export async function generateExcelWorkbook(
       // getMonthsBetween anyway — the app is the math authority). Same
       // derivation as useProjectWorkspace, so the live STEP 2/3 chain
       // ($J$5 ← D28) recomputes exactly the engine's numbers.
-      writeStep1Cell(
+      const durationWritten = writeStep1Cell(
         STEP1_DURATION_CELL,
         getMonthsBetween(projectMetadata.expectedStart || "", projectMetadata.expectedFinish || ""),
         "number"
       );
+      if (!durationWritten) {
+        // The WHOLE live STEP 2/3 chain hangs on this one cell. If it were
+        // silently skipped, D28 would keep =YEARFRAC over the text dates in
+        // D10/D11 and recalc the entire workbook to #VALUE! on open.
+        throw new Error(
+          `STEP 1 ${STEP1_DURATION_CELL} (the duration dial) is missing from the template — refusing to export a workbook whose live formulas would recalc to #VALUE!.`
+        );
+      }
       writeStep1Cell("D58", Number(projectMetadata.unitCount) || 0, "number");
 
       // Optional physical specs — only write if explicitly set
@@ -1686,8 +1694,11 @@ export async function generateExcelWorkbook(
             setCellInlineString(cell, String(row.customFields?.[col.id] ?? ""));
           }
         }
-      } else if (PERMIT_HOME_CODES.has(code)) {
-        // Written onto the native PERMITS rows after the division loop
+      } else if (PERMIT_HOME_CODES.has(code) && !permitGridRows.has(code)) {
+        // FIRST grid row per permit code is written onto its native PERMITS
+        // row after the division loop; duplicates (split allowances, CSV +
+        // manual pairs) overflow-insert below like any other row so their
+        // dollars are never dropped.
         permitGridRows.set(code, row);
       } else {
         unmappedRows.push(row);
@@ -1790,11 +1801,13 @@ export async function generateExcelWorkbook(
   // Every permit home row is neutralized: grid values when the row exists in
   // the grid, 0/0 otherwise — so the Building Permit live pull can never feed
   // I331 a number the app didn't count.
+  const permitHomesWritten = new Set<string>();
   for (const rowEl of getRowElements(sheetDataChildren)) {
     const cellC = findCellInRow(rowEl, "C");
     if (!cellC) continue;
     const code = readCellText(cellC).trim();
     if (!PERMIT_HOME_CODES.has(code)) continue;
+    permitHomesWritten.add(code);
     const rowNum = getRowNum(rowEl);
     const gridRow = permitGridRows.get(code);
     // Ascending column order: D → F → G → H
@@ -1810,6 +1823,18 @@ export async function generateExcelWorkbook(
     }
     const hCell = getOrCreateCell(rowEl, "H", rowNum, getStyleFromRow(rowEl, "H"));
     setCellValue(hCell, Number(gridRow?.unitPrice) || 0);
+  }
+  // Diverted permit rows whose home row vanished from the template would
+  // otherwise lose their dollars silently (they were kept out of overflow
+  // insertion above) — same loud drift policy as the STEP 2/3 line miss.
+  for (const [code, gridRow] of permitGridRows) {
+    if (permitHomesWritten.has(code)) continue;
+    const dollars = (Number(gridRow.matchedQty) || 0) * (Number(gridRow.unitPrice) || 0);
+    if (Math.abs(dollars) > RECONCILIATION_TOLERANCE) {
+      throw new Error(
+        `Permit row "${code}" carries dollars but its native PERMITS row is missing from the template — the template layout drifted.`
+      );
+    }
   }
 
   // ── PHASE 2f: Subtotal, Modifiers, Grand Total, Reconciliation ─────────────

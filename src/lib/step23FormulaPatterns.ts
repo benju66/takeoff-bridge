@@ -162,6 +162,21 @@ export const STEP23_LINE_PATTERNS: readonly Step23LinePattern[] = [
   ),
 ];
 
+// Every sign-off must be consumed: a code rename in constants.ts would
+// otherwise silently revert its line to the default write shape (e.g. Small
+// Tools superQty → monthly, dropping su-utilization scaling) with all tests
+// green — the sync test only pins NATIVE shapes.
+{
+  const tableCodes = new Set(STEP23_LINE_PATTERNS.map((l) => l.code));
+  for (const code of Object.keys(SIGN_OFFS)) {
+    if (!tableCodes.has(code)) {
+      throw new Error(
+        `step23FormulaPatterns: sign-off for "${code}" matches no line config — constants.ts codes drifted.`
+      );
+    }
+  }
+}
+
 export const STEP23_PATTERN_BY_CODE: ReadonlyMap<string, Step23LinePattern> = (() => {
   const map = new Map<string, Step23LinePattern>();
   for (const line of STEP23_LINE_PATTERNS) {
@@ -224,6 +239,34 @@ export function inputCellsFor(write: QtyWriteKind): QtyInputCells {
     case "pctFrozen": return { E: null, F: "pct", H: "basis" };
   }
 }
+
+// ─── Section subtotal cells ──────────────────────────────────────────────────
+
+/**
+ * STEP 2/3 section-subtotal cells ← the linked STEP 4 division rows
+ * (computeLinkedDivisionTotals itemIds). Forensically verified; STEP 2/3
+ * rows never shift (the exporter inserts rows only on STEP 4). SINGLE home
+ * for these coordinates: the exporter derives its pull formulas and cache
+ * refreshes from this table, and the sync test pins each cell to a native
+ * SUM in the committed template — a template re-upload that shifts a
+ * subtotal row fails CI instead of silently summing the wrong range.
+ */
+export const STEP23_SECTION_SUBTOTALS: readonly {
+  itemId: string;
+  sheet: Step23SheetName;
+  row: number;
+}[] = [
+  { itemId: "01-0400.002", sheet: "STEP 2 - GCs", row: 16 },       // Total Supervision
+  { itemId: "01-0000.001", sheet: "STEP 2 - GCs", row: 58 },       // Total Design, PM and GCs
+  { itemId: "02-0000.001", sheet: "STEP 3 - SITE OPS", row: 29 },  // Total Site Operations
+  { itemId: "02-4100.002", sheet: "STEP 3 - SITE OPS", row: 35 },  // Total Demolition
+  { itemId: "02-9005.003", sheet: "STEP 3 - SITE OPS", row: 40 },  // Total Final Cleaning
+  { itemId: "02-9070.004", sheet: "STEP 3 - SITE OPS", row: 45 },  // Total SWPPP Permit
+  { itemId: "02-9200.005", sheet: "STEP 3 - SITE OPS", row: 51 },  // Total Survey and Layout
+  { itemId: "02-9300.006", sheet: "STEP 3 - SITE OPS", row: 62 },  // Total Building and Site Services
+  { itemId: "02-9400.007", sheet: "STEP 3 - SITE OPS", row: 72 },  // Total Site Equipment
+  { itemId: "02-9500.008", sheet: "STEP 3 - SITE OPS", row: 82 },  // Total Site Special Inspections
+];
 
 // ─── Dial cells ──────────────────────────────────────────────────────────────
 

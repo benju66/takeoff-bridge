@@ -63,6 +63,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     error,
     projectDurationMonths,
     handleProjectParamChange,
+    applyProjectFields,
   } = useProjectWorkspace(projectId);
 
   const squareFootage: number = project ? project.squareFootage : 0;
@@ -106,35 +107,54 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // Round-trip Phase 5: applies an APPLY_ROUNDTRIP command's dial half onto
   // the Step 2/3/project state ("forward" = next, "inverse" = prev). Threaded
   // into the workbook's command dispatch so ONE undo reverses rows AND dials.
+  // Latest-refs keep this callback's identity STABLE: the calc hooks return
+  // fresh objects every render, and depending on them directly would rebuild
+  // the entire command-dispatch closure chain per render.
+  const personnelRef = React.useRef(personnel);
+  const infrastructureRef = React.useRef(infrastructure);
+  React.useEffect(() => {
+    personnelRef.current = personnel;
+    infrastructureRef.current = infrastructure;
+  });
   const applyRoundTripDials = React.useCallback(
     (changes: RoundTripDialChanges, direction: "forward" | "inverse") => {
       const pick = <T,>(d: { prev: T; next: T }): T => (direction === "forward" ? d.next : d.prev);
+      const p = personnelRef.current;
+      const infra = infrastructureRef.current;
       for (const [key, d] of Object.entries(changes.utilizations ?? {})) {
-        personnel.setUtilization(key, pick(d));
+        p.setUtilization(key, pick(d));
       }
       for (const [key, d] of Object.entries(changes.rateOverrides ?? {})) {
         const value = pick(d);
         // prev null = the corporate default was active before the upload
-        if (value === null) personnel.resetRate(key);
-        else personnel.handleRateChange(key, String(value));
+        if (value === null) p.resetRate(key);
+        else p.handleRateChange(key, String(value));
       }
       for (const [key, d] of Object.entries(changes.equipment ?? {})) {
-        if (d) personnel.handleEquipmentChange(key as "dumpsters" | "toilets" | "electric", String(pick(d)));
+        if (d) p.handleEquipmentChange(key as "dumpsters" | "toilets" | "electric", String(pick(d)));
       }
       for (const [key, d] of Object.entries(changes.gcManualEntries ?? {})) {
-        personnel.handleManualEntryChange(key, String(pick(d)));
+        p.handleManualEntryChange(key, String(pick(d)));
       }
       for (const [key, d] of Object.entries(changes.siteOpsQuantities ?? {})) {
-        infrastructure.handleLineQuantityChange(key, String(pick(d)));
+        infra.handleLineQuantityChange(key, String(pick(d)));
       }
       for (const [key, d] of Object.entries(changes.siteOpsRates ?? {})) {
-        infrastructure.handleLineRateChange(key, String(pick(d)));
+        infra.handleLineRateChange(key, String(pick(d)));
       }
-      for (const [field, d] of Object.entries(changes.projectFields ?? {})) {
-        if (d) handleProjectParamChange(field as keyof Project, pick(d));
+      // Project fields apply as ONE atomic batch: a per-field loop over the
+      // single-field handler would lose every field but the last (stale
+      // `project` spread) and race per-field saves.
+      const projectEntries = Object.entries(changes.projectFields ?? {});
+      if (projectEntries.length > 0) {
+        const fields: Partial<Project> = {};
+        for (const [field, d] of projectEntries) {
+          if (d) (fields as Record<string, string | number>)[field] = pick(d);
+        }
+        applyProjectFields(fields);
       }
     },
-    [personnel, infrastructure, handleProjectParamChange]
+    [applyProjectFields]
   );
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the

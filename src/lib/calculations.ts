@@ -301,6 +301,21 @@ export interface TakeoffSummary {
 }
 
 /**
+ * The engine summary's numeric fields, copied VERBATIM — the canonical shape
+ * frozen into estimate_versions records (drops the non-numeric overrides
+ * audit map). ONE definition: VersionsPanel freezes with it and the
+ * round-trip baseline-capture check compares against it; a fork would let
+ * the two shapes drift and defeat the pre-upload-baseline equality gate.
+ */
+export function summaryNumbers(summary: TakeoffSummary): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(summary)) {
+    if (typeof value === "number") out[key] = value;
+  }
+  return out;
+}
+
+/**
  * The computed TakeoffSummary fields an estimator may override (Phase 4). The engine
  * applies an override only for these keys; the estimate_overrides table stores `field`
  * as free text so Phase 5 can widen this set without a migration. `subtotal` and the 7
