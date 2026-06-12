@@ -1,6 +1,8 @@
 # Excel Round-Trip — Plan of Record
-_2026-06-12 · status: ACTIVE — Phases 1–5 SHIPPED 2026-06-12; next: Phase 6
-(see `docs/handoffs/2026-06-12-excel-roundtrip-phase-6-kickoff.md`)_
+_2026-06-12 · status: ACTIVE — Phases 1–6 + the Phase 7 code-review pass SHIPPED
+2026-06-12 (PR #3); flip to SHIPPED after the architect-machine items in
+`docs/handoffs/2026-06-12-excel-roundtrip-closure.md` (calibration golden, real-Excel
+round-trip incl. stamp survival, local build)_
 
 ## Context
 
