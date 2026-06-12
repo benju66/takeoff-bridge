@@ -22,6 +22,7 @@ vi.mock("../supabase", () => ({
 
 import {
   recordClassificationResolution,
+  recordClassificationResolutions,
   getClassificationHistory,
 } from "../db";
 import { RESOLVED_BY, TRUSTED_RESOLVED_BY } from "../resolvedBy";
@@ -115,6 +116,68 @@ describe("Classification History — recordClassificationResolution", () => {
     await expect(
       recordClassificationResolution("X", "Y", null, "ai")
     ).rejects.toThrow("Failed to record classification resolution: DB error");
+  });
+});
+
+describe("Classification History — recordClassificationResolutions (Phase 5 signal batch)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("inserts every signal row in ONE batch under the saving project", async () => {
+    mockInsert.mockResolvedValueOnce({ error: null });
+
+    await recordClassificationResolutions(
+      [
+        { classification: "Drywall Mystery", resolvedCode: "09-2900.001", resolvedBy: RESOLVED_BY.SUGGESTION_REJECTED },
+        { classification: "Drywall Mystery", resolvedCode: "09-5100.001", resolvedBy: RESOLVED_BY.SUGGESTION_OVERRIDDEN },
+        { classification: "Slab on Grade", resolvedCode: "03-3000.001", resolvedBy: RESOLVED_BY.SUGGESTION_ACCEPTED },
+      ],
+      "project-1"
+    );
+
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+    expect(mockInsert).toHaveBeenCalledWith([
+      {
+        classification: "Drywall Mystery",
+        resolved_code: "09-2900.001",
+        project_id: "project-1",
+        resolved_by: "suggestion_rejected",
+        confidence: 1.0,
+      },
+      {
+        classification: "Drywall Mystery",
+        resolved_code: "09-5100.001",
+        project_id: "project-1",
+        resolved_by: "suggestion_overridden",
+        confidence: 1.0,
+      },
+      {
+        classification: "Slab on Grade",
+        resolved_code: "03-3000.001",
+        project_id: "project-1",
+        resolved_by: "suggestion_accepted",
+        confidence: 1.0,
+      },
+    ]);
+  });
+
+  it("skips the request entirely for an empty batch", async () => {
+    await recordClassificationResolutions([], "project-1");
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("throws on Supabase error (fire-and-forget callers swallow it)", async () => {
+    // NOTE: always called with a real project id in production — the deployed
+    // RLS insert policy rejects null-project rows (see the helper's doc).
+    mockInsert.mockResolvedValueOnce({ error: { message: "DB error" } });
+
+    await expect(
+      recordClassificationResolutions(
+        [{ classification: "X", resolvedCode: "Y", resolvedBy: RESOLVED_BY.SUGGESTION_ACCEPTED }],
+        "project-1"
+      )
+    ).rejects.toThrow("Failed to record classification resolutions: DB error");
   });
 });
 

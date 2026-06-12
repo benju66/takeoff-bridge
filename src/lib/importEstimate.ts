@@ -39,6 +39,7 @@ import { getFuzzySuggestions, type SuggestionItem } from "./similarity";
 import { LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
 import { getDivisionCode } from "./division";
 import { RECONCILIATION_TOLERANCE } from "./exporter";
+import { RESOLVED_BY, type ResolvedBy } from "./resolvedBy";
 
 /** The 7 modifier rates + rounding fed to computeTakeoffSummary. */
 export interface ImportSummaryRates {
@@ -144,9 +145,13 @@ export interface MappingSuggestion {
 
 /**
  * Past confirmations per classification string, from classification_history
- * (db.ts getClassificationHistoryBulk): `description → [{resolvedCode, count}]`
- * sorted by count desc. ADVISORY input — when absent/empty every tier behaves
- * exactly as before (fail-soft: history must never block an import).
+ * (db.ts getClassificationHistoryBulk): `description → [{resolvedCode, count}]`,
+ * BEST SUGGESTION FIRST. `count` is the distinct-bid confirmation count (the
+ * "× N" badge), but since fidelity Phase 5 the ORDER is signal-aware
+ * (rejection downweights + recency tiebreaks — suggestionRanking.ts), so
+ * counts are not necessarily descending; consumers must never re-sort by
+ * count. ADVISORY input — when absent/empty every tier behaves exactly as
+ * before (fail-soft: history must never block an import).
  */
 export type ClassificationHistoryMap = ReadonlyMap<string, { resolvedCode: string; count: number }[]>;
 
@@ -275,6 +280,65 @@ export function suggestImportMappings(
   const out = new Map<string, MappingSuggestion>();
   for (const item of extracted.adHocLineItems) {
     out.set(importRowId(item), suggestMapping(item, bridge, reverse, history));
+  }
+  return out;
+}
+
+/** One suggestion-signal training row the import save records (Phase 5). */
+export interface SuggestionSignal {
+  classification: string;
+  resolvedCode: string;
+  resolvedBy: ResolvedBy;
+}
+
+/**
+ * The tiers whose UI presents ONE distinguished primary (the colored ✓
+ * button) — the only tiers where confirming a different code is a JUDGMENT on
+ * that primary. `similar` renders a flat shortlist of equals (architect F3:
+ * "a ranked shortlist a human picks from", no recommendation made), so
+ * picking its second chip rejects nothing.
+ */
+const SIGNAL_TIERS: readonly MappingConfidence[] = ["bridge", "linked", "history"];
+
+/**
+ * What the estimator DID with each primary suggestion — derived at save time
+ * from the confirmed rows vs the (immutable) suggestions (fidelity Phase 5).
+ * These rows ride ALONGSIDE the clean `user`/`user_lump` observation, tagged
+ * with the resolvedBy.ts signal vocabulary; they are the accept/reject/override
+ * training signal a future ML tier needs and that cannot be backfilled.
+ *
+ *  - confirmed the suggested primary (bridge/linked/history tier) →
+ *    `suggestion_accepted`;
+ *  - confirmed a DIFFERENT code → `suggestion_rejected` against the declined
+ *    primary PLUS `suggestion_overridden` against the chosen one;
+ *  - left unconfirmed, nothing was suggested (`none`), or the tier shows no
+ *    distinguished primary (`similar`) → NO signal;
+ *  - marked "combined" (`macro_lump_sum`) → NO signal: a lump line is not a
+ *    clean observation in EITHER direction (Phase 2 quarantine) — its
+ *    confirmation is tagged `user_lump` and never ranks, so its assignment
+ *    must not downweight the suggested pairing either.
+ *
+ * Deliberately conservative throughout: a phantom rejection would sink a
+ * pairing nobody actually declined, forever, in an append-only table.
+ */
+export function suggestionSignalsForSave(
+  rows: readonly Pick<ProcessedTakeoffRow, "id" | "itemId" | "description" | "dataFidelity">[],
+  suggestions: ReadonlyMap<string, MappingSuggestion>
+): SuggestionSignal[] {
+  const out: SuggestionSignal[] = [];
+  for (const r of rows) {
+    const s = suggestions.get(r.id);
+    if (!s || !s.itemId || !r.itemId) continue;
+    if (!SIGNAL_TIERS.includes(s.confidence)) continue;
+    if (r.dataFidelity === "macro_lump_sum") continue;
+    const push = (resolvedCode: string, resolvedBy: ResolvedBy) =>
+      out.push({ classification: r.description, resolvedCode, resolvedBy });
+    if (r.itemId === s.itemId) {
+      push(r.itemId, RESOLVED_BY.SUGGESTION_ACCEPTED);
+    } else {
+      push(s.itemId, RESOLVED_BY.SUGGESTION_REJECTED);
+      push(r.itemId, RESOLVED_BY.SUGGESTION_OVERRIDDEN);
+    }
   }
   return out;
 }

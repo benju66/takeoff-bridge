@@ -3,10 +3,11 @@ import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
 import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
-import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus } from "./catalogLifecycle";
+import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus, type LifecycleDef } from "./catalogLifecycle";
 import { isBuiltInCatalogCode } from "./catalog";
 import { isValidProcoreCode } from "./procoreValidCodes";
-import { TRUSTED_RESOLVED_BY, type ResolvedBy } from "./resolvedBy";
+import { TRUSTED_RESOLVED_BY, RANKING_RESOLVED_BY, type ResolvedBy } from "./resolvedBy";
+import { rankClassificationHistory, type ClassificationObservation } from "./suggestionRanking";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
@@ -663,10 +664,49 @@ export async function recordClassificationResolution(
 }
 
 /**
+ * Batch form of recordClassificationResolution for the import save's
+ * suggestion-signal rows (fidelity Phase 5): ONE insert request instead of a
+ * volley of single-row POSTs fired while the page navigates away — and a
+ * rejected/overridden pair lands atomically or not at all. Same typed
+ * vocabulary gate (a tag resolvedBy.ts doesn't define cannot compile); the
+ * table stays append-only. Fire-and-forget callers swallow errors.
+ *
+ * `projectId` accepts null for signature parity with the single-row helper,
+ * but the DEPLOYED insert policy only admits rows whose project the tenant
+ * owns — a null-project insert is rejected by RLS. Always pass the saving
+ * project's id.
+ */
+export async function recordClassificationResolutions(
+  resolutions: readonly { classification: string; resolvedCode: string; resolvedBy: ResolvedBy }[],
+  projectId: string | null
+): Promise<void> {
+  if (resolutions.length === 0) return;
+  const { error } = await supabase.from("classification_history").insert(
+    resolutions.map((r) => ({
+      classification: r.classification,
+      resolved_code: r.resolvedCode,
+      project_id: projectId,
+      resolved_by: r.resolvedBy,
+      confidence: 1.0,
+    }))
+  );
+
+  if (error) {
+    console.error("Failed to record classification resolutions:", error);
+    throw new Error(`Failed to record classification resolutions: ${error.message}`);
+  }
+}
+
+/**
  * Retrieves all historical resolutions for a classification string.
  * Groups by resolved_code with count for AI confidence scoring.
  * Trusted observations only (resolvedBy.ts): lump-tagged rows stay recorded
  * but never feed a suggestion.
+ *
+ * LEGACY single-classification reader (no production consumers today): raw
+ * row counts, no distinct-project dedupe, no lifecycle refile, no rejection
+ * downweight. The ranking authority is getClassificationHistoryBulk →
+ * suggestionRanking.ts — wire new suggestion consumers THERE, not here.
  */
 export async function getClassificationHistory(
   classification: string
@@ -710,53 +750,75 @@ export async function getClassificationHistory(
 /**
  * Bulk classification-history read for the import review (Phase 3 Slice 1):
  * one chunked `.in()` query for ALL the bid's line descriptions, grouped to
- * `classification → [{resolvedCode, count}]` sorted by count (desc) then code
- * (deterministic ties). Classifications with no history are simply absent.
- * READ-only; the table stays append-only. Callers treat history as advisory
- * (fail-soft) — an empty map must leave the import flow working unchanged.
- * Counts only TRUSTED observations (resolvedBy.ts allowlist): a `user_lump`
- * confirmation is a combined line's pairing, recorded forever but never ranked
- * into suggestions (record everything, tagged — architect-locked).
+ * `classification → [{resolvedCode, count}]`, best suggestion first.
+ * Classifications with no history are simply absent. READ-only; the table
+ * stays append-only. Callers treat history as advisory (fail-soft) — an empty
+ * map must leave the import flow working unchanged.
+ *
+ * Ranking is delegated to the pure suggestionRanking.ts (fidelity Phase 5):
+ * trusted distinct-project counts are the base, rejection signals downweight,
+ * recency tiebreaks, and `lifecycleDefs` (the caller's custom GC/Site-Ops
+ * defs) refile merged codes under their winner and drop retired codes before
+ * any scoring. The query allowlist (RANKING_RESOLVED_BY) fetches the trusted
+ * base plus `suggestion_rejected` rows ONLY — a `user_lump` pairing or an
+ * accepted/overridden signal row never even reaches the ranking code (record
+ * everything, tagged — architect-locked).
  */
 export async function getClassificationHistoryBulk(
-  classifications: readonly string[]
+  classifications: readonly string[],
+  lifecycleDefs?: readonly LifecycleDef[]
 ): Promise<Map<string, { resolvedCode: string; count: number }[]>> {
-  const out = new Map<string, { resolvedCode: string; count: number }[]>();
   const unique = [...new Set(classifications.filter((c) => c.trim() !== ""))];
-  if (unique.length === 0) return out;
+  if (unique.length === 0) return new Map();
 
   // PostgREST `.in()` lists go into the request URL — chunk to stay well clear
   // of URL-length limits on big bids (CARE alone has ~140 distinct lines).
+  // Chunks are independent, so they run in parallel. WITHIN a chunk, page past
+  // PostgREST's silent 1000-row response cap with a stable total order
+  // (created_at, then id) — the ranking's dedupe and downweights need the
+  // COMPLETE observation pool, and after a backlog push one chunk's
+  // descriptions can easily carry more than 1000 history rows.
   const CHUNK = 100;
-  const counts = new Map<string, Map<string, number>>();
-  for (let i = 0; i < unique.length; i += CHUNK) {
-    const { data, error } = await supabase
-      .from("classification_history")
-      .select("classification, resolved_code")
-      .in("classification", unique.slice(i, i + CHUNK))
-      .in("resolved_by", TRUSTED_RESOLVED_BY);
-    if (error) {
-      console.error("Failed to fetch bulk classification history:", error);
-      throw new Error(`Failed to fetch bulk classification history: ${error.message}`);
+  const PAGE = 1000;
+  const fetchChunk = async (chunk: string[]) => {
+    const rows: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("classification_history")
+        .select("classification, resolved_code, resolved_by, project_id, created_at")
+        .in("classification", chunk)
+        .in("resolved_by", RANKING_RESOLVED_BY)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("Failed to fetch bulk classification history:", error);
+        throw new Error(`Failed to fetch bulk classification history: ${error.message}`);
+      }
+      rows.push(...(data ?? []));
+      if (!data || data.length < PAGE) return rows;
     }
-    for (const row of data || []) {
-      const cls = row.classification as string;
-      const code = row.resolved_code as string;
-      const byCode = counts.get(cls) ?? new Map<string, number>();
-      byCode.set(code, (byCode.get(code) ?? 0) + 1);
-      counts.set(cls, byCode);
+  };
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    chunks.push(unique.slice(i, i + CHUNK));
+  }
+
+  const observations: ClassificationObservation[] = [];
+  for (const rows of await Promise.all(chunks.map(fetchChunk))) {
+    for (const row of rows) {
+      observations.push({
+        classification: row.classification as string,
+        resolvedCode: row.resolved_code as string,
+        resolvedBy: (row.resolved_by as string) ?? "",
+        projectId: (row.project_id as string | null) ?? null,
+        createdAt: (row.created_at as string) ?? "",
+      });
     }
   }
 
-  for (const [cls, byCode] of counts) {
-    out.set(
-      cls,
-      [...byCode.entries()]
-        .map(([resolvedCode, count]) => ({ resolvedCode, count }))
-        .sort((a, b) => b.count - a.count || a.resolvedCode.localeCompare(b.resolvedCode))
-    );
-  }
-  return out;
+  return rankClassificationHistory(observations, lifecycleDefs);
 }
 
 /**

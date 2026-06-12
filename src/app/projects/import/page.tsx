@@ -18,7 +18,7 @@ import {
   applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
   catalogCostCodeEntries, step23LinesForImport, uomMismatch,
   applyStep23Corrections, step23LineKey, step23ReviewStats,
-  findLikelyDuplicateImports,
+  findLikelyDuplicateImports, suggestionSignalsForSave,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
 import {
@@ -34,7 +34,8 @@ import { RESOLVED_BY } from "@/lib/resolvedBy";
 import { primeCostCodeResolver, primeCostCodeResolverFromCatalog } from "@/lib/costCodeResolver";
 import {
   getCostCodeMap, getProjects, saveProject, saveEstimate, createEstimateSnapshot,
-  recordEstimateOverride, recordClassificationResolution, saveImportedStep23Lines,
+  recordEstimateOverride, recordClassificationResolution, recordClassificationResolutions,
+  saveImportedStep23Lines,
   getClassificationHistoryBulk, getCustomStep23LineDefs, createCustomStep23LineDef,
   getCatalogAdditions,
 } from "@/lib/db";
@@ -108,10 +109,15 @@ export default function ImportPastEstimatePage() {
    * review (and the import itself) must never block on this table.
    */
   const [customDefs, setCustomDefs] = useState<CustomStep23LineDef[]>([]);
+  /** True once a defs fetch SUCCEEDED — distinguishes "confirmed zero custom
+   *  defs" from "not loaded yet", so handleFile's inline fallback fetch only
+   *  fires when a fast file-drop genuinely beat the mount load. */
+  const customDefsLoadedRef = React.useRef(false);
   useEffect(() => {
     let cancelled = false;
     getCustomStep23LineDefs()
       .then((defs) => {
+        customDefsLoadedRef.current = true;
         if (!cancelled) setCustomDefs(defs);
       })
       .catch((err) => {
@@ -263,11 +269,41 @@ export default function ImportPastEstimatePage() {
       // Legacy normalization inputs: the workbook's own BLI bridge + reverse map.
       const bridge = deriveLegacyBridge(wb);
 
+      // Lifecycle defs for suggestion ranking (Phase 5): ranking refiles
+      // merged codes under their winner and never offers a retired one — same
+      // rules as resolveStep23Line and the assign picker. Prefer the
+      // mount-loaded defs; a fast file-drop can beat that fetch, so load
+      // inline when they haven't landed (same fail-soft: an outage degrades
+      // to no lifecycle filtering). Drop any custom def whose code collides
+      // with a built-in STEP 2/3 def, a linked row, or a STEP 4 catalog item:
+      // those universes carry no lifecycle and the resolver ignores shadowing
+      // customs (lookupsFor's collision rule), so ranking must too — a
+      // retired shadow must not kill a live code's history.
+      let liveDefs = customDefs;
+      if (liveDefs.length === 0 && !customDefsLoadedRef.current) {
+        try {
+          liveDefs = await getCustomStep23LineDefs();
+          customDefsLoadedRef.current = true;
+          if (liveDefs.length > 0) setCustomDefs(liveDefs);
+        } catch {
+          liveDefs = [];
+        }
+      }
+      const rankingDefs = liveDefs.filter(
+        (d) =>
+          !isBuiltInStep23Code(d.code) &&
+          !isLinkedDivisionRow(d.code) &&
+          getCatalogItems()[d.code] === undefined
+      );
+
       // Past confirmations for this bid's exact descriptions (Phase 3 Slice 1).
       // ADVISORY + fail-soft: a history outage degrades to the pre-history tiers.
       let history: Map<string, { resolvedCode: string; count: number }[]> | undefined;
       try {
-        history = await getClassificationHistoryBulk(extracted.adHocLineItems.map((i) => i.description));
+        history = await getClassificationHistoryBulk(
+          extracted.adHocLineItems.map((i) => i.description),
+          rankingDefs
+        );
       } catch {
         history = undefined;
       }
@@ -447,6 +483,8 @@ export default function ImportPastEstimatePage() {
       // classification_history). Training data: fire-and-forget. A line marked
       // "combined" records its pairing TAGGED (resolvedBy.ts vocabulary) so
       // suggestion ranking and price mining skip it — recorded, never discarded.
+      // (suggestionSignalsForSave relies on every signal having a clean row
+      // here — change the two guards together.)
       for (const r of rows) {
         if (r.itemId && parsed.suggestions.has(r.id)) {
           recordClassificationResolution(
@@ -457,6 +495,14 @@ export default function ImportPastEstimatePage() {
           ).catch(() => {});
         }
       }
+
+      // Suggestion signals (fidelity Phase 5): what the estimator DID with each
+      // primary suggestion — accepted / rejected / overridden — recorded
+      // alongside (never instead of) the clean rows above, in ONE batch insert
+      // so a rejected/overridden pair lands atomically. Ranking downweights
+      // rejected pairings; the rest is the ML tier's future training signal.
+      recordClassificationResolutions(suggestionSignalsForSave(rows, parsed.suggestions), id)
+        .catch(() => {});
 
       // Fire-and-forget milestone snapshot (training data — loss is non-critical).
       createEstimateSnapshot(
