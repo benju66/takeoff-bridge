@@ -30,10 +30,15 @@ import { loadWorkbookModel } from "../lib/formulaEvaluator";
 import type { ProcessedTakeoffRow, ColumnDefinition } from "@/types";
 import type { Project } from "@/types/db";
 import { layoutWithDivisions, MASTER_TEMPLATE_PATH } from "./fixtures/templateLayout";
-
-const STEP1_FILE = "xl/worksheets/sheet4.xml";
-const STEP2_FILE = "xl/worksheets/sheet5.xml";
-const STEP4_FILE = "xl/worksheets/sheet7.xml";
+import {
+  STEP1_FILE,
+  STEP2_FILE,
+  STEP4_FILE,
+  mutateWorkbook,
+  typeValue,
+  deleteRow,
+  insertRow,
+} from "./helpers/workbookMutation";
 
 // ─── Fixture (same numbers as the recalc golden) ─────────────────────────────
 
@@ -108,57 +113,6 @@ async function exportBuffer(): Promise<ArrayBuffer> {
     fs.readFileSync(MASTER_TEMPLATE_PATH) as unknown as ArrayBuffer, gc(), so()
   );
   return blob.arrayBuffer();
-}
-
-// ─── XML mutation helpers — what Excel writes when an estimator edits ────────
-
-async function mutateWorkbook(
-  buffer: ArrayBuffer,
-  mutations: (zip: JSZip) => Promise<void>
-): Promise<ArrayBuffer> {
-  const zip = await JSZip.loadAsync(buffer);
-  await mutations(zip);
-  return zip.generateAsync({ type: "arraybuffer" });
-}
-
-/** Replace a cell's content with a plain numeric value (formula dropped —
- * exactly what Excel does on manual entry). */
-async function typeValue(zip: JSZip, sheetFile: string, ref: string, value: number): Promise<void> {
-  let xml = await zip.file(sheetFile)!.async("string");
-  const re = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
-  if (!re.test(xml)) throw new Error(`Cell ${ref} not found in ${sheetFile}`);
-  xml = xml.replace(re, (_m, attrs: string) => {
-    const cleaned = attrs.replace(/\s*t="[^"]*"/, "");
-    return `<c r="${ref}"${cleaned}><v>${value}</v></c>`;
-  });
-  zip.file(sheetFile, xml);
-}
-
-/** Delete an entire row element (Excel row deletion, minus the re-numbering —
- * extraction keys by col-C code, so the simplification is safe here). */
-async function deleteRow(zip: JSZip, sheetFile: string, rowNum: number): Promise<void> {
-  let xml = await zip.file(sheetFile)!.async("string");
-  const re = new RegExp(`<row r="${rowNum}"[^>]*>[\\s\\S]*?</row>`);
-  if (!re.test(xml)) throw new Error(`Row ${rowNum} not found in ${sheetFile}`);
-  xml = xml.replace(re, "");
-  zip.file(sheetFile, xml);
-}
-
-/** Append a new data row (an estimator typing a fresh line under a division). */
-async function insertRow(
-  zip: JSZip, sheetFile: string, rowNum: number,
-  cells: { code: string; desc: string; qty: number; price: number }
-): Promise<void> {
-  let xml = await zip.file(sheetFile)!.async("string");
-  const rowXml =
-    `<row r="${rowNum}">` +
-    `<c r="C${rowNum}" t="inlineStr"><is><t>${cells.code}</t></is></c>` +
-    `<c r="D${rowNum}" t="inlineStr"><is><t>${cells.desc}</t></is></c>` +
-    `<c r="F${rowNum}"><v>${cells.qty}</v></c>` +
-    `<c r="H${rowNum}"><v>${cells.price}</v></c>` +
-    `</row>`;
-  xml = xml.replace("</sheetData>", `${rowXml}</sheetData>`);
-  zip.file(sheetFile, xml);
 }
 
 function cloneState(state: RoundTripState): RoundTripState {

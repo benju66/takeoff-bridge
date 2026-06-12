@@ -23,6 +23,8 @@ import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLER
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
+import type { RoundTripDialChanges } from "@/types";
+import type { Project } from "@/types/db";
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace";
 import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
@@ -98,9 +100,44 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     rateCardSnapshot,
   );
 
+  // Round-trip Phase 5: applies an APPLY_ROUNDTRIP command's dial half onto
+  // the Step 2/3/project state ("forward" = next, "inverse" = prev). Threaded
+  // into the workbook's command dispatch so ONE undo reverses rows AND dials.
+  const applyRoundTripDials = React.useCallback(
+    (changes: RoundTripDialChanges, direction: "forward" | "inverse") => {
+      const pick = <T,>(d: { prev: T; next: T }): T => (direction === "forward" ? d.next : d.prev);
+      for (const [key, d] of Object.entries(changes.utilizations ?? {})) {
+        personnel.setUtilization(key, pick(d));
+      }
+      for (const [key, d] of Object.entries(changes.rateOverrides ?? {})) {
+        const value = pick(d);
+        // prev null = the corporate default was active before the upload
+        if (value === null) personnel.resetRate(key);
+        else personnel.handleRateChange(key, String(value));
+      }
+      for (const [key, d] of Object.entries(changes.equipment ?? {})) {
+        if (d) personnel.handleEquipmentChange(key as "dumpsters" | "toilets" | "electric", String(pick(d)));
+      }
+      for (const [key, d] of Object.entries(changes.gcManualEntries ?? {})) {
+        personnel.handleManualEntryChange(key, String(pick(d)));
+      }
+      for (const [key, d] of Object.entries(changes.siteOpsQuantities ?? {})) {
+        infrastructure.handleLineQuantityChange(key, String(pick(d)));
+      }
+      for (const [key, d] of Object.entries(changes.siteOpsRates ?? {})) {
+        infrastructure.handleLineRateChange(key, String(pick(d)));
+      }
+      for (const [field, d] of Object.entries(changes.projectFields ?? {})) {
+        if (d) handleProjectParamChange(field as keyof Project, pick(d));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps — handler identities are stable per render of the hooks
+    [personnel.setUtilization, personnel.handleRateChange, personnel.resetRate, personnel.handleEquipmentChange, personnel.handleManualEntryChange, infrastructure.handleLineQuantityChange, infrastructure.handleLineRateChange, handleProjectParamChange]
+  );
+
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
   // export handlers — gc-siteops Phase 3)
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides);
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, applyRoundTripDials);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,

@@ -231,8 +231,9 @@ export interface RowDelta {
   excelRow?: BaselineRow;
   /** kind "removed": the current app row the Excel file no longer carries. */
   currentRow?: BaselineRow;
-  /** Row existed at export but the app has since deleted it AND Excel edited
-   * it — both sides moved (three-way row conflict). */
+  /** Both sides moved (three-way row conflict): kind "added" = the app
+   * deleted a row Excel edited; kind "removed" = Excel deleted a row the app
+   * edited since export. */
   conflict?: boolean;
 }
 
@@ -345,9 +346,15 @@ export function computeRoundTripDelta(
         stale.value = true;
         continue;
       }
-      // Exported, vanished from the Excel file → user deleted it
-      stale.value = !valuesEqual(b.qty, c.qty) || !valuesEqual(b.unitPrice, c.unitPrice) || stale.value;
-      rowDeltas.push({ key, itemId, description: c.description, kind: "removed", currentRow: c });
+      // Exported, vanished from the Excel file → user deleted it. If the app
+      // ALSO changed the row since export, both sides moved → row conflict.
+      const currentMoved =
+        !valuesEqual(b.qty, c.qty) || !valuesEqual(b.unitPrice, c.unitPrice) || !valuesEqual(b.description, c.description);
+      if (currentMoved) stale.value = true;
+      rowDeltas.push({
+        key, itemId, description: c.description, kind: "removed", currentRow: c,
+        ...(currentMoved ? { conflict: true } : {}),
+      });
       continue;
     }
     if (!e || !c) continue;
