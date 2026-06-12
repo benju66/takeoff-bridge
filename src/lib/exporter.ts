@@ -3,6 +3,12 @@ import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS, isLinkedDivisionRow } from "./constants";
 import { computeTakeoffSummary, computeLinkedDivisionTotals, getMonthsBetween, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
 import { STEP23_PATTERN_BY_CODE, STEP1_DURATION_CELL, qtyFormulaFor, inputCellsFor } from "./step23FormulaPatterns";
+import {
+  writeStampParts,
+  STAMP_SCHEMA_VERSION,
+  RoundTripState,
+  BaselineStep23Inputs,
+} from "./roundTripStamp";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import { resolveProcoreCode } from "./costCodeResolver";
@@ -1182,6 +1188,62 @@ export function buildStep23DetailLines(
 }
 
 /**
+ * Builds the round-trip baseline: the workbook's extractable INPUT state at
+ * export time (round-trip Phase 4). Field-for-field the same shape
+ * roundTrip.ts extracts from a re-uploaded file:
+ *  - STEP 4 grid rows (linked division rows excluded — computed displays)
+ *  - STEP 2/3 input-cell values per line (pattern-table inputCellsFor)
+ *  - STEP 1 dials (duration, sqft, unit count, the 7 modifier rates)
+ */
+export function buildRoundTripBaseline(
+  rows: ProcessedTakeoffRow[],
+  projectMetadata: Project,
+  gcCalcResult: PersonnelCalcResult,
+  siteOpsCalcResult: SiteOpsCalcResult,
+  estimateTotalBasis: number
+): RoundTripState {
+  const detail = buildStep23DetailLines(gcCalcResult, siteOpsCalcResult, estimateTotalBasis);
+  const step23Inputs: Record<string, BaselineStep23Inputs> = {};
+  for (const line of [...detail.step2, ...detail.step3]) {
+    const pattern = STEP23_PATTERN_BY_CODE.get(line.code);
+    if (!pattern) continue; // writeStep23SheetDetail throws on this drift
+    const inputs = inputCellsFor(pattern.write);
+    const rec: BaselineStep23Inputs = { H: line.rate };
+    if (inputs.E !== null && line.utilization !== undefined) rec.E = line.utilization;
+    if (inputs.F !== null) rec.F = line.qty;
+    step23Inputs[line.code] = rec;
+  }
+
+  const modifierRates: Record<string, number> = {};
+  for (const mod of ESTIMATE_MODIFIERS) {
+    const rateField = `${mod.key}Rate` as keyof Project;
+    modifierRates[mod.key] = (projectMetadata[rateField] as number) ?? mod.defaultRate;
+  }
+
+  return {
+    step4Rows: rows
+      .filter((r) => !isLinkedDivisionRow(r.itemId))
+      .map((r) => ({
+        itemId: (r.itemId || "").trim(),
+        description: r.description || "",
+        qty: Number(r.matchedQty) || 0,
+        unitPrice: Number(r.unitPrice) || 0,
+        uom: r.uom || "",
+      })),
+    step23Inputs,
+    step1: {
+      durationMonths: getMonthsBetween(
+        projectMetadata.expectedStart || "",
+        projectMetadata.expectedFinish || ""
+      ),
+      squareFootage: Number(projectMetadata.squareFootage) || 0,
+      unitCount: Number(projectMetadata.unitCount) || 0,
+      modifierRates,
+    },
+  };
+}
+
+/**
  * Writes the GC / Site Ops line detail onto the exported workbook's
  * "STEP 2 - GCs" and "STEP 3 - SITE OPS" sheets as a LIVE projection of the
  * app (round-trip Phase 2; gc-siteops Phase 6 wrote frozen values). The
@@ -2240,6 +2302,28 @@ export async function generateExcelWorkbook(
       "$1$2$3"
     );
     if (cleaned !== wsXml) zip.file(wsName, cleaned);
+  }
+
+  // ── PHASE 2h: Round-trip stamp (Phase 4) ───────────────────────────────────
+  // Identity + baseline snapshot in a customXml part (Excel preserves these
+  // across edit/save). The baseline is the workbook's extractable INPUT state
+  // — same shape roundTrip.ts extracts on re-upload, so the three-way diff
+  // (exported vs Excel vs current) compares field-for-field with no DB
+  // lookup of historical state. Unsaved projects (no id) export unstamped.
+  if (projectMetadata?.id) {
+    await writeStampParts(zip, {
+      schemaVersion: STAMP_SCHEMA_VERSION,
+      projectId: projectMetadata.id,
+      projectName: projectMetadata.name || "",
+      exportedAt: new Date().toISOString(),
+      baseline: buildRoundTripBaseline(
+        rows,
+        projectMetadata,
+        gcCalcResult,
+        siteOpsCalcResult,
+        step4Summary.totalEstimatedCost
+      ),
+    });
   }
 
   // Generate output
