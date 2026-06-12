@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Search,
   Info,
@@ -12,10 +12,12 @@ import {
   ShieldCheck,
   AlertTriangle,
   PackagePlus,
+  GitCompareArrows,
+  Tags,
 } from "lucide-react";
 import { getCatalogItems, isBuiltInCatalogCode } from "@/lib/catalog";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions } from "@/lib/db";
+import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions, getProcoreCostCodes } from "@/lib/db";
 import { primeCostCodeResolver } from "@/lib/costCodeResolver";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
@@ -23,7 +25,9 @@ import {
   PROCORE_CODE_DESCRIPTIONS,
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
-import { CostCodeMapEntry, CatalogAddition } from "@/types/db";
+import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
+import { computeTypeReconciliation } from "@/lib/procoreTypeReconciliation";
+import { CostCodeMapEntry, CatalogAddition, ProcoreCostCode, ProcoreCostCodeType } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Cost Code Mapping editor (Phase 3c) — global view/edit of cost_code_map,
@@ -39,8 +43,14 @@ import { CostCodeMapEntry, CatalogAddition } from "@/types/db";
 // - Edits apply to rows created/re-derived AFTER the change (itemId edits, CSV
 //   imports, new workspaces). Existing saved line items keep their persisted
 //   code until touched.
-// - Only the row being edited mounts its <select> (224 options); all other
-//   rows render a lightweight button — keeps the 221-row table snappy.
+// - Only the row being edited mounts its <select>; all other rows render a
+//   lightweight button — keeps the 221-row table snappy.
+//
+// Phase 3 (type-aware, additive): the page now also READS the typed Procore
+// master list (procore_cost_codes via getProcoreCostCodes) to source the target
+// dropdown + descriptions + a Procore Type column, and to surface a read-only
+// type-mismatch / missing-base advisory. The EXPORT/persist validation gate is
+// unchanged — it stays the JSON oracle (isValidProcoreCode) until Phase 4.
 // ---------------------------------------------------------------------------
 
 const SOURCE_BADGES: Record<CostCodeMapEntry["source"], { label: string; classes: string }> = {
@@ -57,6 +67,23 @@ const SOURCE_BADGES: Record<CostCodeMapEntry["source"], { label: string; classes
     classes: "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50",
   },
 };
+
+// Procore type → badge classes (Phase 3 type-aware view). Mirrors /procore-codes.
+const PROCORE_TYPE_BADGES: Record<ProcoreCostCodeType, string> = {
+  Labor: "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-500 border-amber-200 dark:border-amber-900/50",
+  Material: "bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/50",
+  Subcontract: "bg-violet-50 dark:bg-violet-950/20 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-900/50",
+  Equipment: "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50",
+};
+
+function ProcoreTypeBadge({ type }: { type: ProcoreCostCodeType | undefined }) {
+  if (!type) return <span className="text-slate-400 italic text-[10px]">—</span>;
+  return (
+    <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${PROCORE_TYPE_BADGES[type]}`}>
+      {type.toUpperCase()}
+    </span>
+  );
+}
 
 export default function CostCodeMappingDashboard() {
   const [entries, setEntries] = useState<CostCodeMapEntry[] | null>(null);
@@ -76,6 +103,15 @@ export default function CostCodeMappingDashboard() {
    * outage degrades to "no additions", never blocks the editor.
    */
   const [additions, setAdditions] = useState<CatalogAddition[]>([]);
+  /**
+   * The typed Procore master list (procore_cost_codes). Phase 3 wires this in
+   * READ-ONLY: it sources the mapping target dropdown + Procore descriptions +
+   * the type column, and powers the type-aware reconciliation advisory. It does
+   * NOT replace the export/persist validation gate — that stays the JSON oracle
+   * (isValidProcoreCode) until Phase 4. Fail-soft: an outage degrades to the JSON
+   * code list so the editor keeps working, just without the type-aware extras.
+   */
+  const [procoreCodes, setProcoreCodes] = useState<ProcoreCostCode[]>([]);
 
   // Load the live mapping on mount (single gateway: db.ts)
   useEffect(() => {
@@ -115,6 +151,71 @@ export default function CostCodeMappingDashboard() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  // Load the typed Procore master list independently (fail-soft). An outage just
+  // means the type column / advisory are skipped and the dropdown falls back to
+  // the JSON code list — editing never blocks on this.
+  useEffect(() => {
+    let cancelled = false;
+    getProcoreCostCodes()
+      .then((loaded) => {
+        if (cancelled) return;
+        setProcoreCodes(loaded);
+        // Phase 4: this list IS the validation oracle now — prime it so the
+        // persist gate (isValidProcoreCode) validates against DB-active codes.
+        primeProcoreValidCodesFromList(loaded);
+      })
+      .catch((err) => {
+        console.error("Failed to load Procore master list (type-aware view skipped):", err);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // --- Typed Procore master list derivations (Phase 3, read-only) ---
+  const procoreActive = useMemo(
+    () => procoreCodes.filter((c) => c.status === "active"),
+    [procoreCodes],
+  );
+  const procoreTypeByCode = useMemo(
+    () => new Map(procoreActive.map((c) => [c.code, c.type] as const)),
+    [procoreActive],
+  );
+  const procoreDescByCode = useMemo(
+    () => new Map(procoreActive.map((c) => [c.code, c.description] as const)),
+    [procoreActive],
+  );
+  // Procore description preferring the DB master list, falling back to the JSON
+  // oracle so a still-valid legacy code (in JSON, not yet in the master list)
+  // still resolves a label.
+  const procoreDescription = useCallback(
+    (code: string) => procoreDescByCode.get(code) ?? PROCORE_CODE_DESCRIPTIONS.get(code),
+    [procoreDescByCode],
+  );
+  // Mapping target dropdown: the DB active list (type-aware) when reachable; the
+  // JSON oracle when not. The persist gate stays the JSON oracle (isValidProcoreCode)
+  // regardless, so a DB pick (⊂ JSON) always validates — no flip this phase.
+  const targetOptions = useMemo<{ code: string; type?: ProcoreCostCodeType }[]>(() => {
+    if (procoreActive.length > 0) {
+      return [...procoreActive]
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }))
+        .map((c) => ({ code: c.code, type: c.type }));
+    }
+    return PROCORE_VALID_CODES.map((c) => ({ code: c.code }));
+  }, [procoreActive]);
+  // Type-aware reconciliation advisory (read-only; no auto-fix). Only meaningful
+  // once the master list has loaded — otherwise nothing can be classified.
+  const reconciliation = useMemo(() => {
+    if (!entries || procoreActive.length === 0)
+      return { mismatches: [], missingBase: [] };
+    return computeTypeReconciliation(
+      entries.map((e) => ({ internalCode: e.internalCode, procoreCode: e.procoreCode })),
+      getCatalogItems(),
+      procoreTypeByCode,
+      // Phase 4: linked-division summaries map to the retired 2-20000.000 base
+      // but never export — exempt them so the advisory's missing-base drops 8 → 0.
+      { exemptLinkedDivision: true },
+    );
+  }, [entries, procoreActive, procoreTypeByCode]);
 
   const handleMappingChange = async (internalCode: string, newProcoreCode: string) => {
     if (!entries) return;
@@ -157,16 +258,18 @@ export default function CostCodeMappingDashboard() {
     const catalog = getCatalogItems();
     return entries.filter((e) => {
       const internalDescription = catalog[e.internalCode]?.description || "";
-      const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(e.procoreCode) || "";
+      const procoreDesc = procoreDescription(e.procoreCode) || "";
+      const procoreType = procoreTypeByCode.get(e.procoreCode) || "";
       return (
         e.internalCode.toLowerCase().includes(query) ||
         internalDescription.toLowerCase().includes(query) ||
         e.procoreCode.toLowerCase().includes(query) ||
-        procoreDescription.toLowerCase().includes(query) ||
+        procoreDesc.toLowerCase().includes(query) ||
+        procoreType.toLowerCase().includes(query) ||
         e.source.toLowerCase().includes(query)
       );
     });
-  }, [entries, searchQuery]);
+  }, [entries, searchQuery, procoreDescription, procoreTypeByCode]);
 
   // Divergence diagnostic: BUILT-IN catalog itemIds with NO cost_code_map row
   // resolve to "" at row creation (export blocker) and are editable nowhere —
@@ -190,15 +293,15 @@ export default function CostCodeMappingDashboard() {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return additions;
     return additions.filter((a) => {
-      const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(a.procoreCode) || "";
+      const procoreDesc = procoreDescription(a.procoreCode) || "";
       return (
         a.itemId.toLowerCase().includes(query) ||
         a.description.toLowerCase().includes(query) ||
         a.procoreCode.toLowerCase().includes(query) ||
-        procoreDescription.toLowerCase().includes(query)
+        procoreDesc.toLowerCase().includes(query)
       );
     });
-  }, [additions, searchQuery]);
+  }, [additions, searchQuery, procoreDescription]);
 
   if (!isLoaded || entries === null) {
     return (
@@ -263,6 +366,84 @@ export default function CostCodeMappingDashboard() {
               will block at export until resolved. Re-run the seed (npm run generate-seed → apply SQL) to add them:&nbsp;
               <span className="font-mono font-bold">{catalogCodesMissingFromMap.slice(0, 12).join(", ")}{catalogCodesMissingFromMap.length > 12 ? ", …" : ""}</span>
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Type-aware reconciliation advisory (Phase 3) — READ-ONLY, no auto-fix.
+          Surfaces where an estimate code's cost type disagrees with Procore's
+          type for its mapped base, and where a mapped base is absent from the
+          Procore master list. Fixing these (the estimate catalog's costType
+          values) is the follow-on reconciliation workstream — not done here. */}
+      {procoreActive.length > 0 && (reconciliation.mismatches.length > 0 || reconciliation.missingBase.length > 0) && (
+        <div className="bg-amber-50/40 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-xl mb-2 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-200/70 dark:border-amber-900/50 flex items-center gap-2">
+            <GitCompareArrows size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+              Type-aware reconciliation — {reconciliation.mismatches.length} type mismatch{reconciliation.mismatches.length === 1 ? "" : "es"}, {reconciliation.missingBase.length} missing base{reconciliation.missingBase.length === 1 ? "" : "s"}
+            </h4>
+            <span className="ml-auto text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Advisory · read-only</span>
+          </div>
+          <p className="px-4 pt-3 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+            Compared against the Procore master list (<a href="/procore-codes" className="font-bold text-blue-600 dark:text-blue-400 hover:underline">/procore-codes</a>).
+            Nothing here changes export behavior — these are flagged for correction in a later reconciliation pass, not auto-fixed.
+          </p>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+            {/* Type mismatches */}
+            <div className="bg-card border border-grid-border rounded-xl overflow-hidden">
+              <div className="px-3 py-2 border-b border-grid-border bg-background/60 flex items-center gap-2">
+                <Tags size={13} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                  Type mismatches ({reconciliation.mismatches.length})
+                </span>
+              </div>
+              {reconciliation.mismatches.length === 0 ? (
+                <p className="px-3 py-3 text-[11px] text-slate-500 italic">None — every mapped type agrees with Procore.</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto divide-y divide-grid-border/50">
+                  {reconciliation.mismatches.map((m) => (
+                    <div key={m.internalCode} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400 w-32 shrink-0">{m.internalCode}</span>
+                      <span className="text-slate-600 dark:text-slate-400">
+                        estimate says <span className="font-bold text-foreground">{m.estimateType ?? m.estimateCostType}</span>
+                        {" · "}Procore says <span className="font-bold text-foreground">{m.procoreType}</span>
+                      </span>
+                      <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{m.procoreCode}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Missing base */}
+            <div className="bg-card border border-grid-border rounded-xl overflow-hidden">
+              <div className="px-3 py-2 border-b border-grid-border bg-background/60 flex items-center gap-2">
+                <AlertTriangle size={13} className="text-rose-500 shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                  Mapped base not in Procore list ({reconciliation.missingBase.length})
+                </span>
+              </div>
+              {reconciliation.missingBase.length === 0 ? (
+                <p className="px-3 py-3 text-[11px] text-slate-500 italic">None — every mapped base exists.</p>
+              ) : (
+                <>
+                  <p className="px-3 pt-2 text-[10px] text-slate-500 dark:text-slate-400 italic">
+                    These map to a Procore base absent from the master list (a retire-candidate code). Export-safe today
+                    where the rows are linked-division display totals; resolved in Phase 4.
+                  </p>
+                  <div className="max-h-60 overflow-y-auto divide-y divide-grid-border/50">
+                    {reconciliation.missingBase.map((m) => (
+                      <div key={m.internalCode} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                        <span className="font-mono font-bold text-blue-600 dark:text-blue-400 w-32 shrink-0">{m.internalCode}</span>
+                        <span className="text-slate-600 dark:text-slate-400">→ base</span>
+                        <span className="ml-auto font-mono text-[10px] text-rose-500 shrink-0">{m.procoreCode}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -332,6 +513,7 @@ export default function CostCodeMappingDashboard() {
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Internal Code</th>
                     <th className="p-4 text-center w-80 border-r border-b border-grid-border font-semibold">Item Description</th>
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Procore Code (Click to Edit)</th>
+                    <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Procore Type</th>
                     <th className="p-4 text-center w-72 border-r border-b border-grid-border font-semibold">Procore Description</th>
                     <th className="p-4 text-center border-r border-b border-grid-border font-semibold">Source</th>
                   </tr>
@@ -339,14 +521,15 @@ export default function CostCodeMappingDashboard() {
                 <tbody>
                   {filteredEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
+                      <td colSpan={6} className="p-8 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
                         No mappings match the query: &quot;{searchQuery}&quot;
                       </td>
                     </tr>
                   ) : (
                     filteredEntries.map((entry) => {
                       const internalDescription = getCatalogItems()[entry.internalCode]?.description || "—";
-                      const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(entry.procoreCode);
+                      const procoreDesc = procoreDescription(entry.procoreCode);
+                      const procoreType = procoreTypeByCode.get(entry.procoreCode);
                       const badge = SOURCE_BADGES[entry.source] || SOURCE_BADGES.template;
                       const isLegacyCode = !isValidProcoreCode(entry.procoreCode);
                       const isSaving = savingCode === entry.internalCode;
@@ -364,7 +547,7 @@ export default function CostCodeMappingDashboard() {
                           <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             <div className="flex items-center justify-center gap-2">
                               {isEditing ? (
-                                // Only the active row mounts the 224-option select
+                                // Only the active row mounts the (type-aware) options select
                                 <select
                                   autoFocus
                                   value={entry.procoreCode}
@@ -380,9 +563,9 @@ export default function CostCodeMappingDashboard() {
                                       {entry.procoreCode} (not on Importer list)
                                     </option>
                                   )}
-                                  {PROCORE_VALID_CODES.map((opt) => (
+                                  {targetOptions.map((opt) => (
                                     <option key={opt.code} value={opt.code}>
-                                      {opt.code}
+                                      {opt.code}{opt.type ? ` · ${opt.type}` : ""}
                                     </option>
                                   ))}
                                 </select>
@@ -402,8 +585,11 @@ export default function CostCodeMappingDashboard() {
                               )}
                             </div>
                           </td>
+                          <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
+                            <ProcoreTypeBadge type={procoreType} />
+                          </td>
                           <td className="p-4 text-slate-600 dark:text-slate-400 font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
-                            {procoreDescription || <span className="italic text-rose-500">Not on Importer list</span>}
+                            {procoreDesc || <span className="italic text-rose-500">Not on Importer list</span>}
                           </td>
                           <td className="p-4 text-center border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
                             <span className={`inline-block text-[9px] px-2 py-0.5 border rounded-md font-bold tracking-widest ${badge.classes}`}>
@@ -453,7 +639,7 @@ export default function CostCodeMappingDashboard() {
                       </tr>
                     ) : (
                       filteredAdditions.map((a) => {
-                        const procoreDescription = PROCORE_CODE_DESCRIPTIONS.get(a.procoreCode);
+                        const procoreDesc = procoreDescription(a.procoreCode);
                         return (
                           <tr key={a.itemId} className="group transition-colors">
                             <td className="p-4 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-widest uppercase border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
@@ -466,7 +652,7 @@ export default function CostCodeMappingDashboard() {
                               {a.procoreCode}
                             </td>
                             <td className="p-4 text-slate-600 dark:text-slate-400 font-semibold border-r border-b border-grid-border transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60">
-                              {procoreDescription || <span className="italic text-rose-500">Not on Importer list</span>}
+                              {procoreDesc || <span className="italic text-rose-500">Not on Importer list</span>}
                             </td>
                           </tr>
                         );

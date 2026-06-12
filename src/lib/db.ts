@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -2332,4 +2332,125 @@ export async function updateCatalogAddition(input: {
     throw new Error(`Failed to update catalog code ${itemId}: ${error?.message ?? "no row returned"}`);
   }
   return mapCatalogAdditionRow(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Procore cost codes master list (Procore Cost Codes — Phase 1)
+// ═══════════════════════════════════════════════════════════════════
+//
+// The company's authoritative Procore cost-code master list (procore_cost_codes
+// table): (code, type, description) + lifecycle (status/mergedInto). The
+// type-aware source of truth for "what Procore codes exist" and the join spine
+// for the later actuals/final-cost workstream.
+//
+// UNWIRED in Phase 1: this read function exists but NO consumer flips to it yet —
+// src/lib/procore-valid-codes.json stays the live export-validation oracle until
+// Phase 4. Added now so Phase 2 (the /procore-codes page) and Phase 3 (type-aware
+// /cost-codes) have the read surface ready.
+
+const PROCORE_COST_CODE_COLUMNS = "code, type, description, status, merged_into";
+
+function mapProcoreCostCodeRow(row: Record<string, unknown>): ProcoreCostCode {
+  return {
+    code: row.code as string,
+    type: row.type as ProcoreCostCode["type"],
+    description: row.description as string,
+    // status is NOT NULL DEFAULT 'active'; the ?? is a safety net for narrower projections.
+    status: (row.status as ProcoreCostCode["status"]) ?? "active",
+    mergedInto: (row.merged_into as string | null) ?? null,
+  };
+}
+
+/**
+ * The full Procore cost-code master list (procore_cost_codes table), ordered by
+ * code — every row including retired/merged ones, so the management page and the
+ * Phase 4 reconciliation can show lifecycle state. Consumers that want only the
+ * live list filter on `status === 'active'`. Throws on error (consistent with
+ * getCatalogAdditions / getCostCodeMap); callers that must degrade gracefully wrap
+ * with `.catch(() => [])` at the call site.
+ */
+export async function getProcoreCostCodes(): Promise<ProcoreCostCode[]> {
+  const { data, error } = await supabase
+    .from("procore_cost_codes")
+    .select(PROCORE_COST_CODE_COLUMNS)
+    .order("code", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch Procore cost codes:", error);
+    throw new Error(`Failed to fetch Procore cost codes: ${error.message}`);
+  }
+
+  return (data || []).map(mapProcoreCostCodeRow);
+}
+
+/**
+ * Apply a /procore-codes import (Phase 2). Upserts the validated file rows and
+ * (only) the codes the architect explicitly confirmed for retirement — never
+ * auto-tombstones a missing code (architect-locked: a partial/bad export must
+ * not silently nuke live codes).
+ *
+ * - `upserts` INSERT-or-UPDATE on the `code` PK: a new code is inserted, an
+ *   existing one has its type/description refreshed and is (re)set 'active'
+ *   with merged_into cleared (a re-import re-activates a previously retired
+ *   code that reappears in the file).
+ * - `retireCodes` flips the named ACTIVE codes to status='retired'. These are
+ *   exactly the diff's proposed retirements the user ticked — nothing else.
+ *
+ * Re-validates the upsert rows here (single gateway: never trust the caller) so
+ * an invalid type/shape can't reach the table even if the page is bypassed.
+ * Routes through the table's existing INSERT/UPDATE RLS policies — NO new DDL.
+ * Not transactional across the two statements (supabase-js has no multi-stmt tx
+ * without an RPC); upserts run first so a mid-apply failure never leaves a code
+ * retired without its replacement landing.
+ */
+export async function applyProcoreCostCodesImport(input: {
+  upserts: Array<{ code: string; type: ProcoreCostCode["type"]; description: string }>;
+  retireCodes?: string[];
+}): Promise<void> {
+  const retireCodes = (input.retireCodes ?? []).map((c) => c.trim()).filter(Boolean);
+
+  // Re-validate every upsert row against the table's shape + CHECK vocabulary.
+  const validTypes: ProcoreCostCode["type"][] = ["Labor", "Material", "Subcontract", "Equipment"];
+  const rows = input.upserts.map((r) => ({
+    code: r.code.trim(),
+    type: r.type,
+    description: r.description.trim(),
+  }));
+  for (const r of rows) {
+    if (!r.code) throw new Error("Cannot apply import: a row has an empty cost code.");
+    if (!r.description) throw new Error(`Cannot apply import: ${r.code} has an empty description.`);
+    if (!validTypes.includes(r.type)) {
+      throw new Error(`Cannot apply import: ${r.code} has invalid type "${r.type}".`);
+    }
+  }
+
+  if (rows.length > 0) {
+    const { error: upsertError } = await supabase
+      .from("procore_cost_codes")
+      .upsert(
+        rows.map((r) => ({
+          code: r.code,
+          type: r.type,
+          description: r.description,
+          status: "active",
+          merged_into: null,
+        })),
+        { onConflict: "code" },
+      );
+    if (upsertError) {
+      console.error("Failed to apply Procore cost-code upserts:", upsertError);
+      throw new Error(`Failed to apply Procore cost-code import: ${upsertError.message}`);
+    }
+  }
+
+  if (retireCodes.length > 0) {
+    const { error: retireError } = await supabase
+      .from("procore_cost_codes")
+      .update({ status: "retired" })
+      .in("code", retireCodes);
+    if (retireError) {
+      console.error("Failed to retire Procore cost codes:", retireError);
+      throw new Error(`Failed to retire Procore cost codes: ${retireError.message}`);
+    }
+  }
 }

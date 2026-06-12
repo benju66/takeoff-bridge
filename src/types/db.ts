@@ -313,6 +313,41 @@ export interface CatalogAddition {
 }
 
 /**
+ * Procore's classification of a cost code (procore_cost_codes table). Note
+ * Equipment has NO estimate-side counterpart — the estimate catalog carries only
+ * Labor/Materials/Subcontract (L/M/S); the type-aware mapping advisory (Phase 3)
+ * surfaces that gap rather than resolving it.
+ */
+export type ProcoreCostCodeType = 'Labor' | 'Material' | 'Subcontract' | 'Equipment';
+
+/**
+ * Lifecycle state of a Procore cost code (procore_cost_codes table). A code's row
+ * is never deleted — it tombstones via 'retired' or redirects via 'merged'
+ * (mergedInto names the winner). 'active' codes are the live Procore master list.
+ */
+export type ProcoreCostCodeStatus = 'active' | 'retired' | 'merged';
+
+/**
+ * One row of the company's authoritative Procore cost-code master list
+ * (procore_cost_codes table — Procore Cost Codes Phase 1). The type-aware source
+ * of truth for "what Procore codes exist," seeded from the Procore export
+ * spreadsheet (217 codes). The join spine for the later actuals/final-cost
+ * workstream. Phase 1 ships this read shape UNWIRED — the hard-coded
+ * src/lib/procore-valid-codes.json stays the live export-validation oracle until
+ * Phase 4 flips it.
+ */
+export interface ProcoreCostCode {
+  /** The Procore cost code, e.g. "1-10000.000" (Procore's shape varies). */
+  code: string;
+  type: ProcoreCostCodeType;
+  /** Human-readable label (non-empty). */
+  description: string;
+  status: ProcoreCostCodeStatus;
+  /** Redirect winner when status='merged' (a code string; null otherwise). */
+  mergedInto: string | null;
+}
+
+/**
  * One named frozen version of a project's estimate (estimate_versions table,
  * Estimate Versioning module) — list-view shape WITHOUT the frozen line items
  * (use EstimateVersionDetail for those). The team edits one live working copy;

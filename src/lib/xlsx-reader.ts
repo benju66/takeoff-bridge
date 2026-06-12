@@ -89,3 +89,65 @@ export async function parseTogalXLSX(
 
   return { rows, sheetNames, selectedSheet: ws.name };
 }
+
+// ---------------------------------------------------------------------------
+// Procore Cost Codes master-list reader (Procore Cost Codes — Phase 2)
+//
+// The Procore export has a fixed 3-column shape: Cost Code | Type | Description.
+// parseTogalXLSX above only keeps rows that carry a "Classification" column, so
+// it can't read this file — this is the dedicated parse path the /procore-codes
+// import flow uses. It returns RAW string cells (no type/shape validation); the
+// caller validates the vocabulary + shape via validateProcoreImportRows in
+// src/lib/procoreCostCodes.ts (single validation surface, mirrors the seed).
+// ---------------------------------------------------------------------------
+
+/** One raw row from the Procore Cost Codes spreadsheet (pre-validation). */
+export interface ParsedProcoreCostCodeRow {
+  code: string;
+  type: string;
+  description: string;
+}
+
+const PROCORE_COST_CODE_HEADER = ["cost code", "type", "description"];
+
+/**
+ * Parse the Procore Cost Codes .xlsx (Cost Code | Type | Description) into raw
+ * string rows. Auto-selects the first sheet with data, asserts the 3-column
+ * header (fail-loud — a wrong-shape file is rejected before any DB write), and
+ * skips fully-blank rows. Cells are trimmed; no other normalization.
+ */
+export async function parseProcoreCostCodesXLSX(
+  file: File,
+): Promise<ParsedProcoreCostCodeRow[]> {
+  const wb = new ExcelJS.Workbook();
+  const buffer = await file.arrayBuffer();
+  await wb.xlsx.load(buffer);
+
+  const ws = wb.worksheets.find((s) => s.rowCount > 1);
+  if (!ws) {
+    throw new Error("No data sheet found in the uploaded file.");
+  }
+
+  // Header check (row 1) — exact 3-column shape, case-insensitive.
+  const header = [1, 2, 3].map((n) =>
+    String(extractCellValue(ws.getRow(1).getCell(n)) || "").trim().toLowerCase(),
+  );
+  if (header.join("|") !== PROCORE_COST_CODE_HEADER.join("|")) {
+    throw new Error(
+      `Unexpected header row: got [${header.join(", ")}], expected [Cost Code, Type, Description]. ` +
+        `This page imports the Procore Cost Codes export only.`,
+    );
+  }
+
+  const rows: ParsedProcoreCostCodeRow[] = [];
+  ws.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return; // header
+    const code = String(extractCellValue(row.getCell(1)) || "").trim();
+    const type = String(extractCellValue(row.getCell(2)) || "").trim();
+    const description = String(extractCellValue(row.getCell(3)) || "").trim();
+    if (!code && !type && !description) return; // skip fully-blank rows
+    rows.push({ code, type, description });
+  });
+
+  return rows;
+}

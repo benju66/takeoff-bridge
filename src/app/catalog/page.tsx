@@ -49,6 +49,7 @@ import {
   PROCORE_CODE_DESCRIPTIONS,
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
+import { primeProcoreValidCodesFromDb } from "@/lib/procoreValidCodesPrime";
 import type { CustomStep23LineDef, CatalogAddition } from "@/types/db";
 
 // ---------------------------------------------------------------------------
@@ -874,6 +875,13 @@ function Step4CatalogSection() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Phase 4: prime the Procore validation oracle from the live master list so
+  // the addition writer's persist gate (isValidProcoreCode) validates against
+  // DB-active codes. Fail-soft — an outage keeps the JSON baseline.
+  useEffect(() => {
+    primeProcoreValidCodesFromDb();
   }, []);
 
   const flashSaved = (itemId: string) => {
