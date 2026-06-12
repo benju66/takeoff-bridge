@@ -313,6 +313,25 @@ export interface CatalogAddition {
 }
 
 /**
+ * A cost-type override for a BUILT-IN STEP 4 catalog code
+ * (catalog_cost_type_overrides table — Template + Catalog Reconciliation
+ * Phase 2). The catalog chokepoint (src/lib/catalog.ts) patches the matching
+ * built-in's costType with this value — the override wins for that ONE field
+ * only — so a type correction survives the template re-harvest. The INVERSE of
+ * CatalogAddition's collision rule: an addition never shadows a built-in; an
+ * override exists only to relabel one. LABEL ONLY — costType moves no dollars
+ * (not read by calculations.ts or exporter.ts).
+ */
+export interface CatalogCostTypeOverride {
+  /** A BUILT-IN catalog code (NN-NNNN.NNN) — db.ts rejects non-built-ins. */
+  itemId: string;
+  /** Cost type: 'L' (Labor) | 'M' (Materials) | 'S' (Subcontract) | 'E' (Equipment). */
+  costType: string;
+  /** Optional provenance for WHY the type was overridden ('' when none). */
+  note: string;
+}
+
+/**
  * Procore's classification of a cost code (procore_cost_codes table). The
  * estimate-side vocabulary mirrors all four as L/M/S/E (Equipment joined in the
  * Template + Catalog Reconciliation workstream, Phase 1); the type-aware mapping

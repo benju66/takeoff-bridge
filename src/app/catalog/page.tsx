@@ -29,6 +29,7 @@ import {
   getCatalogAdditions,
   createCatalogAddition,
   updateCatalogAddition,
+  getCatalogCostTypeOverrides,
 } from "@/lib/db";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
@@ -42,6 +43,7 @@ import { isActive } from "@/lib/catalogLifecycle";
 import {
   isBuiltInCatalogCode,
   catalogAdditionDriftState,
+  primeCatalogCostTypeOverrides,
 } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
@@ -884,6 +886,18 @@ function Step4CatalogSection() {
   // DB-active codes. Fail-soft — an outage keeps the JSON baseline.
   useEffect(() => {
     primeProcoreValidCodesFromDb();
+  }, []);
+
+  // Prime the built-in cost-type override overlay independently (Reconciliation
+  // Phase 2 — fail-soft) so this page and a workspace opened later in this tab
+  // read the corrected types. The Phase 5 editor will also drive its display
+  // from these rows. LABEL ONLY — moves no dollars; empty = identity.
+  useEffect(() => {
+    getCatalogCostTypeOverrides()
+      .then((loaded) => primeCatalogCostTypeOverrides(loaded))
+      .catch((err) => {
+        console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
+      });
   }, []);
 
   const flashSaved = (itemId: string) => {

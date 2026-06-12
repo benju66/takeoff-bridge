@@ -28,7 +28,7 @@ import {
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
 import { primeProcoreValidCodesFromDb } from "@/lib/procoreValidCodesPrime";
 import { validateAssignInput } from "@/lib/assignCode";
-import { getCatalogItems } from "@/lib/catalog";
+import { getCatalogItems, primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { getDivisionCode } from "@/lib/division";
 import { RESOLVED_BY } from "@/lib/resolvedBy";
@@ -39,6 +39,7 @@ import {
   saveImportedStep23Lines,
   getClassificationHistoryBulk, getCustomStep23LineDefs, createCustomStep23LineDef,
   getCatalogAdditions,
+  getCatalogCostTypeOverrides,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
 import type { Project, BidOutcome, DeliveryMethod, CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
@@ -248,6 +249,11 @@ export default function ImportPastEstimatePage() {
       // their own procore_code + default_unit_price — so the catalog item overlay
       // + BOTH resolvers carry them; cost_code_map / rate_card untouched. FAIL-SOFT.
       primeCatalogAdditionOverlays(await getCatalogAdditions().catch(() => []));
+
+      // Prime the built-in cost-type override overlay (Reconciliation Phase 2)
+      // alongside the additions so imported row births read the corrected type.
+      // LABEL ONLY — moves no dollars. FAIL-SOFT; empty = identity.
+      primeCatalogCostTypeOverrides(await getCatalogCostTypeOverrides().catch(() => []));
 
       // Phase 4: prime the Procore validation oracle from the live master list so
       // the review gate (assign / mint custom code) validates against DB-active

@@ -12,7 +12,7 @@ import {
   ColumnFiltersState,
   Table,
 } from "@tanstack/react-table";
-import { getCatalogItems } from "@/lib/catalog";
+import { getCatalogItems, primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
@@ -22,7 +22,7 @@ import { SelectCellInput } from "@/components/workspace/SelectCellInput";
 import { RowProvenanceGlyph } from "@/components/workspace/RowProvenanceGlyph";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
-import { Project, DivisionLayout, CatalogAddition, ProcoreCostCode } from "@/types/db";
+import { Project, DivisionLayout, CatalogAddition, CatalogCostTypeOverride, ProcoreCostCode } from "@/types/db";
 import {
   getEstimateLineItems,
   getProjectRegistry,
@@ -33,6 +33,7 @@ import {
   getCostCodeMap,
   getRateCard,
   getCatalogAdditions,
+  getCatalogCostTypeOverrides,
   getProcoreCostCodes,
 } from "@/lib/db";
 import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
@@ -353,7 +354,7 @@ export function useTakeoffWorkbook(
         // Load all data sources in parallel. Catalog additions are FAIL-SOFT
         // (`.catch(() => [])`) so an additions outage degrades to built-ins only
         // and never rejects the whole mount batch.
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard, savedCatalogAdditions, savedProcoreCodes] =
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard, savedCatalogAdditions, savedCostTypeOverrides, savedProcoreCodes] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
@@ -364,6 +365,7 @@ export function useTakeoffWorkbook(
             getCostCodeMap(MASTER_TEMPLATE_NAME),
             getRateCard(MASTER_TEMPLATE_NAME),
             getCatalogAdditions().catch(() => [] as CatalogAddition[]),
+            getCatalogCostTypeOverrides().catch(() => [] as CatalogCostTypeOverride[]),
             getProcoreCostCodes().catch(() => [] as ProcoreCostCode[]),
           ]);
 
@@ -383,6 +385,11 @@ export function useTakeoffWorkbook(
         // overlay + BOTH resolvers carry them; cost_code_map / rate_card untouched.
         // An empty list is a no-op identity (nothing primed).
         primeCatalogAdditionOverlays(savedCatalogAdditions);
+
+        // Prime the built-in cost-type override overlay (Reconciliation Phase 2)
+        // alongside the additions so row births read the corrected type. LABEL
+        // ONLY — costType moves no dollars. FAIL-SOFT; empty = identity.
+        primeCatalogCostTypeOverrides(savedCostTypeOverrides);
 
         // Prime the company-default rate chokepoint (Rate-card Phase B). On an
         // EMPTY result (unseeded DB / template-name mismatch) leave it unprimed:

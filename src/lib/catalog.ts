@@ -1,5 +1,5 @@
 import { InternalEstimateItem } from "@/types";
-import { CatalogAddition } from "@/types/db";
+import { CatalogAddition, CatalogCostTypeOverride } from "@/types/db";
 import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 
 // ---------------------------------------------------------------------------
@@ -22,6 +22,7 @@ import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
 // ---------------------------------------------------------------------------
 
 let primedAdditions: InternalEstimateItem[] | null = null;
+let primedCostTypeOverrides: Map<string, string> | null = null;
 
 /**
  * Prime the in-app catalog additions overlay (Phase 6 wires the DB fetch here,
@@ -32,21 +33,54 @@ export function primeCatalogAdditions(items: InternalEstimateItem[]): void {
   primedAdditions = items.length > 0 ? items : null;
 }
 
-/** Test-only: clear the primed additions overlay. */
+/**
+ * Prime the built-in cost-type override overlay (catalog_cost_type_overrides
+ * rows — Template + Catalog Reconciliation Phase 2). An override patches a
+ * matching BUILT-IN's costType — that ONE field only — the inverse of the
+ * addition collision rule: an addition never shadows a built-in, an override
+ * exists only to relabel one. Overrides naming a non-built-in code are inert
+ * (e.g. a code dropped by a later harvest). An empty list is treated as
+ * nothing primed so the identity contract holds. LABEL ONLY — costType is read
+ * by neither calculations.ts nor exporter.ts, so priming moves no dollars.
+ */
+export function primeCatalogCostTypeOverrides(overrides: CatalogCostTypeOverride[]): void {
+  if (overrides.length === 0) {
+    primedCostTypeOverrides = null;
+    return;
+  }
+  primedCostTypeOverrides = new Map(overrides.map((o) => [o.itemId, o.costType]));
+}
+
+/** Test-only: clear the primed additions + cost-type override overlays. */
 export function resetCatalog(): void {
   primedAdditions = null;
+  primedCostTypeOverrides = null;
 }
 
 /**
  * The merged STEP 4 catalog keyed by itemId. Nothing primed ⇒ the exact
  * ESTIMATE_ITEMS_MASTER reference. With additions primed, additions are layered
  * first and the built-ins overwrite any colliding code (built-in always wins).
+ * With cost-type overrides primed, each matching built-in is then cloned with
+ * the override's costType (override wins for that one field; all other fields —
+ * and every untouched item — keep the built-in reference).
  */
 export function getCatalogItems(): Record<string, InternalEstimateItem> {
-  if (!primedAdditions) return ESTIMATE_ITEMS_MASTER;
+  if (!primedAdditions && !primedCostTypeOverrides) return ESTIMATE_ITEMS_MASTER;
   const merged: Record<string, InternalEstimateItem> = {};
-  for (const add of primedAdditions) merged[add.itemId] = add;
-  return Object.assign(merged, ESTIMATE_ITEMS_MASTER);
+  if (primedAdditions) {
+    for (const add of primedAdditions) merged[add.itemId] = add;
+  }
+  Object.assign(merged, ESTIMATE_ITEMS_MASTER);
+  if (primedCostTypeOverrides) {
+    for (const [itemId, costType] of primedCostTypeOverrides) {
+      const builtIn = ESTIMATE_ITEMS_MASTER[itemId];
+      if (builtIn && builtIn.costType !== costType) {
+        merged[itemId] = { ...builtIn, costType };
+      }
+    }
+  }
+  return merged;
 }
 
 /**

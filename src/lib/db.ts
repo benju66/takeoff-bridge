@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -2332,6 +2332,94 @@ export async function updateCatalogAddition(input: {
     throw new Error(`Failed to update catalog code ${itemId}: ${error?.message ?? "no row returned"}`);
   }
   return mapCatalogAdditionRow(data);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Catalog cost-type overrides (Template + Catalog Reconciliation Phase 2)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Cost-type overrides for BUILT-IN STEP 4 catalog codes
+// (catalog_cost_type_overrides table). The catalog chokepoint (catalog.ts)
+// patches a matching built-in's costType with the override — that ONE field
+// only — so a type correction survives the template re-harvest. LABEL ONLY:
+// cost_type moves no dollars (not read by calculations.ts / exporter.ts);
+// saved line items keep their frozen-at-birth cost_type.
+
+const CATALOG_COST_TYPE_OVERRIDE_COLUMNS = "item_id, cost_type, note";
+
+function mapCatalogCostTypeOverrideRow(row: Record<string, unknown>): CatalogCostTypeOverride {
+  return {
+    itemId: row.item_id as string,
+    costType: row.cost_type as string,
+    note: (row.note as string) || "",
+  };
+}
+
+/**
+ * Every built-in cost-type override (catalog_cost_type_overrides table),
+ * ordered by itemId — the overlay the catalog chokepoint patches onto the
+ * built-ins. Consumers load these FAIL-SOFT (`.catch(() => [])` at the prime
+ * site): an outage degrades to the harvested types, never blocks a workflow.
+ */
+export async function getCatalogCostTypeOverrides(): Promise<CatalogCostTypeOverride[]> {
+  const { data, error } = await supabase
+    .from("catalog_cost_type_overrides")
+    .select(CATALOG_COST_TYPE_OVERRIDE_COLUMNS)
+    .order("item_id", { ascending: true });
+
+  if (error) {
+    console.error("Failed to fetch catalog cost-type overrides:", error);
+    throw new Error(`Failed to fetch catalog cost-type overrides: ${error.message}`);
+  }
+
+  return (data || []).map(mapCatalogCostTypeOverrideRow);
+}
+
+/**
+ * Creates or updates the cost-type override for one BUILT-IN catalog code (the
+ * Phase 3 bulk-fix seeding + the Phase 5 /catalog built-in cost-type editor
+ * write path). Validates before the write, mirroring the table's CHECK
+ * constraints:
+ *  - itemId must be a CURRENT BUILT-IN catalog code (an override exists only to
+ *    relabel a built-in — the inverse of the addition collision rule);
+ *  - cost type must be L/M/S/E (the shared addition guard).
+ * Upsert on the item_id PK: one override per code, the latest write wins.
+ * updated_at is owned by the touch trigger. NOT a financial write — costType is
+ * a label (advisory + future row births only).
+ */
+export async function upsertCatalogCostTypeOverride(input: {
+  itemId: string;
+  costType: string;
+  note?: string;
+}): Promise<CatalogCostTypeOverride> {
+  const itemId = input.itemId.trim();
+  const costType = normalizeAdditionCostType(input.costType);
+
+  if (!isBuiltInCatalogCode(itemId)) {
+    throw new Error(
+      `Code ${itemId} is not a built-in STEP 4 catalog code — a cost-type override can only relabel a built-in (additions carry their own type)`
+    );
+  }
+
+  const row: { item_id: string; cost_type: string; note?: string } = {
+    item_id: itemId,
+    cost_type: costType,
+  };
+  if (input.note !== undefined) {
+    row.note = input.note.trim();
+  }
+
+  const { data, error } = await supabase
+    .from("catalog_cost_type_overrides")
+    .upsert(row, { onConflict: "item_id" })
+    .select(CATALOG_COST_TYPE_OVERRIDE_COLUMNS)
+    .single();
+
+  if (error || !data) {
+    console.error(`Failed to save cost-type override for ${itemId}:`, error);
+    throw new Error(`Failed to save cost-type override for ${itemId}: ${error?.message ?? "no row returned"}`);
+  }
+  return mapCatalogCostTypeOverrideRow(data);
 }
 
 // ═══════════════════════════════════════════════════════════════════

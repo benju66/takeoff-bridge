@@ -6,13 +6,17 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 18 (added estimate_versions — Estimate Versioning module)
+-- Tables: 20 (added catalog_cost_type_overrides — Template + Catalog
+--   Reconciliation Phase 2)
 -- RPC Functions: 4 (save_estimate_line_items, save_estimate,
 --   create_estimate_version, submit_estimate_version)
--- Trigger Functions: 4 (custom_step23_line_defs lifecycle guard + updated_at touch
+-- Trigger Functions: 7 (custom_step23_line_defs lifecycle guard + updated_at touch
 --   — Catalog Manager Phase 2; catalog_additions updated_at touch — Phase 6;
---   estimate_versions freeze guard — Estimate Versioning)
--- RLS Policies: 31 (added estimate_versions SELECT/INSERT/UPDATE — Estimate Versioning)
+--   estimate_versions freeze guard — Estimate Versioning; procore_cost_codes
+--   lifecycle guard + updated_at touch — Procore Cost Codes Phase 1;
+--   catalog_cost_type_overrides updated_at touch — Reconciliation Phase 2)
+-- RLS Policies: 38 (added catalog_cost_type_overrides SELECT/INSERT/UPDATE —
+--   Reconciliation Phase 2)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -23,7 +27,12 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-11 (Estimate Versioning: new estimate_versions table —
+-- Last updated: 2026-06-12 (Template + Catalog Reconciliation Phase 2: new
+-- catalog_cost_type_overrides table — the runtime cost-type override overlay
+-- for BUILT-IN STEP 4 catalog codes. Patches a built-in's costType (label only,
+-- moves no dollars) at the catalog chokepoint; survives template re-harvest.
+-- SELECT/INSERT/UPDATE policies modeled on catalog_additions, plus an
+-- updated_at touch trigger. Earlier — Estimate Versioning: new estimate_versions table —
 -- named frozen versions of the working copy, one submitted official bid per
 -- project (partial-unique index), price history derived at read time from the
 -- submitted version. Earlier same day — Catalog Manager Phase 6: new catalog_additions table —
@@ -1586,3 +1595,93 @@ CREATE TRIGGER procore_cost_codes_touch_updated_at_trg
   BEFORE UPDATE ON procore_cost_codes
   FOR EACH ROW
   EXECUTE FUNCTION touch_procore_cost_codes_updated_at();
+
+-- ─────────────────────────────────────────────────
+-- Table 18: catalog_cost_type_overrides (Template + Catalog Reconciliation
+--           Phase 2 — built-in cost-type override overlay)
+-- ─────────────────────────────────────────────────
+--
+-- Cost-type overrides for BUILT-IN STEP 4 catalog codes (ESTIMATE_ITEMS_MASTER,
+-- the harvested estimate-catalog.json). The catalog chokepoint (src/lib/catalog.ts
+-- getCatalogItems()) patches a matching built-in's costType with the override —
+-- the override wins for that ONE field only; every other field stays the
+-- harvested value. Because the overlay lives here and not in the template, it
+-- survives `npm run sync-codes` re-harvests. The INVERSE of catalog_additions
+-- (where a built-in always wins): an addition may never shadow a built-in, while
+-- an override exists ONLY to relabel one.
+--
+-- LABEL ONLY — moves no dollars by construction: cost_type is read by neither
+-- calculations.ts nor exporter.ts (both export goldens tie $0.00 with the overlay
+-- primed). It feeds the /cost-codes type-mismatch advisory and FUTURE row births;
+-- saved estimate_line_items keep their frozen-at-birth cost_type (no backfill).
+--
+-- item_id: a BUILT-IN catalog code (NN-NNNN.NNN). db.ts rejects an item_id that
+-- is not a current built-in; the regex CHECK is the server-side shape backstop.
+-- An override whose code leaves a later harvest goes inert (the overlay patches
+-- matching built-ins only) — the row stays as the provenance record.
+--
+-- cost_type: L/M/S/E, the estimate-side vocabulary (Equipment joined in
+-- Reconciliation Phase 1). note: optional human context for WHY the type was
+-- overridden (e.g. "Procore types this Equipment", Phase 3 bulk-fix provenance).
+
+CREATE TABLE catalog_cost_type_overrides (
+  item_id    TEXT PRIMARY KEY
+             CONSTRAINT catalog_cost_type_overrides_item_id_shape_check
+             CHECK (item_id ~ '^\d{2}-\d{4}\.\d{3}$'),  -- catalog code shape NN-NNNN.NNN
+  cost_type  TEXT NOT NULL
+             CONSTRAINT catalog_cost_type_overrides_cost_type_check
+             CHECK (cost_type IN ('L', 'M', 'S', 'E')), -- Labor / Materials / Subcontract / Equipment
+  note       TEXT NOT NULL DEFAULT '',                  -- optional provenance ('' when none)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE catalog_cost_type_overrides ENABLE ROW LEVEL SECURITY;
+
+-- Read: corporate data, consistent with cost_code_map / rate_card / catalog_additions.
+-- (SELECT USING(true) is intentionally NOT flagged by the rls_policy_always_true linter.)
+CREATE POLICY "catalog_cost_type_overrides_select_policy" ON catalog_cost_type_overrides
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Write: INSERT + UPDATE (the db.ts upsert — Phase 3 bulk-fix seeding + the
+-- Phase 5 /catalog built-in cost-type editor). db.ts validates built-in
+-- membership + L/M/S/E before the write; the CHECK constraints are the
+-- server-side backstop. No DELETE policy → an override row is never removed
+-- (provenance; reverting = setting cost_type back to the harvested value).
+-- THE deliberate widening for this new table — adds two expected
+-- rls_policy_always_true advisor WARNs (INSERT WITH CHECK true; UPDATE
+-- USING/WITH CHECK true), mirroring the catalog_additions / cost_code_map /
+-- rate_card / custom_step23_line_defs / procore_cost_codes precedent — carries
+-- the same consolidated "move writes server-side (service-role only)" follow-up.
+CREATE POLICY "catalog_cost_type_overrides_insert_policy" ON catalog_cost_type_overrides
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
+CREATE POLICY "catalog_cost_type_overrides_update_policy" ON catalog_cost_type_overrides
+  FOR UPDATE
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);
+
+-- updated_at touch (BEFORE UPDATE), mirroring the catalog_additions pattern.
+-- SET search_path = '' pins schema resolution (only pg_catalog built-ins
+-- referenced) — keeps the function_search_path_mutable advisor clean.
+-- SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION touch_catalog_cost_type_overrides_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER catalog_cost_type_overrides_touch_updated_at_trg
+  BEFORE UPDATE ON catalog_cost_type_overrides
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_catalog_cost_type_overrides_updated_at();

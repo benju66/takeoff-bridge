@@ -15,9 +15,9 @@ import {
   GitCompareArrows,
   Tags,
 } from "lucide-react";
-import { getCatalogItems, isBuiltInCatalogCode } from "@/lib/catalog";
+import { getCatalogItems, isBuiltInCatalogCode, primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions, getProcoreCostCodes } from "@/lib/db";
+import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions, getCatalogCostTypeOverrides, getProcoreCostCodes } from "@/lib/db";
 import { primeCostCodeResolver } from "@/lib/costCodeResolver";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
@@ -150,6 +150,18 @@ export default function CostCodeMappingDashboard() {
         console.error("Failed to load catalog additions (read-only display skipped):", err);
       });
     return () => { cancelled = true; };
+  }, []);
+
+  // Prime the built-in cost-type override overlay independently (Reconciliation
+  // Phase 2 — fail-soft). Phase 3's seeded corrections reach the type-mismatch
+  // advisory through this prime (the advisory reads getCatalogItems()). LABEL
+  // ONLY — moves no dollars; empty = identity.
+  useEffect(() => {
+    getCatalogCostTypeOverrides()
+      .then((loaded) => primeCatalogCostTypeOverrides(loaded))
+      .catch((err) => {
+        console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
+      });
   }, []);
 
   // Load the typed Procore master list independently (fail-soft). An outage just

@@ -9,9 +9,11 @@ import {
   getImportedStep23History,
   getCustomStep23LineDefs,
   getCatalogAdditions,
+  getCatalogCostTypeOverrides,
 } from "@/lib/db";
 import { step23Observations, type Step23HistorySource } from "@/lib/step23Normalization";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
+import { primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import {
   computeDataHealth,
   type DataHealthFinding,
@@ -59,6 +61,16 @@ export function useDataHealth(): DataHealthState {
           return fallback;
         }
       };
+
+      // The cost-type override overlay rides along for in-session consistency
+      // (Reconciliation Phase 2) but is NOT an audit input — a failed load must
+      // not claim audit findings are absent, so it stays out of soft()/failed.
+      // No prime on failure (priming [] would wipe another page's prime).
+      getCatalogCostTypeOverrides()
+        .then((loaded) => primeCatalogCostTypeOverrides(loaded))
+        .catch((err) => {
+          console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
+        });
 
       const [projects, estimateTotals, lineItems, step4Obs, step23Sources, customDefs, additions] =
         await Promise.all([
