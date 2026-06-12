@@ -168,14 +168,19 @@ export default function CostCodeMappingDashboard() {
   // advisory through this prime (the advisory reads getCatalogItems()). LABEL
   // ONLY — moves no dollars; empty = identity.
   useEffect(() => {
+    let cancelled = false;
     getCatalogCostTypeOverrides()
       .then((loaded) => {
+        // Prime even if unmounted — the overlay is session-wide module state;
+        // only the local snapshot setState is gated on the mount.
         primeCatalogCostTypeOverrides(loaded);
+        if (cancelled) return;
         setCatalogItems(getCatalogItems());
       })
       .catch((err) => {
         console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
       });
+    return () => { cancelled = true; };
   }, []);
 
   // Load the typed Procore master list independently (fail-soft). An outage just
@@ -284,7 +289,7 @@ export default function CostCodeMappingDashboard() {
     if (!entries) return [];
     const query = searchQuery.trim().toLowerCase();
     if (!query) return entries;
-    const catalog = getCatalogItems();
+    const catalog = catalogItems;
     return entries.filter((e) => {
       const internalDescription = catalog[e.internalCode]?.description || "";
       const procoreDesc = procoreDescription(e.procoreCode) || "";
@@ -298,7 +303,7 @@ export default function CostCodeMappingDashboard() {
         e.source.toLowerCase().includes(query)
       );
     });
-  }, [entries, searchQuery, procoreDescription, procoreTypeByCode]);
+  }, [entries, searchQuery, procoreDescription, procoreTypeByCode, catalogItems]);
 
   // Divergence diagnostic: BUILT-IN catalog itemIds with NO cost_code_map row
   // resolve to "" at row creation (export blocker) and are editable nowhere —
@@ -311,10 +316,10 @@ export default function CostCodeMappingDashboard() {
   const catalogCodesMissingFromMap = useMemo(() => {
     if (!entries || entries.length === 0) return [];
     const mapped = new Set(entries.map((e) => e.internalCode));
-    return Object.keys(getCatalogItems())
+    return Object.keys(catalogItems)
       .filter((id) => isBuiltInCatalogCode(id) && !mapped.has(id))
       .sort();
-  }, [entries]);
+  }, [entries, catalogItems]);
 
   // Read-only additions for display, joined to their Procore description and
   // search-filtered with the same query as the editable map table.
@@ -556,7 +561,7 @@ export default function CostCodeMappingDashboard() {
                     </tr>
                   ) : (
                     filteredEntries.map((entry) => {
-                      const internalDescription = getCatalogItems()[entry.internalCode]?.description || "—";
+                      const internalDescription = catalogItems[entry.internalCode]?.description || "—";
                       const procoreDesc = procoreDescription(entry.procoreCode);
                       const procoreType = procoreTypeByCode.get(entry.procoreCode);
                       const badge = SOURCE_BADGES[entry.source] || SOURCE_BADGES.template;
