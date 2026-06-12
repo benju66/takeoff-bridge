@@ -32,6 +32,7 @@ import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
+import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
 import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
@@ -433,6 +434,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
         </div>
 
       </header>
+
+      {/* Data Health strip (fidelity Phase 4) — the company audit filtered to
+          this project. Advisory + fail-soft: renders nothing while loading,
+          on outage, or when this project has no findings. */}
+      <ErrorBoundary>
+        <DataHealthStrip projectId={projectId} />
+      </ErrorBoundary>
 
       {/* Export Error Banner */}
       {exportError && (

@@ -1,5 +1,6 @@
 import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
+import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
 import { isStep23DeterministicCode, isBuiltInStep23Code } from "./step23Normalization";
 import { transitionError, redirectsToRepoint, isActive, type CatalogLifecycleStatus } from "./catalogLifecycle";
@@ -1183,6 +1184,62 @@ export async function getBidPriceHistory(): Promise<PriceObservation[]> {
   }
 
   return observations;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Data Health (fidelity Phase 4 — READ-only audit fuel)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Minimal per-line facts across ALL projects for the Data Health engine
+ * (unmapped-lines + lump-share findings). READ-only and deliberately thin —
+ * five columns, no payloads — so the company-wide scan stays cheap. The
+ * judging lives in the pure dataHealth.ts; nothing here filters beyond the
+ * row→fact mapping.
+ */
+export async function getLineItemHealthFacts(): Promise<LineItemHealthFact[]> {
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .select("project_id, item_id, is_mapped, data_fidelity, total");
+
+  if (error) {
+    console.error("Failed to fetch line-item health facts:", error);
+    throw new Error(`Failed to fetch line-item health facts: ${error.message}`);
+  }
+
+  return (data || []).map((row) => ({
+    projectId: (row.project_id as string) || "",
+    itemId: (row.item_id as string) || "",
+    isMapped: row.is_mapped === true,
+    dataFidelity: (row.data_fidelity as string) || "",
+    total: Number(row.total) || 0,
+  }));
+}
+
+/**
+ * Every project's saved estimate grand total keyed by project id — the
+ * duplicate-import detector's total-proximity signal (dataHealth.ts).
+ * READ-only; a project with no saved estimate simply has no entry, and the
+ * detector treats a missing total as "not comparable", never as $0.
+ */
+export async function getEstimateTotalsByProject(): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from("project_estimates")
+    .select("project_id, total_cost");
+
+  if (error) {
+    console.error("Failed to fetch estimate totals:", error);
+    throw new Error(`Failed to fetch estimate totals: ${error.message}`);
+  }
+
+  const out = new Map<string, number>();
+  for (const row of data || []) {
+    // A NULL total is OMITTED (not stored as 0): the Map's absence IS the
+    // "never computed" signal, distinct from a genuine $0.00 estimate.
+    if (row.total_cost == null) continue;
+    out.set(row.project_id as string, Number(row.total_cost) || 0);
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════
