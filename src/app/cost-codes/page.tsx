@@ -25,6 +25,7 @@ import {
   PROCORE_CODE_DESCRIPTIONS,
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
+import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
 import { computeTypeReconciliation } from "@/lib/procoreTypeReconciliation";
 import { CostCodeMapEntry, CatalogAddition, ProcoreCostCode, ProcoreCostCodeType } from "@/types/db";
 
@@ -158,7 +159,11 @@ export default function CostCodeMappingDashboard() {
     let cancelled = false;
     getProcoreCostCodes()
       .then((loaded) => {
-        if (!cancelled) setProcoreCodes(loaded);
+        if (cancelled) return;
+        setProcoreCodes(loaded);
+        // Phase 4: this list IS the validation oracle now — prime it so the
+        // persist gate (isValidProcoreCode) validates against DB-active codes.
+        primeProcoreValidCodesFromList(loaded);
       })
       .catch((err) => {
         console.error("Failed to load Procore master list (type-aware view skipped):", err);
@@ -206,6 +211,9 @@ export default function CostCodeMappingDashboard() {
       entries.map((e) => ({ internalCode: e.internalCode, procoreCode: e.procoreCode })),
       getCatalogItems(),
       procoreTypeByCode,
+      // Phase 4: linked-division summaries map to the retired 2-20000.000 base
+      // but never export — exempt them so the advisory's missing-base drops 8 → 0.
+      { exemptLinkedDivision: true },
     );
   }, [entries, procoreActive, procoreTypeByCode]);
 

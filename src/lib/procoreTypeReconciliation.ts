@@ -18,6 +18,7 @@
  */
 
 import type { ProcoreCostCodeType } from "@/types/db";
+import { isLinkedDivisionRow } from "@/lib/constants";
 
 /**
  * Estimate-side cost-type vocabulary (L/M/S) → Procore type. The estimate catalog
@@ -79,11 +80,23 @@ export interface MappingForReconciliation {
  * A mapping is a MISSING_BASE when its procoreCode is not in the master list;
  * otherwise it is a TYPE_MISMATCH when the estimate's type disagrees with
  * Procore's. Results are sorted by internalCode for stable display.
+ *
+ * Phase 4: with `options.exemptLinkedDivision`, a mapping that WOULD be a
+ * MISSING_BASE is suppressed when its internalCode is a linked-division summary
+ * row (isLinkedDivisionRow). Those 8 division-02 summaries map to the retired
+ * `2-20000.000` base — pure noise in the advisory because the export never
+ * writes them (they carry STEP 2/3 dollars, excluded from the STEP 4 rollup).
+ * The exemption is scoped to the missing-base branch ONLY: a linked-division row
+ * whose base DOES exist with a disagreeing type is still a real mismatch finding,
+ * so the canonical 67 mismatch count is unaffected. The default (no options)
+ * keeps the unexempted behavior so the 67/8 counts stay pinned and the exemption
+ * stays honest/visible.
  */
 export function computeTypeReconciliation(
   mappings: MappingForReconciliation[],
   catalogByInternalCode: Record<string, { costType: string } | undefined>,
   procoreTypeByCode: ReadonlyMap<string, ProcoreCostCodeType>,
+  options?: { exemptLinkedDivision?: boolean },
 ): TypeReconciliation {
   const mismatches: TypeMismatch[] = [];
   const missingBase: MissingBase[] = [];
@@ -91,6 +104,9 @@ export function computeTypeReconciliation(
   for (const m of mappings) {
     const procoreType = procoreTypeByCode.get(m.procoreCode);
     if (!procoreType) {
+      // Linked-division summaries map to the retired 2-20000.000 base and never
+      // export — exempt them from the missing-base advisory (8 → 0).
+      if (options?.exemptLinkedDivision && isLinkedDivisionRow(m.internalCode)) continue;
       missingBase.push({ internalCode: m.internalCode, procoreCode: m.procoreCode });
       continue;
     }

@@ -22,7 +22,7 @@ import { SelectCellInput } from "@/components/workspace/SelectCellInput";
 import { RowProvenanceGlyph } from "@/components/workspace/RowProvenanceGlyph";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
-import { Project, DivisionLayout, CatalogAddition } from "@/types/db";
+import { Project, DivisionLayout, CatalogAddition, ProcoreCostCode } from "@/types/db";
 import {
   getEstimateLineItems,
   getProjectRegistry,
@@ -33,7 +33,9 @@ import {
   getCostCodeMap,
   getRateCard,
   getCatalogAdditions,
+  getProcoreCostCodes,
 } from "@/lib/db";
+import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
 import {
   primeCostCodeResolver,
   primeCostCodeResolverFromCatalog,
@@ -351,7 +353,7 @@ export function useTakeoffWorkbook(
         // Load all data sources in parallel. Catalog additions are FAIL-SOFT
         // (`.catch(() => [])`) so an additions outage degrades to built-ins only
         // and never rejects the whole mount batch.
-        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard, savedCatalogAdditions] =
+        const [savedLineItems, savedRegistry, savedGlobalReg, savedColDefs, savedLocks, savedTemplateConfig, savedCostCodeMap, savedRateCard, savedCatalogAdditions, savedProcoreCodes] =
           await Promise.all([
             getEstimateLineItems(projectId),
             getProjectRegistry(projectId),
@@ -362,9 +364,16 @@ export function useTakeoffWorkbook(
             getCostCodeMap(MASTER_TEMPLATE_NAME),
             getRateCard(MASTER_TEMPLATE_NAME),
             getCatalogAdditions().catch(() => [] as CatalogAddition[]),
+            getProcoreCostCodes().catch(() => [] as ProcoreCostCode[]),
           ]);
 
         if (cancelled) return;
+
+        // Phase 4: prime the Procore validation oracle from the live master list
+        // (its ACTIVE rows) so the export gate / ExportOverrideModal validate
+        // against DB-active codes. Fail-soft — an empty/failed load keeps the
+        // JSON baseline (a superset, so it never blocks a legitimate code).
+        primeProcoreValidCodesFromList(savedProcoreCodes);
 
         // Prime the STEP 4 catalog-additions overlay BEFORE any row init AND
         // before the cost-code/rate primes below (the degraded

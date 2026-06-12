@@ -93,6 +93,25 @@ describe("computeTypeReconciliation — canonical 67/8", () => {
     }
   });
 
+  it("with linked-division exemption: 67 mismatches and 0 missing-base", async () => {
+    const procoreTypeByCode = await readProcoreTypeMap();
+
+    const exempt = computeTypeReconciliation(catalogMappings(), CATALOG, procoreTypeByCode, {
+      exemptLinkedDivision: true,
+    });
+    // The 8 missing-base ARE the division-02 linked summaries (→ retired
+    // 2-20000.000); the exemption skips exactly those and nothing else.
+    expect(exempt.missingBase.length).toBe(0);
+    // Mismatches are unaffected — no linked-division row is a type mismatch.
+    expect(exempt.mismatches.length).toBe(67);
+
+    // Pin that WITHOUT the exemption it is STILL 8 missing-base, so the exemption
+    // stays honest/visible (it suppresses a real, enumerated set — not a bug).
+    const unexempt = computeTypeReconciliation(catalogMappings(), CATALOG, procoreTypeByCode);
+    expect(unexempt.missingBase.length).toBe(8);
+    expect(unexempt.mismatches.length).toBe(67);
+  });
+
   it("returns no findings when every estimate type agrees and every base exists", () => {
     const procoreTypeByCode = new Map<string, ProcoreCostCodeType>([["1-10000.000", "Material"]]);
     const mappings: MappingForReconciliation[] = [{ internalCode: "x", procoreCode: "1-10000.000" }];

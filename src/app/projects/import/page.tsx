@@ -26,6 +26,7 @@ import {
   type Step23LineDef,
 } from "@/lib/step23Normalization";
 import { PROCORE_VALID_CODES } from "@/lib/procoreValidCodes";
+import { primeProcoreValidCodesFromDb } from "@/lib/procoreValidCodesPrime";
 import { validateAssignInput } from "@/lib/assignCode";
 import { getCatalogItems } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
@@ -247,6 +248,11 @@ export default function ImportPastEstimatePage() {
       // their own procore_code + default_unit_price — so the catalog item overlay
       // + BOTH resolvers carry them; cost_code_map / rate_card untouched. FAIL-SOFT.
       primeCatalogAdditionOverlays(await getCatalogAdditions().catch(() => []));
+
+      // Phase 4: prime the Procore validation oracle from the live master list so
+      // the review gate (assign / mint custom code) validates against DB-active
+      // codes, not the JSON baseline. Fail-soft — an outage keeps the baseline.
+      await primeProcoreValidCodesFromDb();
 
       // Prime the granular-code resolver the same way the workspace mount does;
       // the same entries (reversed) feed the bridge's procore→internal lookup.
