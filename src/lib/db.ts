@@ -2382,3 +2382,75 @@ export async function getProcoreCostCodes(): Promise<ProcoreCostCode[]> {
 
   return (data || []).map(mapProcoreCostCodeRow);
 }
+
+/**
+ * Apply a /procore-codes import (Phase 2). Upserts the validated file rows and
+ * (only) the codes the architect explicitly confirmed for retirement — never
+ * auto-tombstones a missing code (architect-locked: a partial/bad export must
+ * not silently nuke live codes).
+ *
+ * - `upserts` INSERT-or-UPDATE on the `code` PK: a new code is inserted, an
+ *   existing one has its type/description refreshed and is (re)set 'active'
+ *   with merged_into cleared (a re-import re-activates a previously retired
+ *   code that reappears in the file).
+ * - `retireCodes` flips the named ACTIVE codes to status='retired'. These are
+ *   exactly the diff's proposed retirements the user ticked — nothing else.
+ *
+ * Re-validates the upsert rows here (single gateway: never trust the caller) so
+ * an invalid type/shape can't reach the table even if the page is bypassed.
+ * Routes through the table's existing INSERT/UPDATE RLS policies — NO new DDL.
+ * Not transactional across the two statements (supabase-js has no multi-stmt tx
+ * without an RPC); upserts run first so a mid-apply failure never leaves a code
+ * retired without its replacement landing.
+ */
+export async function applyProcoreCostCodesImport(input: {
+  upserts: Array<{ code: string; type: ProcoreCostCode["type"]; description: string }>;
+  retireCodes?: string[];
+}): Promise<void> {
+  const retireCodes = (input.retireCodes ?? []).map((c) => c.trim()).filter(Boolean);
+
+  // Re-validate every upsert row against the table's shape + CHECK vocabulary.
+  const validTypes: ProcoreCostCode["type"][] = ["Labor", "Material", "Subcontract", "Equipment"];
+  const rows = input.upserts.map((r) => ({
+    code: r.code.trim(),
+    type: r.type,
+    description: r.description.trim(),
+  }));
+  for (const r of rows) {
+    if (!r.code) throw new Error("Cannot apply import: a row has an empty cost code.");
+    if (!r.description) throw new Error(`Cannot apply import: ${r.code} has an empty description.`);
+    if (!validTypes.includes(r.type)) {
+      throw new Error(`Cannot apply import: ${r.code} has invalid type "${r.type}".`);
+    }
+  }
+
+  if (rows.length > 0) {
+    const { error: upsertError } = await supabase
+      .from("procore_cost_codes")
+      .upsert(
+        rows.map((r) => ({
+          code: r.code,
+          type: r.type,
+          description: r.description,
+          status: "active",
+          merged_into: null,
+        })),
+        { onConflict: "code" },
+      );
+    if (upsertError) {
+      console.error("Failed to apply Procore cost-code upserts:", upsertError);
+      throw new Error(`Failed to apply Procore cost-code import: ${upsertError.message}`);
+    }
+  }
+
+  if (retireCodes.length > 0) {
+    const { error: retireError } = await supabase
+      .from("procore_cost_codes")
+      .update({ status: "retired" })
+      .in("code", retireCodes);
+    if (retireError) {
+      console.error("Failed to retire Procore cost codes:", retireError);
+      throw new Error(`Failed to retire Procore cost codes: ${retireError.message}`);
+    }
+  }
+}
