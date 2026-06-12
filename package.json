@@ -12,6 +12,8 @@
     "generate-rate-card-seed": "node scripts/generate-rate-card-seed.js",
     "generate-procore-codes-seed": "node scripts/generate-procore-cost-codes-seed.js",
     "procore-codes-reconcile": "node --env-file=.env.local scripts/procore-cost-codes-reconcile.js",
+    "type-disposition": "node scripts/catalog-type-disposition.js",
+    "seed-type-overrides": "node --env-file=.env.local scripts/seed-cost-type-overrides.js",
     "upload-template": "node --env-file=.env.local scripts/upload-template.js",
     "test": "vitest run",
     "test:watch": "vitest",

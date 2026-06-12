@@ -28,6 +28,7 @@ import {
 import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
 import { computeTypeReconciliation } from "@/lib/procoreTypeReconciliation";
 import { CostCodeMapEntry, CatalogAddition, ProcoreCostCode, ProcoreCostCodeType } from "@/types/db";
+import { InternalEstimateItem } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Cost Code Mapping editor (Phase 3c) — global view/edit of cost_code_map,
@@ -112,6 +113,15 @@ export default function CostCodeMappingDashboard() {
    * code list so the editor keeps working, just without the type-aware extras.
    */
   const [procoreCodes, setProcoreCodes] = useState<ProcoreCostCode[]>([]);
+  /**
+   * Render-time snapshot of the merged STEP 4 catalog (getCatalogItems()). The
+   * overlay primes are effects that mutate MODULE state only — no re-render —
+   * so anything computed from the catalog in a memo would go stale the moment
+   * an overlay lands (Phase 3: the seeded cost-type corrections must drop the
+   * mismatch advisory 67 → 2 on this page). Each prime effect re-snapshots
+   * after priming; the advisory memo keys on this state.
+   */
+  const [catalogItems, setCatalogItems] = useState<Record<string, InternalEstimateItem>>(() => getCatalogItems());
 
   // Load the live mapping on mount (single gateway: db.ts)
   useEffect(() => {
@@ -145,6 +155,7 @@ export default function CostCodeMappingDashboard() {
         if (cancelled) return;
         setAdditions(loaded);
         primeCatalogAdditionOverlays(loaded);
+        setCatalogItems(getCatalogItems());
       })
       .catch((err) => {
         console.error("Failed to load catalog additions (read-only display skipped):", err);
@@ -158,7 +169,10 @@ export default function CostCodeMappingDashboard() {
   // ONLY — moves no dollars; empty = identity.
   useEffect(() => {
     getCatalogCostTypeOverrides()
-      .then((loaded) => primeCatalogCostTypeOverrides(loaded))
+      .then((loaded) => {
+        primeCatalogCostTypeOverrides(loaded);
+        setCatalogItems(getCatalogItems());
+      })
       .catch((err) => {
         console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
       });
@@ -221,13 +235,16 @@ export default function CostCodeMappingDashboard() {
       return { mismatches: [], missingBase: [] };
     return computeTypeReconciliation(
       entries.map((e) => ({ internalCode: e.internalCode, procoreCode: e.procoreCode })),
-      getCatalogItems(),
+      // The catalogItems STATE snapshot (not a live getCatalogItems() call):
+      // keying on it is what recomputes the advisory once the cost-type
+      // override prime lands (the prime itself triggers no re-render).
+      catalogItems,
       procoreTypeByCode,
       // Phase 4: linked-division summaries map to the retired 2-20000.000 base
       // but never export — exempt them so the advisory's missing-base drops 8 → 0.
       { exemptLinkedDivision: true },
     );
-  }, [entries, procoreActive, procoreTypeByCode]);
+  }, [entries, procoreActive, procoreTypeByCode, catalogItems]);
 
   const handleMappingChange = async (internalCode: string, newProcoreCode: string) => {
     if (!entries) return;

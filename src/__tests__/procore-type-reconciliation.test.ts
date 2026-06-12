@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import ExcelJS from "exceljs";
 import fs from "fs";
 import path from "path";
@@ -7,6 +7,7 @@ import {
   estimateCostTypeToProcore,
   type MappingForReconciliation,
 } from "@/lib/procoreTypeReconciliation";
+import { getCatalogItems, primeCatalogCostTypeOverrides, resetCatalog } from "@/lib/catalog";
 import type { ProcoreCostCodeType } from "@/types/db";
 import catalog from "@/lib/estimate-catalog.json";
 
@@ -14,9 +15,17 @@ import catalog from "@/lib/estimate-catalog.json";
 // Procore Cost Codes — Phase 3 type-aware reconciliation.
 //
 // Pins the type-mismatch advisory against the MEASURED canonical counts:
-//   - 67 estimate-granular codes whose type disagrees with Procore's type, and
-//   -  8 estimate codes mapping to a base NOT in the 217-code Procore master list
-//      (all 8 are the 2-20000.000 linked-division summaries the export excludes).
+//   - RAW (no overlay primed): 67 estimate-granular codes whose HARVESTED type
+//     disagrees with Procore's type. The harvested catalog JSON never changes
+//     here, so 67 stays the raw pin.
+//   - SEEDED (Template + Catalog Reconciliation Phase 3): the live
+//     catalog_cost_type_overrides rows relabel the 65 MECHANICAL fixes
+//     (architect-approved disposition, docs/plans/2026-06-12-catalog-type-
+//     disposition.md), so with the overlay primed the advisory drops to the
+//     2 suspected wrong-code mis-maps — the explained residual.
+//   -  8 estimate codes mapping to a base NOT in the 217-code Procore master
+//      list (all 8 are the 2-20000.000 linked-division summaries the export
+//      excludes). Type relabels never touch this count.
 //
 // Canonical inputs are the two in-repo sources of truth that seed the live
 // tables: src/lib/estimate-catalog.json (the cost_code_map seed source) and
@@ -73,7 +82,11 @@ describe("estimateCostTypeToProcore", () => {
   });
 });
 
-describe("computeTypeReconciliation — canonical 67/8", () => {
+describe("computeTypeReconciliation — canonical raw 67/8, seeded 2", () => {
+  // The seeded-overlay test primes the module-level catalog overlay — always
+  // clear it so the raw pins (and every other suite) see an unprimed catalog.
+  afterEach(() => resetCatalog());
+
   it("reports exactly 67 type mismatches and 8 missing-base", async () => {
     const procoreTypeByCode = await readProcoreTypeMap();
     expect(procoreTypeByCode.size).toBe(217);
@@ -111,6 +124,38 @@ describe("computeTypeReconciliation — canonical 67/8", () => {
     const unexempt = computeTypeReconciliation(catalogMappings(), CATALOG, procoreTypeByCode);
     expect(unexempt.missingBase.length).toBe(8);
     expect(unexempt.mismatches.length).toBe(67);
+  });
+
+  it("with the Phase 3 seeded overlay primed: 67 → 2 (the enumerated mis-map residual)", async () => {
+    const procoreTypeByCode = await readProcoreTypeMap();
+
+    // The 2 mismatches whose CODE mapping (not just the type label) is suspect —
+    // NOT seeded, left standing in the advisory pending an architect repoint
+    // review (disposition report §Suspected wrong-code mis-maps):
+    //   01-0400.002  Supervision (L) → 1-10000.000 General Conditions (Material);
+    //                Procore has dedicated 1-104xx Labor supervision codes.
+    //   12-3530.002  Residential Casework - Installation (S) → 12-123530.000
+    //                Residential Casework (Material); the install half plausibly
+    //                belongs on 6-62000.000 Finish Carpentry Installation (S).
+    const RESIDUAL_MISMAPS = ["01-0400.002", "12-3530.002"];
+
+    // Derive the seeded rows by the same rule as the disposition/seed scripts
+    // (scripts/catalog-type-disposition.js): every RAW mismatch EXCEPT the
+    // enumerated mis-maps gets an override relabeling it to Procore's type.
+    const LETTER: Record<string, string> = { Labor: "L", Material: "M", Subcontract: "S", Equipment: "E" };
+    const raw = computeTypeReconciliation(catalogMappings(), CATALOG, procoreTypeByCode);
+    const overrides = raw.mismatches
+      .filter((m) => !RESIDUAL_MISMAPS.includes(m.internalCode))
+      .map((m) => ({ itemId: m.internalCode, costType: LETTER[m.procoreType], note: "" }));
+    expect(overrides.length).toBe(65); // the seeded mechanical-fix count
+
+    primeCatalogCostTypeOverrides(overrides);
+    const seeded = computeTypeReconciliation(catalogMappings(), getCatalogItems(), procoreTypeByCode);
+
+    // The advisory residual is EXACTLY the 2 mis-map suspects, in sort order.
+    expect(seeded.mismatches.map((m) => m.internalCode)).toEqual(RESIDUAL_MISMAPS);
+    // Relabeling types never touches the missing-base advisory.
+    expect(seeded.missingBase.length).toBe(8);
   });
 
   it("returns no findings when every estimate type agrees and every base exists", () => {
