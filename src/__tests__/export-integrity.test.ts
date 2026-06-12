@@ -749,6 +749,10 @@ describe("Linked division rows & double-count closure (Phase 5)", () => {
     squareFootage: 10000,
     unitCount: 100,
     bidDate: "2026-06-06",
+    // 10 months — matches the durationMonths the gc/siteOps fixtures use, so
+    // the exported dial (STEP 1 D28) is consistent with the cached chain
+    expectedStart: "2026-01",
+    expectedFinish: "2026-11",
     createdAt: new Date().toISOString(),
     constructionContingencyRate: 0,
     designContingencyRate: 0,
@@ -861,20 +865,31 @@ describe("Linked division rows & double-count closure (Phase 5)", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(Buffer.from(arrayBuffer) as never);
 
-    // STEP 4 sheet: the linked rows (template rows 12–24) carry qty 1 × the
-    // computed Step 2/3 subtotal — values, not the grid's zeros, and not the
-    // stray typed dollars. (No insertions above row 24 in this fixture.)
+    // STEP 4 sheet: the linked rows (template rows 12–24) carry qty 1 and the
+    // template's native col-H PULL formula onto the STEP 2/3 section subtotal
+    // (round-trip Phase 2), cached at the engine's computed total — not the
+    // grid's zeros, not the stray typed dollars.
+    // (No insertions above row 24 in this fixture.)
     const step4 = workbook.getWorksheet("STEP 4 - ESTIMATE")!;
-    const linkedRowPositions: Record<string, number> = {
-      "01-0000.001": 12, "01-0400.002": 13, "02-0000.001": 17, "02-4100.002": 18,
-      "02-9005.003": 19, "02-9070.004": 20, "02-9200.005": 21, "02-9300.006": 22,
-      "02-9400.007": 23, "02-9500.008": 24,
+    const linkedRowPositions: Record<string, { row: number; pull: string }> = {
+      "01-0000.001": { row: 12, pull: "'STEP 2 - GCs'!I58" },
+      "01-0400.002": { row: 13, pull: "'STEP 2 - GCs'!I16" },
+      "02-0000.001": { row: 17, pull: "'STEP 3 - SITE OPS'!I29" },
+      "02-4100.002": { row: 18, pull: "'STEP 3 - SITE OPS'!I35" },
+      "02-9005.003": { row: 19, pull: "'STEP 3 - SITE OPS'!I40" },
+      "02-9070.004": { row: 20, pull: "'STEP 3 - SITE OPS'!I45" },
+      "02-9200.005": { row: 21, pull: "'STEP 3 - SITE OPS'!I51" },
+      "02-9300.006": { row: 22, pull: "'STEP 3 - SITE OPS'!I62" },
+      "02-9400.007": { row: 23, pull: "'STEP 3 - SITE OPS'!I72" },
+      "02-9500.008": { row: 24, pull: "'STEP 3 - SITE OPS'!I82" },
     };
-    for (const [itemId, rowNum] of Object.entries(linkedRowPositions)) {
-      const qty = step4.getRow(rowNum).getCell(6).value;   // F
-      const price = step4.getRow(rowNum).getCell(8).value; // H
+    for (const [itemId, pos] of Object.entries(linkedRowPositions)) {
+      const qty = step4.getRow(pos.row).getCell(6).value;   // F
+      const price = step4.getRow(pos.row).getCell(8).value as { formula?: string; result?: number }; // H
       expect(qty, `${itemId} qty`).toBe(1);
-      expect(price, `${itemId} value`).toBeCloseTo(linkedByItemId.get(itemId)!, 2);
+      expect(price?.formula, `${itemId} pull formula`).toBe(pos.pull);
+      // ExcelJS omits `result` for a cached 0
+      expect(price?.result ?? 0, `${itemId} cached value`).toBeCloseTo(linkedByItemId.get(itemId)!, 2);
     }
     // Supervision = the superintendent staff line; GC = remainder (intent, not D4 bugs)
     const supervision = linkedByItemId.get("01-0400.002")!;
@@ -945,6 +960,9 @@ describe("STEP 2/3 sheet detail (Phase 6)", () => {
     squareFootage: 10000,
     unitCount: 100,
     bidDate: "2026-06-07",
+    // 10 months — keeps the D28 duration dial consistent with the fixtures
+    expectedStart: "2026-01",
+    expectedFinish: "2026-11",
     createdAt: new Date().toISOString(),
     constructionContingencyRate: 0,
     designContingencyRate: 0,
@@ -1078,29 +1096,48 @@ describe("STEP 2/3 sheet detail (Phase 6)", () => {
     expect(step2).toBeDefined();
     expect(step3).toBeDefined();
 
-    // ── STEP 2 line rows: utilization (E) / qty (F) / rate (H) values ──
+    // Helper views over ExcelJS formula-cell values
+    const fCell = (sheet: ExcelJS.Worksheet, ref: string) =>
+      sheet.getCell(ref).value as { formula?: string; result?: number };
+
+    // ── STEP 2 line rows (round-trip Phase 2): input cells are VALUES,
+    // computed qty cells carry the live template-grammar formula cached at
+    // the engine qty ──
     // Superintendent (row 13): 100% × 10 mo × 173.2 = 1,732 hr @ $110
     expect(step2.getCell("E13").value).toBe(1);
-    expect(step2.getCell("F13").value).toBe(1732);
+    expect(fCell(step2, "F13").formula).toBe("$J$5*4.33*E13*40");
+    expect(fCell(step2, "F13").result).toBe(1732);
     expect(step2.getCell("H13").value).toBe(110);
     // Project Manager (row 29): 50% → 866 hr @ $120
     expect(step2.getCell("E29").value).toBe(0.5);
-    expect(step2.getCell("F29").value).toBe(866);
+    expect(fCell(step2, "F29").formula).toBe("$J$5*4.33*E29*40");
+    expect(fCell(step2, "F29").result).toBe(866);
     expect(step2.getCell("H29").value).toBe(120);
-    // Idle staff still written ($0 line, default rate visible): Project Executive row 27
+    // Idle staff still live ($0 line, default rate visible): Project Executive row 27
     expect(step2.getCell("E27").value).toBe(0);
-    expect(step2.getCell("F27").value).toBe(0);
+    expect(fCell(step2, "F27").formula).toBe("$J$5*4.33*E27*40");
     expect(step2.getCell("H27").value).toBe(175);
-    // Auto monthly line: Small Tools (row 36) 10 mo × $500 (su-driven)
-    expect(step2.getCell("F36").value).toBe(10);
+    // Small Tools (row 36): su-bound — emitted superQty pattern (sign-off A),
+    // E36 = su utilization, cached qty = 10 mo × 100%
+    expect(step2.getCell("E36").value).toBe(1);
+    expect(fCell(step2, "F36").formula).toBe("$J$5*E36");
+    expect(fCell(step2, "F36").result).toBe(10);
     expect(step2.getCell("H36").value).toBe(500);
-    // Equipment lump sum: Dumpsters (row 47) qty 1 × $5,000
+    // Fuel (row 37): natively superQty — same shape kept
+    expect(step2.getCell("E37").value).toBe(1);
+    expect(fCell(step2, "F37").formula).toBe("$J$5*E37");
+    // Monthly line: Cell Phone (row 43) stays live on the duration dial
+    expect(fCell(step2, "F43").formula).toBe("$J$5");
+    expect(fCell(step2, "F43").result).toBe(10);
+    expect(step2.getCell("H43").value).toBe(135);
+    // Equipment lump sum: Dumpsters (row 47) qty 1 × $5,000 — INPUT cells,
+    // native weekly rate formula deliberately not emitted (sign-off B)
     expect(step2.getCell("F47").value).toBe(1);
     expect(step2.getCell("H47").value).toBe(5000);
     // Manual lump sum: Design - Architecture (row 20) qty 1 × $12,000
     expect(step2.getCell("F20").value).toBe(1);
     expect(step2.getCell("H20").value).toBe(12000);
-    // %-line Safety Consultant (row 35): effective % × whole-job basis
+    // %-line Safety Consultant (row 35): frozen template-faithful values
     expect(step2.getCell("F35").value).toBeCloseTo(500 / summary.totalEstimatedCost, 10);
     expect(step2.getCell("H35").value).toBeCloseTo(summary.totalEstimatedCost, 2);
 
@@ -1111,12 +1148,22 @@ describe("STEP 2/3 sheet detail (Phase 6)", () => {
     expect(i36?.formula).toBe("F36*H36");
 
     // ── STEP 3 line rows ──
-    expect(step3.getCell("F55").value).toBe(2);    // Knox Box qty
+    expect(step3.getCell("F55").value).toBe(2);    // Knox Box qty (input)
     expect(step3.getCell("H55").value).toBe(650);  // Knox Box rate
-    expect(step3.getCell("F17").value).toBe(10);   // Safety: 10 mo
+    // Safety (row 17): emitted monthly pattern (sign-off C), cached 10 mo
+    expect(fCell(step3, "F17").formula).toBe("$J$5");
+    expect(fCell(step3, "F17").result).toBe(10);
     expect(step3.getCell("H17").value).toBe(500);
-    expect(step3.getCell("F18").value).toBe(10000); // Temp Protection: sqft
+    // Temp Protection (row 18): native sqft pattern kept live
+    expect(fCell(step3, "F18").formula).toBe("J8");
+    expect(fCell(step3, "F18").result).toBe(10000);
     expect(step3.getCell("H18").value).toBe(0.25);
+    // Material Hoist (row 65): emitted monthly pattern (sign-off C)
+    expect(fCell(step3, "F65").formula).toBe("$J$5");
+    // Progress Cleaning Payroll (row 15): typed hours VALUE overwrites the
+    // native staffHours formula (sign-off D)
+    expect(step3.getCell("F15").value).toBe(100);
+    expect(step3.getCell("H15").value).toBe(74);
     expect(step3.getCell("F12").value).toBe(1);    // Soil Borings qtyRate
     expect(step3.getCell("H12").value).toBe(2500);
     expect(step3.getCell("F32").value).toBe(1000); // Demolition
@@ -1124,27 +1171,29 @@ describe("STEP 2/3 sheet detail (Phase 6)", () => {
     expect(step3.getCell("F13").value).toBe(1);    // FFE Relocation lump $7,500
     expect(step3.getCell("H13").value).toBe(7500);
 
-    // ── Subtotal cells: VALUES identical to the STEP 4 rows 12–24 writes,
-    // so the template's exact-equality col-S checks tie out ──
+    // ── Subtotal cells: native SUM formulas stay LIVE, cached at the engine's
+    // linked totals; STEP 4 col H pulls these very cells, so the template's
+    // exact-equality col-S checks tie by construction ──
     const step4 = workbook.getWorksheet("STEP 4 - ESTIMATE")!;
-    const subtotalChecks: { itemId: string; sheet: ExcelJS.Worksheet; cell: string; step4Row: number }[] = [
-      { itemId: "01-0400.002", sheet: step2, cell: "I16", step4Row: 13 },
-      { itemId: "01-0000.001", sheet: step2, cell: "I58", step4Row: 12 },
-      { itemId: "02-0000.001", sheet: step3, cell: "I29", step4Row: 17 },
-      { itemId: "02-4100.002", sheet: step3, cell: "I35", step4Row: 18 },
-      { itemId: "02-9005.003", sheet: step3, cell: "I40", step4Row: 19 },
-      { itemId: "02-9070.004", sheet: step3, cell: "I45", step4Row: 20 },
-      { itemId: "02-9200.005", sheet: step3, cell: "I51", step4Row: 21 },
-      { itemId: "02-9300.006", sheet: step3, cell: "I62", step4Row: 22 },
-      { itemId: "02-9400.007", sheet: step3, cell: "I72", step4Row: 23 },
-      { itemId: "02-9500.008", sheet: step3, cell: "I82", step4Row: 24 },
+    const subtotalChecks: { itemId: string; sheet: ExcelJS.Worksheet; cell: string; sum: string; step4Row: number }[] = [
+      { itemId: "01-0400.002", sheet: step2, cell: "I16", sum: "SUM(I11:I15)", step4Row: 13 },
+      { itemId: "01-0000.001", sheet: step2, cell: "I58", sum: "SUM(I18:I57)", step4Row: 12 },
+      { itemId: "02-0000.001", sheet: step3, cell: "I29", sum: "SUM(I11:I28)", step4Row: 17 },
+      { itemId: "02-4100.002", sheet: step3, cell: "I35", sum: "SUM(I31:I34)", step4Row: 18 },
+      { itemId: "02-9005.003", sheet: step3, cell: "I40", sum: "SUM(I37:I39)", step4Row: 19 },
+      { itemId: "02-9070.004", sheet: step3, cell: "I45", sum: "SUM(I42:I44)", step4Row: 20 },
+      { itemId: "02-9200.005", sheet: step3, cell: "I51", sum: "SUM(I47:I50)", step4Row: 21 },
+      { itemId: "02-9300.006", sheet: step3, cell: "I62", sum: "SUM(I53:I61)", step4Row: 22 },
+      { itemId: "02-9400.007", sheet: step3, cell: "I72", sum: "SUM(I64:I71)", step4Row: 23 },
+      { itemId: "02-9500.008", sheet: step3, cell: "I82", sum: "SUM(I74:I81)", step4Row: 24 },
     ];
     for (const check of subtotalChecks) {
-      const subtotalValue = check.sheet.getCell(check.cell).value;
-      // A value (number), not a formula — and the EXACT number on STEP 4 col H
-      expect(typeof subtotalValue, `${check.itemId} subtotal is a value`).toBe("number");
-      expect(subtotalValue, `${check.itemId} subtotal`).toBe(linkedByItemId.get(check.itemId)!);
-      expect(step4.getRow(check.step4Row).getCell(8).value, `${check.itemId} STEP 4 H`).toBe(subtotalValue);
+      const subtotal = fCell(check.sheet, check.cell);
+      expect(subtotal?.formula, `${check.itemId} live SUM`).toBe(check.sum);
+      // ExcelJS omits `result` for a cached 0
+      expect(subtotal?.result ?? 0, `${check.itemId} cached subtotal`).toBe(linkedByItemId.get(check.itemId)!);
+      const step4H = step4.getRow(check.step4Row).getCell(8).value as { result?: number };
+      expect(step4H?.result ?? 0, `${check.itemId} STEP 4 H cache`).toBe(subtotal?.result ?? 0);
     }
     // Spot-check the section math itself
     expect(linkedByItemId.get("01-0400.002")).toBeCloseTo(190520, 2);          // Supervision (su)

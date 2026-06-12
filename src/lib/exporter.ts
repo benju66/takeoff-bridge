@@ -1,7 +1,8 @@
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
 import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
-import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, isLinkedDivisionRow } from "./constants";
-import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
+import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS, isLinkedDivisionRow } from "./constants";
+import { computeTakeoffSummary, computeLinkedDivisionTotals, getMonthsBetween, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
+import { STEP23_PATTERN_BY_CODE, STEP1_DURATION_CELL, qtyFormulaFor, inputCellsFor } from "./step23FormulaPatterns";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import { resolveProcoreCode } from "./costCodeResolver";
@@ -750,16 +751,33 @@ function setCellValue(cellEl: ParsedElement, value: number): void {
 
 /**
  * Set a formula on a parsed cell element.
- * Creates <f>formula</f><v>0</v>.
+ * Creates <f>formula</f><v>cached</v>. The cached value is what non-recalcing
+ * readers see; Excel itself recomputes on open (fullCalcOnLoad=1).
  */
-function setCellFormula(cellEl: ParsedElement, formula: string): void {
+function setCellFormula(cellEl: ParsedElement, formula: string, cachedValue: number = 0): void {
   if (cellEl[":@"]) {
     delete cellEl[":@"]["@_t"];
   }
   cellEl.c = [
     { f: [{ "#text": formula }] },
-    { v: [{ "#text": "0" }] },
+    { v: [{ "#text": String(cachedValue) }] },
   ];
+}
+
+/**
+ * Refresh only the cached <v> of a formula cell, leaving its <f> intact.
+ * Used where the template formula stays native but its cached result is the
+ * blank template's stale number (e.g. the STEP 2/3 section-subtotal SUMs).
+ */
+function setCachedFormulaValue(cellEl: ParsedElement, cachedValue: number): void {
+  const children: ParsedElement[] = cellEl.c || [];
+  const vNode = children.find((ch) => ch.v !== undefined);
+  if (vNode) {
+    vNode.v = [{ "#text": String(cachedValue) }];
+  } else {
+    children.push({ v: [{ "#text": String(cachedValue) }] });
+    cellEl.c = children;
+  }
 }
 
 /**
@@ -1086,10 +1104,11 @@ interface SheetDetailLine {
  * STEP 2/3 section-subtotal cells ← the linked STEP 4 division rows
  * (computeLinkedDivisionTotals itemIds). Coordinates forensically verified
  * (Phase 1 findings §5.1, re-verified Phase 6); STEP 2/3 rows never shift —
- * the exporter inserts rows only on STEP 4. Written as VALUES from the exact
- * numbers Phase 5 writes onto STEP 4 rows 12–24, so the template's
- * exact-equality col-S checks (e.g. S13: I13='STEP 2 - GCs'!I16) compare
- * identical numbers and tie out regardless of floating-point summation order.
+ * the exporter inserts rows only on STEP 4. Round-trip Phase 2: the native
+ * SUM formulas stay live (only their cached <v> is refreshed), and STEP 4
+ * rows 12–24 col H carries pull formulas onto these cells — the template's
+ * exact-equality col-S checks (e.g. S13: I13='STEP 2 - GCs'!I16) then tie by
+ * construction, recalculated or not.
  */
 const STEP23_SUBTOTAL_CELLS: { itemId: string; sheet: string; row: number }[] = [
   { itemId: "01-0400.002", sheet: "STEP 2 - GCs", row: 16 },       // Total Supervision
@@ -1103,6 +1122,12 @@ const STEP23_SUBTOTAL_CELLS: { itemId: string; sheet: string; row: number }[] = 
   { itemId: "02-9400.007", sheet: "STEP 3 - SITE OPS", row: 72 },  // Total Site Equipment
   { itemId: "02-9500.008", sheet: "STEP 3 - SITE OPS", row: 82 },  // Total Site Special Inspections
 ];
+
+/** STEP 4 linked-row col-H pull formulas (round-trip Phase 2), e.g.
+ * `'STEP 2 - GCs'!I58` — the template's own native shape, restored. */
+const STEP23_SUBTOTAL_REF_BY_ITEM_ID = new Map(
+  STEP23_SUBTOTAL_CELLS.map((s) => [s.itemId, `'${s.sheet}'!I${s.row}`])
+);
 
 /** The two %-of-estimate GC lines (findings §5.2) get the template-faithful write shape. */
 const PCT_LINE_CODES = new Set(
@@ -1127,9 +1152,18 @@ export function buildStep23DetailLines(
   siteOpsCalcResult: SiteOpsCalcResult,
   estimateTotalBasis: number
 ): { step2: SheetDetailLine[]; step3: SheetDetailLine[] } {
+  // Superintendent-bound lines (write shape "superQty": F = $J$5*E) carry the
+  // su utilization fraction on col E — the same dial the su staff line writes.
+  const suCode = STAFF_ROLE_DEFAULTS.find((r) => r.key === "su")!.code;
+  const suUtilization = gcCalcResult.staffLines.find((l) => l.code === suCode)?.utilization ?? 0;
+
   const step2: SheetDetailLine[] = [
     ...gcCalcResult.staffLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate, utilization: l.utilization })),
-    ...gcCalcResult.operationalLines.map((l) => ({ code: l.code, qty: l.qty, rate: l.rate })),
+    ...gcCalcResult.operationalLines.map((l) =>
+      STEP23_PATTERN_BY_CODE.get(l.code)?.write === "superQty"
+        ? { code: l.code, qty: l.qty, rate: l.rate, utilization: suUtilization }
+        : { code: l.code, qty: l.qty, rate: l.rate }
+    ),
     ...gcCalcResult.equipmentLines.map((l) => ({ code: l.code, qty: l.total > 0 ? 1 : 0, rate: l.total })),
     ...gcCalcResult.manualLines.map((l) => {
       if (PCT_LINE_CODES.has(l.code)) {
@@ -1149,16 +1183,20 @@ export function buildStep23DetailLines(
 
 /**
  * Writes the GC / Site Ops line detail onto the exported workbook's
- * "STEP 2 - GCs" and "STEP 3 - SITE OPS" sheets (gc-siteops Phase 6 — plan §8;
- * previously these sheets exported blank). Purely informational: the Budget
- * Line Items sheet carries computed values for all 217 rows regardless
- * (Phase 3), so this changes no export dollars.
+ * "STEP 2 - GCs" and "STEP 3 - SITE OPS" sheets as a LIVE projection of the
+ * app (round-trip Phase 2; gc-siteops Phase 6 wrote frozen values). The
+ * Budget Line Items sheet still carries computed values for all rows
+ * (deliberately frozen — no live SUMIF can produce a wrong rollup), so this
+ * changes no export dollars.
  *
- * Per-row writes go in ascending column order (E → F → H — CLAUDE.md rule);
- * each row's live I = F×H line-total formula and the J cost-per-SF formulas
- * are left intact and recompute on open (fullCalcOnLoad). The section
- * subtotal cells are overwritten with the linked division VALUES (see
- * STEP23_SUBTOTAL_CELLS) so the STEP 4 col-S checks tie out exactly.
+ * Write grammar per line comes from step23FormulaPatterns.ts: input cells
+ * (utilizations, rates, typed qtys/amounts) are written as VALUES; computed
+ * qty cells carry template-grammar formulas over the $J$5 duration / $J$8
+ * square-footage dials, cached at the engine qty. Per-row writes go in
+ * ascending column order (E → F → H — CLAUDE.md rule); each row's live
+ * I = F×H line-total formula, the J cost-per-SF formulas, and the section
+ * subtotal SUMs stay native and recompute on open (fullCalcOnLoad) — so a
+ * dial change in Excel recalculates the whole chain.
  */
 async function writeStep23SheetDetail(
   zip: JSZip,
@@ -1220,18 +1258,45 @@ async function writeStep23SheetDetail(
         continue;
       }
       const rowNum = getRowNum(rowEl);
+      // Round-trip Phase 2: write shape comes from the pattern table — input
+      // cells get VALUES (estimator dials, editable in Excel, read back on
+      // re-upload); computed qty cells get the template-grammar formula with
+      // the engine qty as the cached result. Engine and emitted formula agree
+      // by construction (HOURS_PER_MONTH 173.2 = 4.33×40); the recalc golden
+      // proves it numerically.
+      const pattern = STEP23_PATTERN_BY_CODE.get(line.code);
+      if (!pattern) {
+        throw new Error(
+          `GC/Site Ops line "${line.code}" has no entry in the STEP 2/3 pattern table — step23FormulaPatterns.ts no longer matches constants.ts.`
+        );
+      }
+      const inputs = inputCellsFor(pattern.write);
       // Ascending column order within the row: E → F → H
-      if (line.utilization !== undefined) {
+      if (inputs.E !== null) {
+        if (line.utilization === undefined) {
+          throw new Error(
+            `Line "${line.code}" (${pattern.label}) writes col E (${inputs.E}) but the detail line carries no utilization.`
+          );
+        }
         const eCell = getOrCreateCell(rowEl, "E", rowNum, getStyleFromRow(rowEl, "E"));
         setCellValue(eCell, line.utilization);
       }
       const fCell = getOrCreateCell(rowEl, "F", rowNum, getStyleFromRow(rowEl, "F"));
-      setCellValue(fCell, line.qty);
+      const fFormula = qtyFormulaFor(pattern.write, rowNum);
+      if (fFormula !== null) {
+        setCellFormula(fCell, fFormula, line.qty);
+      } else {
+        setCellValue(fCell, line.qty);
+      }
       const hCell = getOrCreateCell(rowEl, "H", rowNum, getStyleFromRow(rowEl, "H"));
       setCellValue(hCell, line.rate);
     }
 
-    // Section subtotal cells → linked division VALUES (exact col-S tie-out)
+    // Section subtotal cells: the native SUM formulas stay LIVE (round-trip
+    // Phase 2 — previously overwritten with values). Only their cached <v> is
+    // refreshed to the engine's linked-division number so non-recalcing
+    // readers see current results; the STEP 4 col-S checks tie by
+    // construction (STEP 4 col H = a pull formula on these very cells).
     for (const sub of STEP23_SUBTOTAL_CELLS) {
       if (sub.sheet !== name) continue;
       const rowEl = findRowElement(children, sub.row);
@@ -1241,13 +1306,12 @@ async function writeStep23SheetDetail(
       }
       const formula = getCellFormula(iCell);
       if (formula === null || !formula.toUpperCase().includes("SUM(")) {
-        // Guard: we expect to replace the template's live SUM. Anything else
-        // means the coordinates no longer point at a subtotal row.
+        // Guard: the coordinates must point at the template's live SUM row.
         throw new Error(
-          `Cell I${sub.row} on "${name}" is not a SUM subtotal (found ${formula === null ? "a static value" : `"${formula}"`}) — refusing to overwrite.`
+          `Cell I${sub.row} on "${name}" is not a SUM subtotal (found ${formula === null ? "a static value" : `"${formula}"`}) — template layout drifted.`
         );
       }
-      setCellValue(iCell, linkedTotalByItemId.get(sub.itemId) ?? 0);
+      setCachedFormulaValue(iCell, linkedTotalByItemId.get(sub.itemId) ?? 0);
     }
 
     const rebuilt = fixXmlEntities(builder.build(parsed));
@@ -1342,6 +1406,17 @@ export async function generateExcelWorkbook(
       writeStep1Cell("D10", projectMetadata.expectedStart || "", "text");
       writeStep1Cell("D11", projectMetadata.expectedFinish || "", "text");
       writeStep1Cell("D12", Number(projectMetadata.squareFootage) || 0, "number");
+      // Round-trip Phase 2: D28 becomes THE duration dial — the engine's
+      // durationMonths as a VALUE, replacing the template's =YEARFRAC(D10,D11)*12
+      // (which D10/D11-as-text already broke, and which disagrees with
+      // getMonthsBetween anyway — the app is the math authority). Same
+      // derivation as useProjectWorkspace, so the live STEP 2/3 chain
+      // ($J$5 ← D28) recomputes exactly the engine's numbers.
+      writeStep1Cell(
+        STEP1_DURATION_CELL,
+        getMonthsBetween(projectMetadata.expectedStart || "", projectMetadata.expectedFinish || ""),
+        "number"
+      );
       writeStep1Cell("D58", Number(projectMetadata.unitCount) || 0, "number");
 
       // Optional physical specs — only write if explicitly set
@@ -1543,17 +1618,24 @@ export async function generateExcelWorkbook(
       }
     }
 
-    // ── Linked division rows (Phase 5): write qty 1 × computed Step 2/3
-    // subtotal as values, independent of grid state, replacing the template's
-    // live pull formulas (which would read $0 off the blank STEP 2/3 sheets).
+    // ── Linked division rows: qty 1 + the template's native col-H pull
+    // formula onto the STEP 2/3 section subtotal, cached at the engine's
+    // computed total (round-trip Phase 2 — Phase 5 wrote frozen values while
+    // the STEP 2/3 sheets exported blank; they now carry the live chain).
+    // The pull refs never shift: STEP 2/3 rows are insertion-free.
     for (const [code, rIdx] of Object.entries(prepopulatedRowsMap)) {
       if (!isLinkedDivisionRow(code)) continue;
       const rowEl = findRowElement(sheetDataChildren, rIdx);
       if (!rowEl) continue;
       const qtyCell = getOrCreateCell(rowEl, "F", rIdx, getStyleFromRow(rowEl, "F"));
       setCellValue(qtyCell, 1);
+      const pull = STEP23_SUBTOTAL_REF_BY_ITEM_ID.get(code);
       const priceCell = getOrCreateCell(rowEl, "H", rIdx, getStyleFromRow(rowEl, "H"));
-      setCellValue(priceCell, linkedDivisionTotalByItemId.get(code) ?? 0);
+      if (pull) {
+        setCellFormula(priceCell, pull, linkedDivisionTotalByItemId.get(code) ?? 0);
+      } else {
+        setCellValue(priceCell, linkedDivisionTotalByItemId.get(code) ?? 0);
+      }
     }
 
     // ── Unmapped row insertion (overflow/manual rows) ──
