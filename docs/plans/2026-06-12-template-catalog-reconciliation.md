@@ -137,10 +137,23 @@ export goldens (STEP-4 McKenna and GC/Site-Ops STEP 2/3).
   · `/handoff`.
 
 ### Phase 4 — Retype STEP-3 Site-Ops equipment + STEP-3 type advisory (golden-gated)
-- **Scope:**
-  - In `constants.ts`, retype the 02.G Site Equipment codes
+
+> **DECISION 2026-06-12 (architect): the 02.G retype was DROPPED.** Verification
+> against both `docs/reference/Procore Cost Codes.xlsx` and the live
+> `procore_cost_codes` table found that all six 02.G bases
+> (`2-29405/29410/29415/29420/29425/29430.000`) — and the entire division 02 — are
+> typed **Material**, not Equipment. The only Equipment-typed code repo-wide is
+> `10-102113.000` Toilet Partitions (already handled in Phase 3). Retyping the
+> estimate to `E` would fabricate a type the Procore authority does not record
+> (AGENTS.md "No Fabricated Types") and would CREATE 6 new mismatches, not reach 0
+> residual. So the estimate keeps the six 02.G lines as Material (they already agree
+> with Procore), and Phase 4 ships only the STEP-3 type-drift advisory below, which
+> correctly reads **0 drift** today. `constants.ts` is unchanged.
+
+- **Scope (as built):**
+  - ~~In `constants.ts`, retype the 02.G Site Equipment codes
     (`02-9405/9410/9415/9420/9425/9430.001`) and the `02-9400.007` summary row from
-    `costType:"M"` → `"E"`. Label-only.
+    `costType:"M"` → `"E"`. Label-only.~~ **Dropped — see decision above.**
   - Extend the type-mismatch advisory: `computeTypeReconciliation` (or a sibling
     helper) also compares the STEP-3 Site-Ops codes (`SITE_OPS_MANUAL_DEFAULTS`,
     `LINKED_DIVISION_ROWS`) against `procore_cost_codes`, surfaced on `/cost-codes`,

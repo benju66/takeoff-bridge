@@ -4,10 +4,16 @@ import fs from "fs";
 import path from "path";
 import {
   computeTypeReconciliation,
+  computeSiteOpsTypeReconciliation,
   estimateCostTypeToProcore,
+  SITE_OPS_TYPE_CHECKED_CODE_COUNT,
   type MappingForReconciliation,
 } from "@/lib/procoreTypeReconciliation";
 import { getCatalogItems, primeCatalogCostTypeOverrides, resetCatalog } from "@/lib/catalog";
+import {
+  SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_DYNAMIC_DEFAULTS,
+} from "@/lib/constants";
 import type { ProcoreCostCodeType } from "@/types/db";
 import catalog from "@/lib/estimate-catalog.json";
 
@@ -172,5 +178,74 @@ describe("computeTypeReconciliation — canonical raw 67/8, seeded 2", () => {
     const result = computeTypeReconciliation(mappings, {}, procoreTypeByCode);
     expect(result.mismatches).toEqual([]);
     expect(result.missingBase).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STEP-3 Site-Ops type drift (Template + Catalog Reconciliation Phase 4).
+//
+// The granular STEP-3 Site-Ops lines hard-code BOTH their Procore code and their
+// cost type in constants.ts (SITE_OPS_DYNAMIC_DEFAULTS / SITE_OPS_MANUAL_DEFAULTS)
+// and bypass cost_code_map + the catalog overlay. computeSiteOpsTypeReconciliation
+// runs the same type comparison over them so a bad hand-edit is caught going
+// forward. Pinned at 0/0 — every Site-Ops type already agrees with its Procore
+// base today.
+//
+// The 02.G assertions are the kickoff's "trust but pin it": the plan ASSUMED the
+// 02.G equipment-rental lines should be Equipment, but the Procore master list
+// (and the seed workbook) type all six as Material — so the architect's decision
+// was to KEEP them Material (no retype). These pins lock that fact in: if Procore
+// ever retypes them Equipment, this test fails loudly and the retype is revisited.
+// ---------------------------------------------------------------------------
+describe("computeSiteOpsTypeReconciliation — STEP-3 Site-Ops, 0 drift", () => {
+  // The six 02.G Site Equipment lines + their Procore bases (kickoff scope).
+  const SITE_EQUIPMENT_CODES = [
+    "02-9405.001", "02-9410.001", "02-9415.001",
+    "02-9420.001", "02-9425.001", "02-9430.001",
+  ];
+
+  it("reports 0 type mismatches and 0 missing-base across every Site-Ops line", async () => {
+    const procoreTypeByCode = await readProcoreTypeMap();
+    expect(procoreTypeByCode.size).toBe(217);
+
+    const result = computeSiteOpsTypeReconciliation(procoreTypeByCode);
+    expect(result.mismatches).toEqual([]);
+    expect(result.missingBase).toEqual([]);
+
+    // The advertised "N lines checked" count equals the actual config size.
+    expect(SITE_OPS_TYPE_CHECKED_CODE_COUNT).toBe(
+      SITE_OPS_DYNAMIC_DEFAULTS.length + SITE_OPS_MANUAL_DEFAULTS.length,
+    );
+  });
+
+  it("the six 02.G Site Equipment lines are Material on BOTH sides (not Equipment)", async () => {
+    const procoreTypeByCode = await readProcoreTypeMap();
+    const allLines = [...SITE_OPS_DYNAMIC_DEFAULTS, ...SITE_OPS_MANUAL_DEFAULTS];
+
+    for (const code of SITE_EQUIPMENT_CODES) {
+      const line = allLines.find((l) => l.code === code);
+      expect(line, `02.G line ${code} present in Site-Ops configs`).toBeTruthy();
+      // Estimate side: the constants still type these Material (no retype).
+      expect(line!.costType, `${code} estimate type`).toBe("M");
+      // Procore side: the master list types the mapped base Material, not Equipment.
+      expect(procoreTypeByCode.get(line!.procoreCode), `${code} → ${line!.procoreCode} Procore type`).toBe("Material");
+    }
+  });
+
+  it("only 10-102113.000 Toilet Partitions is Equipment-typed in the whole master list", async () => {
+    const procoreTypeByCode = await readProcoreTypeMap();
+    const equipmentCodes = [...procoreTypeByCode.entries()]
+      .filter(([, type]) => type === "Equipment")
+      .map(([code]) => code);
+    expect(equipmentCodes).toEqual(["10-102113.000"]);
+  });
+
+  it("surfaces a hand-edit that diverges a Site-Ops type from Procore", async () => {
+    // Synthetic proof the monitor would fire: force one line's base to a type the
+    // estimate does not claim. (Pure-map override; the real configs are untouched.)
+    const procoreTypeByCode = new Map(await readProcoreTypeMap());
+    procoreTypeByCode.set("2-29410.000", "Subcontract"); // Scaffolding line says "M"
+    const result = computeSiteOpsTypeReconciliation(procoreTypeByCode);
+    expect(result.mismatches.map((m) => m.internalCode)).toContain("02-9410.001");
   });
 });
