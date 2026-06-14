@@ -17,6 +17,7 @@ import {
   Plus,
   PackagePlus,
   PackageCheck,
+  Layers,
 } from "lucide-react";
 import {
   getCustomStep23LineDefs,
@@ -30,6 +31,7 @@ import {
   createCatalogAddition,
   updateCatalogAddition,
   getCatalogCostTypeOverrides,
+  upsertCatalogCostTypeOverride,
 } from "@/lib/db";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
@@ -52,7 +54,9 @@ import {
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
 import { primeProcoreValidCodesFromDb } from "@/lib/procoreValidCodesPrime";
-import type { CustomStep23LineDef, CatalogAddition } from "@/types/db";
+import { ESTIMATE_ITEMS_MASTER } from "@/lib/mock-data";
+import type { InternalEstimateItem } from "@/types";
+import type { CustomStep23LineDef, CatalogAddition, CatalogCostTypeOverride } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Catalog Manager (roadmap item 4, Phase 3) — the admin surface for the custom
@@ -719,6 +723,15 @@ export default function CatalogManagerDashboard() {
           with no redeploy, manage existing additions, and reconcile template
           drift. Mounted unconditionally — it has its own loading + error UI. */}
       <Step4CatalogSection />
+
+      {/* ───────────────────────────────────────────────────────────────────
+          Built-in catalog cost types (Template + Catalog Reconciliation
+          Phase 5). Correct the COST TYPE — and only the type — of a harvested
+          built-in STEP 4 code. The fix is a catalog_cost_type_overrides row
+          (the Phase-2 overlay), never an addition; it shows immediately and
+          survives a template re-harvest. Owns the override overlay lifecycle
+          for /catalog. */}
+      <BuiltInCatalogCostTypeSection />
     </div>
   );
 }
@@ -888,17 +901,9 @@ function Step4CatalogSection() {
     primeProcoreValidCodesFromDb();
   }, []);
 
-  // Prime the built-in cost-type override overlay independently (Reconciliation
-  // Phase 2 — fail-soft) so this page and a workspace opened later in this tab
-  // read the corrected types. The Phase 5 editor will also drive its display
-  // from these rows. LABEL ONLY — moves no dollars; empty = identity.
-  useEffect(() => {
-    getCatalogCostTypeOverrides()
-      .then((loaded) => primeCatalogCostTypeOverrides(loaded))
-      .catch((err) => {
-        console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
-      });
-  }, []);
+  // NB: the built-in cost-type override overlay is loaded + primed by the
+  // BuiltInCatalogCostTypeSection below (Reconciliation Phase 5), which owns that
+  // overlay's lifecycle for /catalog — no duplicate fetch/prime here.
 
   const flashSaved = (itemId: string) => {
     setSaveSuccess(itemId);
@@ -1583,6 +1588,325 @@ function Step4AdditionRow({
           <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">In-app only</span>
         ) : (
           <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">Landed (superseded)</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Built-in catalog cost types (Template + Catalog Reconciliation Phase 5).
+// The harvested STEP 4 codes (ESTIMATE_ITEMS_MASTER) carry a costType baked into
+// the template. Here a built-in's TYPE — and ONLY its type — is correctable
+// in-app. The correction is a row in catalog_cost_type_overrides (the Phase-2
+// overlay), NEVER a catalog_additions row: an addition carries its own
+// code/price and may never shadow a built-in, while an override exists only to
+// relabel one (the inverse collision rule). The override patches the built-in's
+// costType at the catalog chokepoint, so the fix shows immediately, survives a
+// template re-harvest, and reaches the /cost-codes type-mismatch advisory.
+//
+// LABEL ONLY — costType is read by neither calculations.ts nor exporter.ts, so a
+// retype moves no dollars on any export or saved row (a row freezes its type at
+// birth; only future row births + the advisory reflect the correction).
+//
+// This section OWNS the override overlay lifecycle for /catalog: it loads the
+// rows on mount, primes the chokepoint (so a workspace opened later in this tab
+// and the advisory read the corrected types), and re-primes after each edit.
+// Display is driven from the overrides STATE — never a live getCatalogItems()
+// read inside a memo — sidestepping the render-less-prime stale-memo trap.
+// ---------------------------------------------------------------------------
+
+function BuiltInCatalogCostTypeSection() {
+  const [overrides, setOverrides] = useState<CatalogCostTypeOverride[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Load the live overrides on mount, prime the chokepoint overlay (session-wide
+  // module state — prime even if this section later unmounts), and keep the list
+  // in state to drive the editor. FAIL-SOFT: an outage degrades to the harvested
+  // types (no override shown) and disables editing, never blocking the rest of
+  // the page.
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogCostTypeOverrides()
+      .then((loaded) => {
+        primeCatalogCostTypeOverrides(loaded);
+        if (cancelled) return;
+        setOverrides(loaded);
+      })
+      .catch((err) => {
+        console.error("Failed to load catalog cost-type overrides:", err);
+        if (!cancelled) {
+          setOverrides([]);
+          setLoadError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const flashSaved = (itemId: string) => {
+    setSaveSuccess(itemId);
+    setTimeout(() => setSaveSuccess((c) => (c === itemId ? null : c)), 3000);
+  };
+
+  // itemId → its override row (the editor's current selection + "overridden" mark).
+  const overrideMap = useMemo(
+    () => new Map((overrides ?? []).map((o) => [o.itemId, o] as const)),
+    [overrides]
+  );
+
+  // Commit a built-in cost-type correction: write through the gateway (the
+  // authoritative built-in + L/M/S/E guard — it rejects a non-built-in code), then
+  // update local state AND re-prime the overlay so the new type shows here and at
+  // every chokepoint immediately. The DB write is what makes it survive a reload.
+  // Setting the type back to the harvested value upserts a no-op override (the
+  // overlay treats override==harvested as identity), which clears the visible mark.
+  const handleCostTypeEdit = async (itemId: string, costType: string) => {
+    setBusyItemId(itemId);
+    try {
+      const saved = await upsertCatalogCostTypeOverride({ itemId, costType });
+      const next = [...(overrides ?? []).filter((o) => o.itemId !== itemId), saved].sort((a, b) =>
+        a.itemId.localeCompare(b.itemId)
+      );
+      setOverrides(next);
+      primeCatalogCostTypeOverrides(next);
+      flashSaved(itemId);
+    } catch (err) {
+      console.error(`Failed to set cost type for ${itemId}:`, err);
+      alert(err instanceof Error ? err.message : `Failed to set cost type for ${itemId}. No change was saved.`);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  // The harvested built-ins, in code order (the static master — never mutated).
+  const builtIns = useMemo(
+    () => Object.values(ESTIMATE_ITEMS_MASTER).sort((a, b) => a.itemId.localeCompare(b.itemId)),
+    []
+  );
+
+  // Count of built-ins whose displayed type actually differs from the harvested
+  // type (a no-op override that equals the harvested type does not count).
+  const overriddenCount = useMemo(() => {
+    let n = 0;
+    for (const item of builtIns) {
+      const ov = overrideMap.get(item.itemId);
+      if (ov && ov.costType !== item.costType) n++;
+    }
+    return n;
+  }, [builtIns, overrideMap]);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return builtIns;
+    return builtIns.filter((item) => {
+      const effective = overrideMap.get(item.itemId)?.costType ?? item.costType;
+      return (
+        item.itemId.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.procoreCode.toLowerCase().includes(q) ||
+        effective.toLowerCase().includes(q) ||
+        (COST_TYPE_LABELS[effective] ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [builtIns, overrideMap, searchQuery]);
+
+  return (
+    <section className="flex flex-col gap-4 border-t border-grid-border pt-8 mt-4">
+      {/* Section header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
+            <Layers className="text-blue-600 dark:text-blue-400" size={24} /> BUILT-IN CATALOG COST TYPES
+          </h2>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1.5">
+            Correct the cost type — Labor, Materials, Subcontract, or Equipment — of a harvested STEP 4 catalog code.
+            The fix is a cost-type override that patches just the type; it shows everywhere immediately and survives the
+            next template harvest. It never moves a dollar (a line freezes its type when a row is saved) and never
+            changes the code or its price.
+          </p>
+        </div>
+        {overrides !== null && !loadError && (
+          <div className="text-[11px] text-slate-600 dark:text-slate-400 shrink-0 self-start md:text-right">
+            <span className="font-bold text-foreground">{overriddenCount}</span> of {builtIns.length} built-in
+            {overriddenCount === 1 ? " code" : " codes"} re-typed
+          </div>
+        )}
+      </div>
+
+      {/* Body — overrides is null only while loading (set to [] on error) */}
+      {overrides === null ? (
+        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 p-6">
+          <Terminal className="text-blue-600 dark:text-blue-400 animate-pulse" size={18} /> Loading built-in cost types…
+        </div>
+      ) : loadError ? (
+        <div className="flex items-center gap-2 bg-rose-50/50 dark:bg-rose-950/10 border border-rose-200 dark:border-rose-900/50 rounded-lg p-4 text-[11px] text-rose-700 dark:text-rose-400">
+          <AlertTriangle size={16} className="shrink-0" /> The cost-type override table could not be loaded — built-in
+          codes show their harvested types and cost-type editing is unavailable until the live table is reachable.
+          Reload to retry.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-4 top-3 text-slate-600 dark:text-slate-400" size={15} />
+            <input
+              type="text"
+              placeholder="Search built-in codes by code, description, Procore code, or cost type…"
+              className="w-full bg-transparent border border-grid-border focus:border-blue-500 focus:ring-2 focus:ring-blue-500 rounded-lg pl-11 pr-4 py-2.5 text-xs text-foreground outline-none transition-all"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Table */}
+          <div className="bg-card border border-grid-border rounded-xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto max-h-[32rem] overflow-y-auto">
+              <table className="w-full text-left text-xs border-separate border-spacing-0 border-t border-l border-grid-border">
+                <thead className="sticky top-0 z-10">
+                  <tr className="bg-background/95 dark:bg-slate-900/95 text-slate-600 dark:text-slate-400 uppercase tracking-wider font-semibold backdrop-blur">
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Code</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Description</th>
+                    <th className="p-3 text-center border-r border-b border-grid-border font-semibold">Procore BLI</th>
+                    <th className="p-3 text-center w-40 border-r border-b border-grid-border font-semibold">Cost Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-8 text-center text-slate-600 dark:text-slate-400 italic border-r border-b border-grid-border">
+                        No built-in codes match the query: &quot;{searchQuery}&quot;
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((item) => (
+                      <BuiltInCostTypeRow
+                        key={item.itemId}
+                        item={item}
+                        override={overrideMap.get(item.itemId)}
+                        busy={busyItemId === item.itemId}
+                        anyBusy={busyItemId !== null}
+                        justSaved={saveSuccess === item.itemId}
+                        onEdit={handleCostTypeEdit}
+                      />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-lg p-4 text-[10px] text-amber-700 dark:text-amber-500 font-bold uppercase tracking-wider">
+            <Info className="text-amber-500/80 shrink-0" size={14} />
+            <span>
+              Cost type is a label — it never moves a dollar. A correction here changes only future row births and the
+              type-mismatch advisory; already-saved estimates keep the type frozen onto each line at save time.
+            </span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One built-in row. The cost-type cell is the only editable control (button →
+// inline <select>, mirroring the additions cost-type editor). A re-typed code
+// shows an "overridden" mark with its harvested original; everything else is
+// read-only context.
+// ---------------------------------------------------------------------------
+
+function BuiltInCostTypeRow({
+  item,
+  override,
+  busy,
+  anyBusy,
+  justSaved,
+  onEdit,
+}: {
+  item: InternalEstimateItem;
+  override: CatalogCostTypeOverride | undefined;
+  busy: boolean;
+  /** True while ANY row is saving — gates this row's editor so two concurrent
+   *  edits can't compute their next override set from the same stale snapshot
+   *  (a lost update; the writes both persist, but one would drop from the
+   *  in-session overlay until reload). */
+  anyBusy: boolean;
+  justSaved: boolean;
+  onEdit: (itemId: string, costType: string) => void;
+}) {
+  const harvested = item.costType;
+  const effective = override?.costType ?? harvested;
+  const overridden = effective !== harvested;
+  const [editing, setEditing] = useState(false);
+
+  const cellHover = "transition-colors group-hover:bg-blue-100/50 dark:group-hover:bg-slate-800/60";
+
+  return (
+    <tr className="group transition-colors">
+      {/* Code */}
+      <td className={`p-3 font-bold text-blue-600 dark:text-blue-400 font-mono tracking-wide uppercase border-r border-b border-grid-border whitespace-nowrap ${cellHover}`}>
+        <div className="flex items-center gap-2">
+          {item.itemId}
+          {justSaved && <CheckCircle2 size={14} className="text-emerald-500 animate-pulse shrink-0" />}
+        </div>
+      </td>
+
+      {/* Description */}
+      <td className={`p-3 text-foreground border-r border-b border-grid-border ${cellHover}`}>{item.description}</td>
+
+      {/* Procore BLI (read-only context) */}
+      <td className={`p-3 text-center font-mono text-slate-500 border-r border-b border-grid-border ${cellHover}`}>
+        {item.procoreCode || "—"}
+      </td>
+
+      {/* Cost type — the editable control */}
+      <td className={`p-2 text-center border-r border-b border-grid-border ${cellHover}`}>
+        {editing ? (
+          <select
+            autoFocus
+            value={effective}
+            disabled={busy}
+            onChange={(e) => {
+              onEdit(item.itemId, e.target.value);
+              setEditing(false);
+            }}
+            onBlur={() => {
+              if (!busy) setEditing(false);
+            }}
+            className="text-xs font-mono rounded-md border border-blue-500 px-2 py-1.5 bg-card cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 text-foreground disabled:opacity-50"
+            title={`Cost type for ${item.itemId}`}
+          >
+            {COST_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value} — {o.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={() => setEditing(true)}
+              disabled={anyBusy}
+              className="inline-flex items-center gap-1.5 text-xs font-mono font-bold rounded-md border border-grid-border hover:border-blue-500 px-2.5 py-1.5 bg-card text-foreground cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
+              title={`${COST_TYPE_LABELS[effective] ?? effective} — click to change`}
+            >
+              {busy ? "Saving…" : effective}
+              <PenLine size={11} className="text-slate-400 shrink-0" />
+            </button>
+            {overridden && (
+              <span
+                className="inline-block text-[9px] px-1.5 py-0.5 border rounded font-bold tracking-wider bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/50"
+                title={`Re-typed — the harvested template type is ${COST_TYPE_LABELS[harvested] ?? harvested} (${harvested})`}
+              >
+                was {harvested}
+              </span>
+            )}
+          </div>
         )}
       </td>
     </tr>
