@@ -11,11 +11,24 @@
 
 import type { Project } from "@/types/db";
 import { ESTIMATE_MODIFIERS } from "@/lib/constants";
-import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
+import type {
+  LinkedDivisionTotal,
+  PersonnelCalcResult,
+  SiteOpsCalcResult,
+  TakeoffSummary,
+} from "@/lib/calculations";
 import type { ProcessedTakeoffRow, EstimateOverrideRecord } from "@/types";
+import {
+  assembleBindingGraphNodes,
+  describeBindingDependency,
+  describeSourceNode,
+} from "@/lib/bindings/registry";
+import { evaluateGraph } from "@/lib/bindings/graph";
+import { findBindingByTarget } from "@/lib/bindings/store";
+import type { Binding } from "@/lib/bindings/types";
 
-/** The three Trust Inspector tabs (Reconcile + Flags ship in later slices). */
-export type TrustTab = "trace" | "reconcile" | "flags";
+/** The Trust Inspector tabs. Trace + Links are two views of one dependency graph. */
+export type TrustTab = "trace" | "links" | "reconcile" | "flags";
 
 /**
  * Human-readable description of each rounding mode, surfaced inline in the trace
@@ -398,4 +411,89 @@ export function buildFlagsModel({
     createdAt: rec.createdAt,
   }));
   return { needsReviewRows, unmappedRows, auditLog };
+}
+
+// ---------------------------------------------------------------------------
+// Links view-model (Phase 5, LD-2): the focused cell's depends-on / used-by.
+//
+// Trace = how a TOTAL decomposes (top-down); Links = what ONE cell reads and what feeds
+// off it (one hop each way) — two views of the same kind-blind binding graph. PURE: it
+// recomputes the graph from source (assembleBindingGraphNodes + evaluateGraph) and labels
+// the edges; no estimate math here. Full node-and-edge visualization is OUT of v1 (LD-2).
+// ---------------------------------------------------------------------------
+
+/** One node in the Links view, with the row id when it is a line node (for grid jump). */
+export interface LinkNodeRef {
+  nodeId: string;
+  label: string;
+  /** STEP 4 row id when the node is a `line:<rowId>:<field>` node — enables click-to-jump. */
+  rowId?: string;
+  /** Recomputed value when known (the graph evaluated it). */
+  value?: number;
+}
+
+export interface LinksModel {
+  /** The node the inspector is focused on (the clicked/badged cell). */
+  focus: LinkNodeRef;
+  /** True when the focused node is computed by a USER binding (a derived, read-only cell). */
+  isBound: boolean;
+  /** Short "depends on …" description of the focus binding (badge label), when bound. */
+  bindingDescription?: string;
+  /** The focus binding's direct inputs (what this cell reads). Empty when not bound. */
+  dependsOn: LinkNodeRef[];
+  /** The authored links whose inputs include the focus (what feeds off this cell). */
+  usedBy: LinkNodeRef[];
+}
+
+export interface BuildLinksArgs {
+  /** Node id the inspector is focused on (e.g. `line:<rowId>:total`, `gc:grandTotal`). */
+  focusNodeId: string;
+  /** The project's authored bindings (optimistic list from the page). */
+  bindings: Binding[];
+  gc: PersonnelCalcResult;
+  siteOps: SiteOpsCalcResult;
+  rows: ProcessedTakeoffRow[];
+}
+
+/**
+ * Build the Links view-model for one focused node. Assembles the same kind-blind graph
+ * the grid recomputes (so depends-on/used-by match exactly what the engine evaluates),
+ * then labels each edge via the shared node labeller. When there are no bindings the
+ * graph is empty and the model is just the focus node (cheap — the common/golden case).
+ */
+export function buildLinksModel({
+  focusNodeId,
+  bindings,
+  gc,
+  siteOps,
+  rows,
+}: BuildLinksArgs): LinksModel {
+  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows);
+  const values = nodes.length ? evaluateGraph(nodes) : new Map<string, number>();
+  const targetIds = new Set(bindings.map((b) => b.targetNodeId));
+
+  const toRef = (nodeId: string): LinkNodeRef => {
+    const d = describeSourceNode(nodeId, rows);
+    return { nodeId, label: d.label, rowId: d.rowId, value: values.get(nodeId) };
+  };
+
+  const focusBinding = findBindingByTarget(bindings, focusNodeId);
+  const focusNode = nodes.find((n) => n.id === focusNodeId);
+
+  // depends-on: the focus binding's direct inputs (only meaningful when it is bound).
+  const dependsOn =
+    focusBinding && focusNode ? focusNode.inputs.map(toRef) : [];
+
+  // used-by: authored link targets whose inputs read the focus node (one hop).
+  const usedBy = nodes
+    .filter((n) => targetIds.has(n.id) && n.inputs.includes(focusNodeId))
+    .map((n) => toRef(n.id));
+
+  return {
+    focus: toRef(focusNodeId),
+    isBound: !!focusBinding,
+    bindingDescription: focusBinding ? describeBindingDependency(focusBinding) : undefined,
+    dependsOn,
+    usedBy,
+  };
 }

@@ -23,13 +23,13 @@
 
 import { compileBindingToNode, lineFieldNodeId } from "./compile";
 import { evaluateGraph } from "./graph";
-import { recomputeBindingValues } from "./recompute";
 import type { Basis, Binding, BindingLine, GraphNode, RollupField } from "./types";
 import {
   LINKED_DIVISION_ROWS,
   SUPERVISION_STAFF_CODES,
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_SECTIONS,
   isLinkedDivisionRow,
   type LinkedDivisionSource,
   type SiteOpsSection,
@@ -103,21 +103,15 @@ function sectionTotalsByCode(siteOps: SiteOpsCalcResult): Map<SiteOpsSection, nu
 }
 
 /**
- * The STEP 2/3 computed values the 10 linked lookups read, as source `GraphNode`s
- * (app-born branch). `gc:grandTotal` and `gc:supervisionSubtotal` are constants;
- * `gc:general` is a DERIVED node (grandTotal − supervision) that depends on the
- * other two — so the graph orders it after them, and it stays faithful to the
- * oracle's "gcGeneralTotal is a derived value, not a raw subtotal". One
- * `siteops:<section>` constant is emitted per section a linked row references.
+ * The three STEP 2 GC source nodes. `gc:grandTotal` and `gc:supervisionSubtotal` are
+ * constants; `gc:general` is a DERIVED node (grandTotal − supervision) that depends on
+ * the other two — so the graph orders it after them, and it stays faithful to the
+ * oracle's "gcGeneralTotal is a derived value, not a raw subtotal". Shared by the
+ * golden linked-division path and the user-binding source set.
  */
-export function gcSiteOpsSourceNodes(
-  gc: PersonnelCalcResult,
-  siteOps: SiteOpsCalcResult
-): GraphNode[] {
+function gcSourceNodes(gc: PersonnelCalcResult): GraphNode[] {
   const supervision = supervisionSubtotal(gc);
-  const sectionTotals = sectionTotalsByCode(siteOps);
-
-  const nodes: GraphNode[] = [
+  return [
     constantNode(GC_GRAND_TOTAL_NODE_ID, gc.grandTotal),
     constantNode(GC_SUPERVISION_NODE_ID, supervision),
     {
@@ -128,6 +122,20 @@ export function gcSiteOpsSourceNodes(
         (m.get(GC_GRAND_TOTAL_NODE_ID) ?? 0) - (m.get(GC_SUPERVISION_NODE_ID) ?? 0),
     },
   ];
+}
+
+/**
+ * The STEP 2/3 computed values the 10 linked lookups read, as source `GraphNode`s
+ * (app-born branch). The 3 GC nodes plus one `siteops:<section>` constant per section
+ * a linked row references. Kept byte-identical (same nodes, same order) — it backs the
+ * golden tie-out, so it must NEVER widen beyond what the linked rows read.
+ */
+export function gcSiteOpsSourceNodes(
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult
+): GraphNode[] {
+  const sectionTotals = sectionTotalsByCode(siteOps);
+  const nodes = gcSourceNodes(gc);
 
   // Emit a source node only for the sections the linked rows actually read.
   const sections = new Set<SiteOpsSection>();
@@ -138,6 +146,40 @@ export function gcSiteOpsSourceNodes(
     nodes.push(constantNode(siteOpsSectionNodeId(section), sectionTotals.get(section) ?? 0));
   }
   return nodes;
+}
+
+/**
+ * EVERY Site-Ops section as a `siteops:<section>` source node (not just the ones the
+ * linked rows reference). Used by the user-binding source set so the authoring picker
+ * can offer any section and the lookup resolves to a real value (an unreferenced
+ * section's total is 0). Distinct from `gcSiteOpsSourceNodes`, which stays narrow for
+ * the golden tie-out.
+ */
+function allSiteOpsSectionNodes(siteOps: SiteOpsCalcResult): GraphNode[] {
+  const sectionTotals = sectionTotalsByCode(siteOps);
+  return SITE_OPS_SECTIONS.map((s) =>
+    constantNode(siteOpsSectionNodeId(s.id), sectionTotals.get(s.id) ?? 0)
+  );
+}
+
+/**
+ * The FULL set of source nodes a USER binding may read (spec §2.2, the addressability
+ * ceiling): the 3 GC computed values, every Site-Ops section, and every line's
+ * aggregatable field (`line:<id>:total|unitPrice|matchedQty`). A superset of the golden
+ * `gcSiteOpsSourceNodes` (extra constants are harmless to an unrelated binding), it is
+ * the single source set both the recompute and the authoring picker draw from — so the
+ * picker can only ever offer a node the engine actually evaluates.
+ */
+export function userBindingSourceNodes(
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult,
+  lines: readonly BindingLine[]
+): GraphNode[] {
+  return [
+    ...gcSourceNodes(gc),
+    ...allSiteOpsSectionNodes(siteOps),
+    ...lineFieldSourceNodes(lines),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +357,33 @@ export function recomputeLineBindingValues(
   siteOps: SiteOpsCalcResult,
   rows: readonly ProcessedTakeoffRow[]
 ): Map<string, number> {
-  if (bindings.length === 0) return new Map();
+  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows);
+  if (nodes.length === 0) return new Map();
+  return evaluateGraph(nodes);
+}
+
+/**
+ * Assembles the kind-blind graph node list (live source nodes + compiled USER binding
+ * nodes) the recompute, the authoring cycle-guard, and the Links view all share — the
+ * ONE place collision precedence is resolved so the graph core (graph.ts) is never
+ * handed two nodes with the same id:
+ *  - **Reserved linked rows win.** A user binding targeting one of the 10 hardcoded
+ *    linked-division total nodes is SKIPPED (logged) — the hardcoded bridge stays
+ *    authoritative.
+ *  - **User binding wins over a plain line.** A surviving binding REPLACES that line's
+ *    constant `line:<id>:total` source node (the colliding constant is dropped).
+ *
+ * Returns `[]` when there are no effective user bindings, so the recompute is INERT and
+ * the export goldens tie $0.00 (a project with no user bindings builds NO nodes).
+ * Stays KIND-BLIND: kind knowledge lives only in `compileBindingToNode`.
+ */
+export function assembleBindingGraphNodes(
+  bindings: readonly Binding[],
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult,
+  rows: readonly ProcessedTakeoffRow[]
+): GraphNode[] {
+  if (bindings.length === 0) return [];
 
   // Reserved target node ids: the total node of every linked-division row present.
   const reserved = new Set<string>();
@@ -334,17 +402,74 @@ export function recomputeLineBindingValues(
     }
     effective.push(b);
   }
-  if (effective.length === 0) return new Map();
+  if (effective.length === 0) return [];
 
   const lines = rows.map(projectLine);
   const dropTargets = new Set(effective.map((b) => b.targetNodeId));
   // Source nodes minus any constant a surviving binding now computes (binding wins).
-  const sourceNodes = [
-    ...gcSiteOpsSourceNodes(gc, siteOps),
-    ...lineFieldSourceNodes(lines),
-  ].filter((n) => !dropTargets.has(n.id));
+  const sourceNodes = userBindingSourceNodes(gc, siteOps, lines).filter(
+    (n) => !dropTargets.has(n.id)
+  );
+  const bindingNodes = effective.map((b) => compileBindingToNode(b, { lines }));
+  return [...sourceNodes, ...bindingNodes];
+}
 
-  return recomputeBindingValues(effective, sourceNodes, lines);
+// ---------------------------------------------------------------------------
+// Node labelling (Phase 5) — friendly names for the authoring picker + Links view
+// ---------------------------------------------------------------------------
+
+/** Friendly labels for the three STEP 2 GC source nodes. */
+export const GC_NODE_LABELS: Record<string, string> = {
+  [GC_GRAND_TOTAL_NODE_ID]: "Personnel grand total",
+  [GC_SUPERVISION_NODE_ID]: "Total Supervision",
+  [GC_GENERAL_NODE_ID]: "Design / PM / GCs",
+};
+
+/** A node resolved to a display label, with the line's rowId when it is a line node (for click-to-jump). */
+export interface NodeLabel {
+  /** Human-readable label, e.g. "STEP 2 · Total Supervision" or "09-9000.001 · Drywall". */
+  label: string;
+  /** The STEP 4 row id when the node is a `line:<rowId>:<field>` node — enables grid jump. */
+  rowId?: string;
+  /** The line field when the node is a line node and the field is not `total`. */
+  field?: RollupField;
+}
+
+/**
+ * Resolves any source/target node id (spec §2.2) to a friendly {@link NodeLabel}. The
+ * single labeller shared by the authoring picker and the Trust Inspector Links view, so
+ * a node reads the same everywhere. Pure: it only parses the id and looks up the row.
+ */
+export function describeSourceNode(
+  nodeId: string,
+  rows: readonly ProcessedTakeoffRow[]
+): NodeLabel {
+  if (nodeId.startsWith("gc:")) {
+    return { label: `STEP 2 · ${GC_NODE_LABELS[nodeId] ?? nodeId}` };
+  }
+  if (nodeId.startsWith("siteops:")) {
+    const section = nodeId.slice("siteops:".length);
+    const cfg = SITE_OPS_SECTIONS.find((s) => s.id === section);
+    return { label: `STEP 3 · ${cfg?.label ?? section}` };
+  }
+  if (nodeId.startsWith("line:")) {
+    // line:<rowId>:<field> — rowId may itself contain no colon (uuid / row-<itemId>).
+    const rest = nodeId.slice("line:".length);
+    const lastColon = rest.lastIndexOf(":");
+    const rowId = lastColon === -1 ? rest : rest.slice(0, lastColon);
+    const field = (lastColon === -1 ? "total" : rest.slice(lastColon + 1)) as RollupField;
+    const row = rows.find((r) => r.id === rowId);
+    const base = row ? `${row.itemId || "(no code)"}${row.description ? ` · ${row.description}` : ""}` : rowId;
+    return {
+      label: field === "total" ? base : `${base} (${field})`,
+      rowId,
+      field: field === "total" ? undefined : field,
+    };
+  }
+  if (nodeId.startsWith("summary:")) {
+    return { label: `Summary · ${nodeId.slice("summary:".length)}` };
+  }
+  return { label: nodeId };
 }
 
 /**

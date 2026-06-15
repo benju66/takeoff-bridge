@@ -14,9 +14,12 @@ import { Project, DivisionLayout } from "@/types/db";
 import { DIVISION_LABELS, ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
+import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
-import { buildFlagsModel } from "@/lib/trustInspector";
+import { buildFlagsModel, buildLinksModel } from "@/lib/trustInspector";
+import type { Binding } from "@/lib/bindings/types";
+import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
 import { SearchBar } from "./SearchBar";
@@ -148,6 +151,12 @@ interface EstimateTableProps {
    *  Inspector trace; a pure view, no engine recompute. */
   linkedDivisionTotals: LinkedDivisionTotal[];
 
+  /** Authored Linked Values bindings — for the Trust Inspector Links tab (Phase 5). */
+  bindings: Binding[];
+  /** STEP 2/3 calc results — the source values the Links view recomputes from. */
+  gcCalcResult: PersonnelCalcResult;
+  siteOpsCalcResult: SiteOpsCalcResult;
+
   /** Live Procore reconciliation (5b) — built from the FULL unfiltered rows + the
    *  same validateExportReadiness the export gate runs (single source). Drives the
    *  status-bar chip and the Reconcile tab. */
@@ -220,6 +229,9 @@ export function EstimateTable({
   divisionBreakdown,
   costTypeBreakdown,
   linkedDivisionTotals,
+  bindings,
+  gcCalcResult,
+  siteOpsCalcResult,
   reconciliation,
   overrideRecords,
   isFiltered,
@@ -277,6 +289,26 @@ export function EstimateTable({
     setTrustOpen(true);
     setTrustSeq((s) => s + 1);
   }, []);
+
+  // Phase 5: the grid's 🔗 binding badge dispatches "tb:inspect-binding" to open Trust on
+  // the Links tab focused on that cell's total node — decoupled from the cell renderer
+  // (which lives in the workbook hook), same pattern as the header's "toggle-sidebar".
+  useEffect(() => {
+    const onInspect = (e: Event) => {
+      const detail = (e as CustomEvent<{ rowId: string }>).detail;
+      if (detail?.rowId) openTrust(lineFieldNodeId(detail.rowId, "total"), "links");
+    };
+    window.addEventListener("tb:inspect-binding", onInspect);
+    return () => window.removeEventListener("tb:inspect-binding", onInspect);
+  }, [openTrust]);
+
+  // Links view-model (Phase 5) for the focused node — the depends-on / used-by the Links
+  // tab renders. Rebuilt when the focus or the binding graph changes; cheap (empty graph)
+  // when there are no bindings, which is the common/golden case.
+  const linksModel = useMemo(
+    () => buildLinksModel({ focusNodeId: trustField, bindings, gc: gcCalcResult, siteOps: siteOpsCalcResult, rows }),
+    [trustField, bindings, gcCalcResult, siteOpsCalcResult, rows]
+  );
 
   // [view rows] — clear any active filter so all contributing takeoff rows are
   // visible, then scroll the grid to the top. Reuses globalFilter + scrollToRowRef.
@@ -1154,6 +1186,7 @@ export function EstimateTable({
         takeoffRowCount={takeoffRowCount}
         reconciliation={reconciliation}
         flagsModel={flagsModel}
+        linksModel={linksModel}
         onViewRow={handleViewRow}
         onAssignCode={handleAssignCode}
         onViewTakeoffRows={handleViewTakeoffRows}

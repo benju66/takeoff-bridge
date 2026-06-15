@@ -41,6 +41,7 @@ import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingSte
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
+import { DefineLinkPanel } from "@/components/workspace/DefineLinkPanel";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
 import { ExportOverrideModal } from "@/components/workspace/ExportOverrideModal";
@@ -130,8 +131,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     columnFilters,
     scrollToRowRef,
     selection,
-    boundRowIds, createDevBinding, clearBindingForRow,
+    boundRowIds, commitBinding, clearBindingForRow,
   } = workbook;
+
+  // Linked Values Phase 5: the "Define link…" authoring panel target (a row id) or null.
+  // Opened from the grid context menu; the panel writes through the workbook command path.
+  const [defineLinkRowId, setDefineLinkRowId] = React.useState<string | null>(null);
+  const defineLinkRow = defineLinkRowId ? rows.find((r) => r.id === defineLinkRowId) ?? null : null;
 
   // Step 4: Takeoff Summary
   // Amendment F: When a filter is active, summaries reflect only visible rows
@@ -573,6 +579,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
+            bindings={bindings}
+            gcCalcResult={personnel.calcResult}
+            siteOpsCalcResult={infrastructure.calcResult}
             reconciliation={reconciliation}
             overrideRecords={overrideRecords}
             isFiltered={isFiltered}
@@ -642,11 +651,27 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           onToggleCellLock={handleToggleCellLock}
           onInsertRow={insertManualRow}
           onDeleteRow={deleteRow}
-          onCreateBinding={createDevBinding}
-          onClearBinding={clearBindingForRow}
+          onDefineLink={setDefineLinkRowId}
           onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
         />
       </ErrorBoundary>
+
+      {/* Linked Values "Define link…" authoring panel (Phase 5). Writes through the
+          workbook command path (commitBinding / clearBindingForRow) — undoable. */}
+      {defineLinkRow && (
+        <ErrorBoundary>
+          <DefineLinkPanel
+            targetRow={defineLinkRow}
+            rows={rows}
+            bindings={bindings}
+            gc={personnel.calcResult}
+            siteOps={infrastructure.calcResult}
+            onCommit={commitBinding}
+            onClear={clearBindingForRow}
+            onClose={() => setDefineLinkRowId(null)}
+          />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

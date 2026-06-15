@@ -132,11 +132,11 @@ export interface UseTakeoffWorkbookReturn {
   handleUndo: () => void;
   handleRedo: () => void;
 
-  // Linked Values Phase 4 — bindings in the grid (display + dev/test lifecycle)
+  // Linked Values Phase 5 — bindings in the grid (display + authoring lifecycle)
   /** Rows whose total is user-bound (read-only derived cell) — for the context menu. */
   boundRowIds: Set<string>;
-  /** Dev/test path: bind a row's total to the nearest preceding bindable row (undoable). */
-  createDevBinding: (rowId: string) => void;
+  /** Persist/replace a binding (the "Define link…" panel write path; undoable). */
+  commitBinding: (binding: Binding) => void;
   /** Clear the binding on a row's total (undoable; no-op when unbound). */
   clearBindingForRow: (rowId: string) => void;
 
@@ -689,44 +689,26 @@ export function useTakeoffWorkbook(
   };
 
   // ---------------------------------------------------------------------------
-  // Linked Values Phase 4 — SET_BINDING / CLEAR_BINDING creators (undoable).
+  // Linked Values Phase 5 — SET_BINDING / CLEAR_BINDING creators (undoable).
   // pushCommand BEFORE the execution boundary, then apply forward — one shared path
-  // for the live edit and (via the command stack) redo (AGENTS.md history rule).
+  // for the live edit and (via the command stack) redo (AGENTS.md history rule). The
+  // real authoring UI (the "Define link…" panel) calls commitBinding; the bindable-row
+  // gate (§6 stable id) lives in authoring.ts and is enforced by the panel/context menu.
   // ---------------------------------------------------------------------------
 
-  /** Volatile parser ids are `row-<index>` (unstable across re-parse). Template
-   *  (`row-<itemId>`), manual (uuid), and saved rows are stable — the §6 gate. */
-  const isStableRowId = (id: string) => !/^row-\d+$/.test(id);
-  /** Bindable = a plain (non-linked) row with a stable id (row-id-stability decision). */
-  const isBindableRow = (row: ProcessedTakeoffRow) =>
-    !isLinkedDivisionRow(row.itemId) && isStableRowId(row.id);
-
-  const commitBinding = (cmd: WorkbookCommand) => {
+  const pushBindingCommand = (cmd: WorkbookCommand) => {
     commandHistory.pushCommand(cmd);
     applyCommandForward(cmd);
   };
 
   /**
-   * Dev/test affordance (NOT the Phase-5 authoring panel): bind a row's total to the
-   * nearest preceding bindable row's total as a `lookup`. Enough to exercise create →
-   * recompute → clear end-to-end. Gated to stable-id, non-linked rows. Keyed by rowId
-   * (not a filter-relative grid index) so it is correct under an active grid filter.
+   * Persist/replace a binding from the "Define link…" panel (the authoring path that
+   * replaced the Phase-4 dev affordance). Pushes SET_BINDING with the prior binding on the
+   * same target as `prev` (null when newly created) so a single Ctrl+Z reverts the edit.
+   * Routed through the existing command path — never a second write path (LD-4 / AGENTS.md).
    */
-  const createDevBinding = (rowId: string) => {
-    const targetRowIndex = rows.findIndex((r) => r.id === rowId);
-    const target = rows[targetRowIndex];
-    if (!target || !isBindableRow(target)) return;
-    let src: ProcessedTakeoffRow | undefined;
-    for (let i = targetRowIndex - 1; i >= 0; i--) {
-      if (isBindableRow(rows[i])) { src = rows[i]; break; }
-    }
-    if (!src) return;
-    const nextBinding: Binding = {
-      targetNodeId: lineFieldNodeId(target.id, "total"),
-      basis: "currency",
-      definition: { kind: "lookup", source: lineFieldNodeId(src.id, "total") },
-    };
-    commitBinding({
+  const commitBinding = (nextBinding: Binding) => {
+    pushBindingCommand({
       type: "SET_BINDING",
       targetNodeId: nextBinding.targetNodeId,
       prevBinding: findBindingByTarget(bindings, nextBinding.targetNodeId) ?? null,
@@ -739,7 +721,7 @@ export function useTakeoffWorkbook(
     const targetNodeId = lineFieldNodeId(rowId, "total");
     const prev = findBindingByTarget(bindings, targetNodeId);
     if (!prev) return;
-    commitBinding({ type: "CLEAR_BINDING", targetNodeId, prevBinding: prev });
+    pushBindingCommand({ type: "CLEAR_BINDING", targetNodeId, prevBinding: prev });
   };
 
   // ---------------------------------------------------------------------------
@@ -1159,17 +1141,33 @@ export function useTakeoffWorkbook(
                 >
                   <span className="truncate">{row.description || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
                   {linked && !linked.stray && (
-                    <span
-                      data-testid={linked.kind === "binding" ? "binding-badge" : "linked-badge"}
-                      className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none"
-                      title={
-                        linked.kind === "binding"
-                          ? `Read-only — bound, depends on ${linked.sourceLabel}`
-                          : `Read-only — linked live from ${linked.sourceLabel}`
-                      }
-                    >
-                      🔗 {linked.kind === "binding" ? "bound" : linked.sourceLabel}
-                    </span>
+                    linked.kind === "binding" ? (
+                      // Phase 5: the binding badge opens Trust → Links tab for this cell.
+                      // A window event keeps the grid cell decoupled from the inspector,
+                      // which lives in EstimateTable (same pattern as "toggle-sidebar").
+                      <button
+                        type="button"
+                        data-testid="binding-badge"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.dispatchEvent(
+                            new CustomEvent("tb:inspect-binding", { detail: { rowId: row.id } })
+                          );
+                        }}
+                        className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none hover:underline cursor-pointer"
+                        title={`Read-only — bound, depends on ${linked.sourceLabel}. Click to inspect links.`}
+                      >
+                        🔗 bound
+                      </button>
+                    ) : (
+                      <span
+                        data-testid="linked-badge"
+                        className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none"
+                        title={`Read-only — linked live from ${linked.sourceLabel}`}
+                      >
+                        🔗 {linked.sourceLabel}
+                      </span>
+                    )
                   )}
                 </div>
               );
@@ -1564,7 +1562,7 @@ export function useTakeoffWorkbook(
     handleUndo,
     handleRedo,
     boundRowIds,
-    createDevBinding,
+    commitBinding,
     clearBindingForRow,
   };
 }

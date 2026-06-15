@@ -19,12 +19,17 @@ import {
 } from "../calculations";
 import {
   recomputeLineBindingValues,
+  assembleBindingGraphNodes,
+  userBindingSourceNodes,
   GC_GRAND_TOTAL_NODE_ID,
+  GC_SUPERVISION_NODE_ID,
+  GC_GENERAL_NODE_ID,
+  siteOpsSectionNodeId,
 } from "../bindings/registry";
 import { lineFieldNodeId } from "../bindings/compile";
 import { upsertBinding, removeBinding, findBindingByTarget } from "../bindings/store";
 import type { Binding } from "../bindings/types";
-import { LINKED_DIVISION_ROWS } from "../constants";
+import { LINKED_DIVISION_ROWS, SITE_OPS_SECTIONS } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -142,6 +147,46 @@ describe("recomputeLineBindingValues", () => {
     warn.mockRestore();
 
     expect(result.size).toBe(0);
+  });
+
+  it("resolves a lookup into a Site-Ops section NOT referenced by any linked row (Phase 5 widening)", () => {
+    // The golden source set only builds sections a linked row reads; the user-binding set
+    // builds EVERY section, so the authoring picker can offer any of them and it resolves.
+    const section = "specialInspections" as const;
+    const sectionNode = userBindingSourceNodes(gc, siteOps, []).find(
+      (n) => n.id === siteOpsSectionNodeId(section)
+    );
+    expect(sectionNode).toBeDefined();
+    const sectionValue = sectionNode!.evaluate(new Map());
+
+    const b = makeRow({ id: "uuid-b", total: 0 });
+    const binding: Binding = {
+      targetNodeId: lineFieldNodeId("uuid-b", "total"),
+      basis: "currency",
+      definition: { kind: "lookup", source: siteOpsSectionNodeId(section) },
+    };
+    const result = recomputeLineBindingValues([binding], gc, siteOps, [b]);
+    expect(result.get(lineFieldNodeId("uuid-b", "total"))).toBeCloseTo(sectionValue, 8);
+  });
+});
+
+describe("userBindingSourceNodes / assembleBindingGraphNodes", () => {
+  it("userBindingSourceNodes emits the 3 GC nodes, every Site-Ops section, and each line field", () => {
+    const rows = [
+      { id: "L1", itemId: "03-0000.001", costType: "", source: "", procoreCode: "", total: 10, unitPrice: 1, matchedQty: 10 },
+    ];
+    const ids = new Set(userBindingSourceNodes(gc, siteOps, rows).map((n) => n.id));
+    expect(ids.has(GC_GRAND_TOTAL_NODE_ID)).toBe(true);
+    expect(ids.has(GC_SUPERVISION_NODE_ID)).toBe(true);
+    expect(ids.has(GC_GENERAL_NODE_ID)).toBe(true);
+    for (const s of SITE_OPS_SECTIONS) expect(ids.has(siteOpsSectionNodeId(s.id))).toBe(true);
+    expect(ids.has(lineFieldNodeId("L1", "total"))).toBe(true);
+    expect(ids.has(lineFieldNodeId("L1", "unitPrice"))).toBe(true);
+    expect(ids.has(lineFieldNodeId("L1", "matchedQty"))).toBe(true);
+  });
+
+  it("assembleBindingGraphNodes is inert (empty) with no bindings (goldens tie $0.00)", () => {
+    expect(assembleBindingGraphNodes([], gc, siteOps, [makeRow({ id: "uuid-a" })])).toEqual([]);
   });
 });
 

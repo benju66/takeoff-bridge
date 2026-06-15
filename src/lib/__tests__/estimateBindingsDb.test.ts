@@ -12,22 +12,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Chainable Supabase mock. Two terminal chains:
-//   from().select(cols).eq(col,val).order(col,opts)        -> { data, error }
-//   from().delete().eq(col,val).eq(col,val)                -> { error }
-//   from().upsert(payload, opts)                            -> { error }
-// plus auth.getSession(). Mirrors estimateOverridesDb.test.ts's approach.
+// Chainable Supabase mock. Terminal chains:
+//   from().select(cols).eq(col,val).order(col,opts)              -> { data, error }
+//   from().update(payload).eq(col,val).eq(col,val).select(cols)  -> { data, error }
+//   from().insert(payload)                                       -> { error }
+//   from().delete().eq(col,val).eq(col,val)                      -> { error }
+// plus auth.getSession(). saveEstimateBinding UPDATEs first (preserving created_by) and
+// only INSERTs when no row matched. Mirrors estimateOverridesDb.test.ts's approach.
 // ---------------------------------------------------------------------------
-const mockUpsert = vi.fn();
 const mockOrder = vi.fn();
 const mockSelectEq = vi.fn(() => ({ order: mockOrder }));
 const mockSelect = vi.fn(() => ({ eq: mockSelectEq }));
+const mockUpdateSelect = vi.fn();
+const mockUpdateEq2 = vi.fn(() => ({ select: mockUpdateSelect }));
+const mockUpdateEq1 = vi.fn(() => ({ eq: mockUpdateEq2 }));
+const mockUpdate = vi.fn((..._args: unknown[]) => {
+  void _args;
+  return { eq: mockUpdateEq1 };
+});
+const mockInsert = vi.fn();
 const mockDeleteEq2 = vi.fn();
 const mockDeleteEq1 = vi.fn(() => ({ eq: mockDeleteEq2 }));
 const mockDelete = vi.fn(() => ({ eq: mockDeleteEq1 }));
 const mockFrom = vi.fn((...args: unknown[]) => {
   void args; // rest param keeps the spread at the call site type-safe; args are recorded by vi.fn
-  return { upsert: mockUpsert, select: mockSelect, delete: mockDelete };
+  return { update: mockUpdate, insert: mockInsert, select: mockSelect, delete: mockDelete };
 });
 const mockGetSession = vi.fn();
 
@@ -50,9 +59,10 @@ beforeEach(() => {
   mockGetSession.mockResolvedValue({ data: { session: { user: { id: "user-7" } } } });
 });
 
-describe("saveEstimateBinding — upsert (mutable, one per project+target)", () => {
-  it("upserts { basis, rule } JSONB with derived target_node_id + kind columns + created_by", async () => {
-    mockUpsert.mockResolvedValueOnce({ error: null });
+describe("saveEstimateBinding — update-then-insert (mutable, one per project+target)", () => {
+  it("CREATE: update misses, then inserts { basis, rule } with derived columns + created_by", async () => {
+    mockUpdateSelect.mockResolvedValueOnce({ data: [], error: null }); // no existing row matched
+    mockInsert.mockResolvedValueOnce({ error: null });
     const binding: Binding = {
       targetNodeId: "line:abc:total",
       basis: "currency",
@@ -62,23 +72,49 @@ describe("saveEstimateBinding — upsert (mutable, one per project+target)", () 
     await saveEstimateBinding("p1", binding);
 
     expect(mockFrom).toHaveBeenCalledWith("estimate_bindings");
-    expect(mockUpsert).toHaveBeenCalledTimes(1);
-    const [payload, opts] = mockUpsert.mock.calls[0];
-    expect(payload).toEqual({
+    // UPDATE path runs first, scoped by both keys, and never touches created_by.
+    const [updatePayload] = mockUpdate.mock.calls[0];
+    expect(updatePayload).toEqual({
+      kind: "lookup",
+      definition: {
+        basis: "currency",
+        rule: { kind: "lookup", source: "gc:supervisionSubtotal", transform: { multiply: 2, add: 50 } },
+      },
+    });
+    expect(updatePayload).not.toHaveProperty("created_by");
+    expect(mockUpdateEq1).toHaveBeenCalledWith("project_id", "p1");
+    expect(mockUpdateEq2).toHaveBeenCalledWith("target_node_id", "line:abc:total");
+    // No row matched → INSERT stamps created_by from the session.
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+    const [insertPayload] = mockInsert.mock.calls[0];
+    expect(insertPayload).toEqual({
       project_id: "p1",
       target_node_id: "line:abc:total",
-      kind: "lookup", // denormalized projection of rule.kind
+      kind: "lookup",
       definition: {
         basis: "currency",
         rule: { kind: "lookup", source: "gc:supervisionSubtotal", transform: { multiply: 2, add: 50 } },
       },
       created_by: "user-7",
     });
-    expect(opts).toEqual({ onConflict: "project_id,target_node_id" });
   });
 
-  it("THROWS on error (authored intent must persist — not fire-and-forget)", async () => {
-    mockUpsert.mockResolvedValueOnce({ error: { message: "permission denied" } });
+  it("EDIT: a matching row is updated in place and never re-inserted (created_by preserved)", async () => {
+    mockUpdateSelect.mockResolvedValueOnce({ data: [{ id: "b1" }], error: null }); // existing row matched
+    const binding: Binding = {
+      targetNodeId: "line:abc:total",
+      basis: "currency",
+      definition: { kind: "lookup", source: "gc:grandTotal" },
+    };
+
+    await saveEstimateBinding("p1", binding);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockInsert).not.toHaveBeenCalled(); // edit path: no insert → created_by untouched
+  });
+
+  it("THROWS on update error (authored intent must persist — not fire-and-forget)", async () => {
+    mockUpdateSelect.mockResolvedValueOnce({ data: null, error: { message: "permission denied" } });
     const binding: Binding = {
       targetNodeId: "line:abc:total",
       basis: "currency",
@@ -86,6 +122,20 @@ describe("saveEstimateBinding — upsert (mutable, one per project+target)", () 
     };
     await expect(saveEstimateBinding("p1", binding)).rejects.toThrow(
       "Failed to save estimate binding: permission denied"
+    );
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("THROWS on insert error (create path)", async () => {
+    mockUpdateSelect.mockResolvedValueOnce({ data: [], error: null });
+    mockInsert.mockResolvedValueOnce({ error: { message: "boom" } });
+    const binding: Binding = {
+      targetNodeId: "line:abc:total",
+      basis: "currency",
+      definition: { kind: "lookup", source: "gc:grandTotal" },
+    };
+    await expect(saveEstimateBinding("p1", binding)).rejects.toThrow(
+      "Failed to save estimate binding: boom"
     );
   });
 });
@@ -176,8 +226,9 @@ describe("estimate_bindings mutable surface (the inverse of append-only override
 
 describe("round-trip → recompute-on-load (save -> reload -> recompute FROM SOURCE)", () => {
   it("a lookup binding reloads from the persisted payload and recomputes to the same value", async () => {
-    // SAVE: persist a lookup with a ×2 +50 transform.
-    mockUpsert.mockResolvedValueOnce({ error: null });
+    // SAVE (create path): update misses, then insert persists a lookup with a ×2 +50 transform.
+    mockUpdateSelect.mockResolvedValueOnce({ data: [], error: null });
+    mockInsert.mockResolvedValueOnce({ error: null });
     const binding: Binding = {
       targetNodeId: "line:r1:total",
       basis: "currency",
@@ -185,17 +236,17 @@ describe("round-trip → recompute-on-load (save -> reload -> recompute FROM SOU
     };
     await saveEstimateBinding("p1", binding);
 
-    // RELOAD: build the DB row from the ACTUAL upserted payload, so the test rides the
+    // RELOAD: build the DB row from the ACTUAL inserted payload, so the test rides the
     // real persisted shape (not a hand-written duplicate).
-    const upserted = mockUpsert.mock.calls[0][0] as Record<string, unknown>;
+    const inserted = mockInsert.mock.calls[0][0] as Record<string, unknown>;
     mockOrder.mockResolvedValueOnce({
       data: [{
         id: "b1",
-        project_id: upserted.project_id,
-        target_node_id: upserted.target_node_id,
-        kind: upserted.kind,
-        definition: upserted.definition,
-        created_by: upserted.created_by,
+        project_id: inserted.project_id,
+        target_node_id: inserted.target_node_id,
+        kind: inserted.kind,
+        definition: inserted.definition,
+        created_by: inserted.created_by,
         created_at: "2026-06-15T01:00:00.000Z",
         updated_at: "2026-06-15T01:00:00.000Z",
       }],

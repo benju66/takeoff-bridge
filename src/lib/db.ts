@@ -1450,34 +1450,53 @@ export async function getEstimateBindings(
 }
 
 /**
- * Upserts ONE binding (mutable; one per project_id+target_node_id). The JSONB payload is
+ * Saves ONE binding (mutable; one per project_id+target_node_id). The JSONB payload is
  * { basis, rule }; target_node_id and kind are derived from the same Binding so they
- * cannot drift. `created_by` is stamped from the session; `updated_at` is bumped by the
- * estimate_bindings touch trigger. THROWS on failure (authored intent must persist —
- * unlike fire-and-forget training data).
+ * cannot drift. THROWS on failure (authored intent must persist — unlike fire-and-forget
+ * training data).
+ *
+ * `created_by` semantics (Phase 5 decision, no DDL): on EDIT the original creator is
+ * preserved — this UPDATEs only kind+definition and never touches created_by, so the
+ * column stays "who first authored this link" rather than drifting to "last writer" on
+ * every re-save. On CREATE (no existing row) it INSERTs and stamps created_by from the
+ * session. The estimate_bindings touch trigger bumps updated_at on the UPDATE; insert
+ * defaults it to now(). (The tenant FOR ALL RLS policy covers the UPDATE's SELECT.)
  */
 export async function saveEstimateBinding(
   projectId: string,
   binding: Binding
 ): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const createdBy = session?.user?.id ?? null;
   const payload: StoredBindingDefinition = { basis: binding.basis, rule: binding.definition };
 
-  const { error } = await supabase.from("estimate_bindings").upsert(
-    {
-      project_id: projectId,
-      target_node_id: binding.targetNodeId,
-      kind: binding.definition.kind,
-      definition: payload,
-      created_by: createdBy,
-    },
-    { onConflict: "project_id,target_node_id" }
-  );
+  // EDIT path: update an existing binding in place, preserving its created_by. `select`
+  // tells us whether a row matched (RLS FOR ALL grants the SELECT the UPDATE needs).
+  const { data: updated, error: updateError } = await supabase
+    .from("estimate_bindings")
+    .update({ kind: binding.definition.kind, definition: payload })
+    .eq("project_id", projectId)
+    .eq("target_node_id", binding.targetNodeId)
+    .select("id");
 
-  if (error) {
-    console.error("Failed to save estimate binding:", error);
-    throw new Error(`Failed to save estimate binding: ${error.message}`);
+  if (updateError) {
+    console.error("Failed to save estimate binding:", updateError);
+    throw new Error(`Failed to save estimate binding: ${updateError.message}`);
+  }
+  if (updated && updated.length > 0) return; // edited an existing binding
+
+  // CREATE path: no existing row → insert and stamp the creator from the session.
+  const { data: { session } } = await supabase.auth.getSession();
+  const createdBy = session?.user?.id ?? null;
+  const { error: insertError } = await supabase.from("estimate_bindings").insert({
+    project_id: projectId,
+    target_node_id: binding.targetNodeId,
+    kind: binding.definition.kind,
+    definition: payload,
+    created_by: createdBy,
+  });
+
+  if (insertError) {
+    console.error("Failed to save estimate binding:", insertError);
+    throw new Error(`Failed to save estimate binding: ${insertError.message}`);
   }
 }
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { ProcessedTakeoffRow, ContextMenuState } from "@/types";
-import { isLinkedDivisionRow } from "@/lib/constants";
+import { isBindableRow } from "@/lib/bindings/authoring";
 
 // ---------------------------------------------------------------------------
 // ContextMenuPortal — Floating right-click context menu for the takeoff grid
@@ -10,15 +10,13 @@ interface ContextMenuPortalProps {
   contextMenu: ContextMenuState;
   rows: ProcessedTakeoffRow[];
   lockedCells: Record<string, boolean>;
-  /** Rows whose total is user-bound (Linked Values Phase 4). */
+  /** Rows whose total is user-bound (Linked Values) — toggles Define vs Edit. */
   boundRowIds: Set<string>;
   onToggleCellLock: (rowId: string, columnId: string) => void;
   onInsertRow: (direction: "above" | "below", targetIndex: number) => void;
   onDeleteRow: (rowId: string) => void;
-  /** Dev/test path: bind this row's total to the nearest preceding bindable row. */
-  onCreateBinding: (rowId: string) => void;
-  /** Clear the binding on this row's total. */
-  onClearBinding: (rowId: string) => void;
+  /** Open the "Define link…" authoring panel for this row (Linked Values Phase 5). */
+  onDefineLink: (rowId: string) => void;
   onDismiss: () => void;
 }
 
@@ -36,8 +34,7 @@ export function ContextMenuPortal({
   onToggleCellLock,
   onInsertRow,
   onDeleteRow,
-  onCreateBinding,
-  onClearBinding,
+  onDefineLink,
   onDismiss,
 }: ContextMenuPortalProps) {
   if (!contextMenu.visible) return null;
@@ -49,11 +46,11 @@ export function ContextMenuPortal({
       ? !!lockedCells[`${currentRowId}::${contextMenu.columnId}`]
       : false;
 
-  // Linked Values Phase 4 (dev/test affordance, NOT the Phase-5 authoring panel).
-  // Hidden on the reserved linked-division rows; the bind handler still enforces the
-  // stable-id gate (§6). Shows "Clear" when already bound.
+  // Linked Values Phase 5 — "Define link…" / "Edit link…" opens the authoring panel.
+  // Shown only on bindable rows (non-linked-division, stable id — the §6 gate); the
+  // reserved linked-division rows stay system-managed. Label flips to Edit when bound.
+  const canBind = !!currentRow && isBindableRow(currentRow);
   const isBound = currentRowId ? boundRowIds.has(currentRowId) : false;
-  const canBind = !!currentRow && !isLinkedDivisionRow(currentRow.itemId);
 
   return (
     <div
@@ -93,31 +90,17 @@ export function ContextMenuPortal({
       {currentRowId && canBind && (
         <>
           <div className="border-t border-grid-border my-1" />
-          {isBound ? (
-            <button
-              type="button"
-              data-testid="ctx-clear-binding"
-              className={menuBtnClass}
-              onClick={() => {
-                onClearBinding(currentRowId);
-                onDismiss();
-              }}
-            >
-              🔗 Clear Binding
-            </button>
-          ) : (
-            <button
-              type="button"
-              data-testid="ctx-bind-total"
-              className={menuBtnClass}
-              onClick={() => {
-                onCreateBinding(currentRowId);
-                onDismiss();
-              }}
-            >
-              🔗 Bind Total (dev)
-            </button>
-          )}
+          <button
+            type="button"
+            data-testid={isBound ? "ctx-edit-link" : "ctx-define-link"}
+            className={menuBtnClass}
+            onClick={() => {
+              onDefineLink(currentRowId);
+              onDismiss();
+            }}
+          >
+            {isBound ? "🔗 Edit link…" : "🔗 Define link…"}
+          </button>
         </>
       )}
       {currentRowId && (
