@@ -9,6 +9,13 @@ import { isValidProcoreCode } from "./procoreValidCodes";
 import { TRUSTED_RESOLVED_BY, RANKING_RESOLVED_BY, type ResolvedBy } from "./resolvedBy";
 import { rankClassificationHistory, type ClassificationObservation } from "./suggestionRanking";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideRecord } from "@/types";
+import type {
+  Binding,
+  Basis,
+  BindingDefinition,
+  EstimateBindingRecord,
+  StoredBindingDefinition,
+} from "./bindings/types";
 import { TEMPLATE_STORAGE_BUCKET } from "./constants";
 import { supabase } from "./supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -1383,6 +1390,115 @@ export async function getEstimateOverrides(
   }
 
   return (data || []).map(mapOverrideFromRow);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Estimate Bindings (Linked Values System — Phase 3, mutable)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Persisted authored bindings (lookups + rollups). Unlike the append-only override
+// trail, this table is MUTABLE (LD-3): a binding is upserted (one per
+// project_id+target_node_id) or deleted. Bindings are written SEPARATELY from the
+// atomic save_estimate line-item RPC, so they survive the line-item DELETE+INSERT.
+//
+// Stored binding VALUES are never trusted: the row carries only the rule (basis +
+// kind-specific definition), and the value is recomputed FROM SOURCE on load
+// (recomputeBindingValues, src/lib/bindings/recompute.ts). target_node_id and kind are
+// denormalized projections of the JSONB payload, derived here on every write so they
+// cannot drift; the DB itself stays blind to binding kind (kind is free TEXT).
+
+const ESTIMATE_BINDING_COLUMNS =
+  "id, project_id, target_node_id, kind, definition, created_by, created_at, updated_at";
+
+function mapBindingFromRow(row: Record<string, unknown>): EstimateBindingRecord {
+  const payload = (row.definition ?? {}) as Partial<StoredBindingDefinition>;
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    binding: {
+      targetNodeId: row.target_node_id as string,
+      // basis lives in the JSONB payload; default to the dominant case if absent.
+      basis: (payload.basis as Basis) ?? "currency",
+      definition: payload.rule as BindingDefinition,
+    },
+    createdBy: (row.created_by as string) || null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    updatedAt: (row.updated_at as string) || new Date().toISOString(),
+  };
+}
+
+/**
+ * Reads a project's persisted bindings, ordered by target_node_id for a stable result.
+ * Feed `records.map(r => r.binding)` to recomputeBindingValues() — stored values are
+ * never trusted, always recomputed from source on load.
+ */
+export async function getEstimateBindings(
+  projectId: string
+): Promise<EstimateBindingRecord[]> {
+  const { data, error } = await supabase
+    .from("estimate_bindings")
+    .select(ESTIMATE_BINDING_COLUMNS)
+    .eq("project_id", projectId)
+    .order("target_node_id", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch bindings for project ${projectId}`, error);
+    throw new Error(`Failed to fetch estimate bindings: ${error.message}`);
+  }
+
+  return (data || []).map(mapBindingFromRow);
+}
+
+/**
+ * Upserts ONE binding (mutable; one per project_id+target_node_id). The JSONB payload is
+ * { basis, rule }; target_node_id and kind are derived from the same Binding so they
+ * cannot drift. `created_by` is stamped from the session; `updated_at` is bumped by the
+ * estimate_bindings touch trigger. THROWS on failure (authored intent must persist —
+ * unlike fire-and-forget training data).
+ */
+export async function saveEstimateBinding(
+  projectId: string,
+  binding: Binding
+): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const createdBy = session?.user?.id ?? null;
+  const payload: StoredBindingDefinition = { basis: binding.basis, rule: binding.definition };
+
+  const { error } = await supabase.from("estimate_bindings").upsert(
+    {
+      project_id: projectId,
+      target_node_id: binding.targetNodeId,
+      kind: binding.definition.kind,
+      definition: payload,
+      created_by: createdBy,
+    },
+    { onConflict: "project_id,target_node_id" }
+  );
+
+  if (error) {
+    console.error("Failed to save estimate binding:", error);
+    throw new Error(`Failed to save estimate binding: ${error.message}`);
+  }
+}
+
+/**
+ * Deletes ONE binding by its (project_id, target_node_id) identity. Idempotent: removing
+ * a binding that does not exist is not an error. THROWS on a real failure.
+ */
+export async function deleteEstimateBinding(
+  projectId: string,
+  targetNodeId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("estimate_bindings")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("target_node_id", targetNodeId);
+
+  if (error) {
+    console.error("Failed to delete estimate binding:", error);
+    throw new Error(`Failed to delete estimate binding: ${error.message}`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════

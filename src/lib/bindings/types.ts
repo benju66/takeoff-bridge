@@ -199,3 +199,40 @@ export interface BindingLine {
 export interface CompileContext {
   lines: BindingLine[];
 }
+
+// ---------------------------------------------------------------------------
+// Persistence shape (Phase 3) — the `estimate_bindings` row, reconstructed
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSONB payload stored in `estimate_bindings.definition`: the value's `basis`
+ * plus the kind-specific `rule`. Kept distinct from the `target_node_id`/`kind`
+ * columns (which are denormalized projections of this payload — `target_node_id` =
+ * `Binding.targetNodeId`, `kind` = `rule.kind` — so the UNIQUE key and the
+ * open-enum-at-the-column-level have dedicated columns while the DB stays blind to
+ * binding kind). db.ts is the single writer and derives the columns from one
+ * {@link Binding}, so they cannot drift.
+ */
+export interface StoredBindingDefinition {
+  basis: Basis;
+  rule: BindingDefinition;
+}
+
+/**
+ * One persisted `estimate_bindings` row, reconstructed by the db gateway into a full
+ * {@link Binding} (targetNodeId + basis + definition) plus audit metadata. MUTABLE —
+ * unlike the append-only override record, a binding is edited in place or cleared
+ * (LD-3). Stored binding VALUES are never persisted/trusted; they are recomputed from
+ * source on load (the row carries only the rule, never a cached result).
+ */
+export interface EstimateBindingRecord {
+  /** Present on rows read back from the DB; omit when constructing a new binding. */
+  id?: string;
+  projectId: string;
+  /** The authored binding (targetNodeId + basis + definition), reconstructed from the row. */
+  binding: Binding;
+  /** auth.uid() of who saved it; null if that user was later removed. */
+  createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
