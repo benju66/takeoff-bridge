@@ -1,0 +1,284 @@
+/**
+ * Linked Values System — value registry (Phase 2).
+ *
+ * The APP-AWARE bridge between the pure calculation engine (calculations.ts) and
+ * the kind-blind binding graph (graph.ts). Its one job: turn the existing calc
+ * results into source `GraphNode`s with the stable IDs from the spec (§2.2), so the
+ * 10 hardcoded linked-division rows can be re-expressed as generic `lookup` bindings
+ * and evaluated through the same engine a future formula kind will use.
+ *
+ * This is the ONLY bindings module that imports app concepts (constants, calc-result
+ * types, the row type). The graph/compiler core stay indifferent to all of it (LD-4):
+ * this module emits plain `GraphNode`s and `Binding`s and teaches the graph no kind.
+ *
+ * Phase 2 is a drop-in proof: the engine reproduces `computeLinkedDivisionTotals`
+ * (app-born) and `linkedTotalsFromRows` (imported) to the cent, then the pages read
+ * the engine's output instead — with zero golden movement.
+ *
+ * BRANCH-AWARENESS (the §6 highest-risk item): for an IMPORTED project the linked
+ * rows are frozen, hand-authored values on the saved estimate — they must NOT be
+ * re-derived from STEP 2/3. So the imported entry point sources the linked node
+ * values as CONSTANTS from the saved rows, never as lookups into STEP 2/3.
+ */
+
+import { compileBindingToNode, lineFieldNodeId } from "./compile";
+import { evaluateGraph } from "./graph";
+import type { Basis, Binding, BindingLine, GraphNode, RollupField } from "./types";
+import {
+  LINKED_DIVISION_ROWS,
+  SUPERVISION_STAFF_CODES,
+  SITE_OPS_DYNAMIC_DEFAULTS,
+  SITE_OPS_MANUAL_DEFAULTS,
+  isLinkedDivisionRow,
+  type LinkedDivisionSource,
+  type SiteOpsSection,
+} from "../constants";
+import type {
+  LinkedDivisionTotal,
+  PersonnelCalcResult,
+  SiteOpsCalcResult,
+} from "../calculations";
+import type { ProcessedTakeoffRow } from "@/types";
+
+// ---------------------------------------------------------------------------
+// Stable node IDs (spec §2.2) — by-ID / by-query, never by cell position
+// ---------------------------------------------------------------------------
+
+/** STEP 2 — Σ supervision staff lines (template "Total Supervision", I16). */
+export const GC_SUPERVISION_NODE_ID = "gc:supervisionSubtotal";
+/** STEP 2 — personnel grand total (all GC lines). */
+export const GC_GRAND_TOTAL_NODE_ID = "gc:grandTotal";
+/** STEP 2 — Design/PM/GCs (grand total − supervision; a DERIVED value, not a raw subtotal). */
+export const GC_GENERAL_NODE_ID = "gc:general";
+
+/** STEP 3 — one Site-Ops template subtotal section. */
+export function siteOpsSectionNodeId(section: SiteOpsSection): string {
+  return `siteops:${section}`;
+}
+
+/**
+ * The stable node ID for a linked STEP 4 division row's total. The linked rows are
+ * uniquely identified by their catalog `itemId` (every consumer keys them by itemId;
+ * duplicates are deduped), so the itemId is their stable row identity here.
+ */
+export function linkedRowTotalNodeId(itemId: string): string {
+  return lineFieldNodeId(itemId, "total");
+}
+
+// ---------------------------------------------------------------------------
+// Source-node construction
+// ---------------------------------------------------------------------------
+
+/** A constant source node: no inputs, evaluates to a fixed value. */
+function constantNode(id: string, value: number, basis: Basis = "currency"): GraphNode {
+  return { id, basis, inputs: [], evaluate: () => value };
+}
+
+/** Σ staff lines whose code is a supervision code (mirrors the oracle exactly). */
+function supervisionSubtotal(gc: PersonnelCalcResult): number {
+  return gc.staffLines
+    .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+    .reduce((sum, l) => sum + l.total, 0);
+}
+
+/**
+ * Site-Ops line code → template subtotal section, summed into per-section totals.
+ * Keyed by the Site-Ops config code (never by a STEP 4 itemId) — this is why the
+ * "02-4100.002" string collision between the STEP 3 sawcutting line and the STEP 4
+ * Demolition linked row cannot cross-contaminate (constants.ts §LINKED_DIVISION_ROWS).
+ */
+function sectionTotalsByCode(siteOps: SiteOpsCalcResult): Map<SiteOpsSection, number> {
+  const sectionByCode = new Map<string, SiteOpsSection>();
+  for (const cfg of SITE_OPS_DYNAMIC_DEFAULTS) sectionByCode.set(cfg.code, cfg.section);
+  for (const cfg of SITE_OPS_MANUAL_DEFAULTS) sectionByCode.set(cfg.code, cfg.section);
+
+  const totals = new Map<SiteOpsSection, number>();
+  for (const line of [...siteOps.dynamicLines, ...siteOps.manualLines]) {
+    const section = sectionByCode.get(line.code);
+    if (!section) continue; // unknown line — the constants test guards against this
+    totals.set(section, (totals.get(section) ?? 0) + line.total);
+  }
+  return totals;
+}
+
+/**
+ * The STEP 2/3 computed values the 10 linked lookups read, as source `GraphNode`s
+ * (app-born branch). `gc:grandTotal` and `gc:supervisionSubtotal` are constants;
+ * `gc:general` is a DERIVED node (grandTotal − supervision) that depends on the
+ * other two — so the graph orders it after them, and it stays faithful to the
+ * oracle's "gcGeneralTotal is a derived value, not a raw subtotal". One
+ * `siteops:<section>` constant is emitted per section a linked row references.
+ */
+export function gcSiteOpsSourceNodes(
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult
+): GraphNode[] {
+  const supervision = supervisionSubtotal(gc);
+  const sectionTotals = sectionTotalsByCode(siteOps);
+
+  const nodes: GraphNode[] = [
+    constantNode(GC_GRAND_TOTAL_NODE_ID, gc.grandTotal),
+    constantNode(GC_SUPERVISION_NODE_ID, supervision),
+    {
+      id: GC_GENERAL_NODE_ID,
+      basis: "currency",
+      inputs: [GC_GRAND_TOTAL_NODE_ID, GC_SUPERVISION_NODE_ID],
+      evaluate: (m) =>
+        (m.get(GC_GRAND_TOTAL_NODE_ID) ?? 0) - (m.get(GC_SUPERVISION_NODE_ID) ?? 0),
+    },
+  ];
+
+  // Emit a source node only for the sections the linked rows actually read.
+  const sections = new Set<SiteOpsSection>();
+  for (const cfg of LINKED_DIVISION_ROWS) {
+    if (cfg.source.kind === "siteOpsSection") sections.add(cfg.source.section);
+  }
+  for (const section of sections) {
+    nodes.push(constantNode(siteOpsSectionNodeId(section), sectionTotals.get(section) ?? 0));
+  }
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// The 10 linked-division rows, re-expressed as lookup bindings
+// ---------------------------------------------------------------------------
+
+/** Resolve a linked row's STEP 2/3 source node ID from its `source.kind` discriminator. */
+function sourceNodeIdFor(source: LinkedDivisionSource): string {
+  switch (source.kind) {
+    case "gcSupervision":
+      return GC_SUPERVISION_NODE_ID;
+    case "gcGeneral":
+      return GC_GENERAL_NODE_ID;
+    case "siteOpsSection":
+      return siteOpsSectionNodeId(source.section);
+  }
+}
+
+/**
+ * The 10 `LINKED_DIVISION_ROWS` as generic `lookup` bindings: each targets
+ * `line:<itemId>:total` and mirrors its STEP 2/3 source node by ID. This is the
+ * hardcoded bridge generalized into the open binding model (the early `source.kind`
+ * enum becomes a real lookup edge in the graph).
+ */
+export function linkedDivisionBindings(): Binding[] {
+  return LINKED_DIVISION_ROWS.map((cfg) => ({
+    targetNodeId: linkedRowTotalNodeId(cfg.itemId),
+    basis: "currency",
+    definition: { kind: "lookup", source: sourceNodeIdFor(cfg.source) },
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Engine entry points — the drop-in replacements for the two oracles
+// ---------------------------------------------------------------------------
+
+/**
+ * APP-BORN branch. Reproduces `computeLinkedDivisionTotals(gc, siteOps)` exactly,
+ * through the engine: build the STEP 2/3 source nodes + the 10 lookup binding nodes,
+ * evaluate the graph in dependency order, and read each linked row's total. Returns
+ * the `LinkedDivisionTotal[]` in `LINKED_DIVISION_ROWS` order — same shape the page
+ * already consumes (and every consumer keys by itemId, so order is immaterial).
+ */
+export function computeLinkedDivisionTotalsViaEngine(
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult
+): LinkedDivisionTotal[] {
+  const sourceNodes = gcSiteOpsSourceNodes(gc, siteOps);
+  const bindingNodes = linkedDivisionBindings().map((b) =>
+    compileBindingToNode(b, { lines: [] })
+  );
+  const values = evaluateGraph([...sourceNodes, ...bindingNodes]);
+
+  return LINKED_DIVISION_ROWS.map((cfg) => ({
+    itemId: cfg.itemId,
+    description: cfg.description,
+    sourceLabel: cfg.sourceLabel,
+    total: values.get(linkedRowTotalNodeId(cfg.itemId)) ?? 0,
+  }));
+}
+
+/**
+ * IMPORTED branch (the §6 highest-risk item). For a finished imported bid the linked
+ * rows are frozen, hand-authored values on the saved estimate — they MUST be sourced
+ * from the saved rows, NOT re-derived from STEP 2/3. So each linked node is a CONSTANT
+ * taken from its saved row's `matchedQty × unitPrice`, run through the same engine.
+ *
+ * Reproduces `linkedTotalsFromRows(rows)` exactly: first-seen dedupe by trimmed itemId,
+ * encounter order, description/sourceLabel falling back from the link-table config to
+ * the row. There are NO lookups into STEP 2/3 here — wiring imported rows as STEP 2/3
+ * lookups would drift the imported golden.
+ */
+export function computeImportedLinkedDivisionTotalsViaEngine(
+  rows: readonly ProcessedTakeoffRow[]
+): LinkedDivisionTotal[] {
+  const cfgByItemId = new Map(LINKED_DIVISION_ROWS.map((c) => [c.itemId, c]));
+  const seen = new Set<string>();
+  const encountered: { itemId: string; description: string; sourceLabel: string }[] = [];
+  const nodes: GraphNode[] = [];
+
+  for (const r of rows) {
+    if (!isLinkedDivisionRow(r.itemId)) continue;
+    const id = (r.itemId || "").trim();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const cfg = cfgByItemId.get(id);
+    nodes.push(constantNode(linkedRowTotalNodeId(id), r.matchedQty * r.unitPrice));
+    encountered.push({
+      itemId: id,
+      description: cfg?.description ?? r.description,
+      sourceLabel: cfg?.sourceLabel ?? "",
+    });
+  }
+
+  const values = evaluateGraph(nodes);
+  return encountered.map((e) => ({
+    itemId: e.itemId,
+    description: e.description,
+    sourceLabel: e.sourceLabel,
+    total: values.get(linkedRowTotalNodeId(e.itemId)) ?? 0,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// STEP 4 line-field source nodes — groundwork for rollup bindings (Phase 3+)
+// ---------------------------------------------------------------------------
+
+/**
+ * Projects a `ProcessedTakeoffRow` to the minimal `BindingLine` the SetRule evaluator
+ * and rollup compiler read. Keeps the bindings layer off the full row type. `source`
+ * is optional on the row, so an absent provenance becomes `""`.
+ */
+export function projectLine(row: ProcessedTakeoffRow): BindingLine {
+  return {
+    id: row.id,
+    itemId: row.itemId,
+    costType: row.costType,
+    source: row.source ?? "",
+    procoreCode: row.procoreCode,
+    total: row.total,
+    unitPrice: row.unitPrice,
+    matchedQty: row.matchedQty,
+  };
+}
+
+/** The aggregatable line fields, each exposed as a `line:<id>:<field>` source node. */
+const LINE_SOURCE_FIELDS: readonly RollupField[] = ["total", "unitPrice", "matchedQty"];
+
+/**
+ * Emits a constant source `GraphNode` for every line's aggregatable field
+ * (`line:<id>:total | :unitPrice | :matchedQty`). Phase 2 does not consume these (the
+ * 10 reframed rows are lookups, not rollups), but a rollup binding depends on one
+ * `line:<id>:<field>` node per matched line — so when the registry starts feeding
+ * rollups (Phase 3+) it MUST emit a source node for every line a SetRule can match,
+ * or a rollup silently under-counts (Phase 1 code-review carry-forward note).
+ */
+export function lineFieldSourceNodes(lines: readonly BindingLine[]): GraphNode[] {
+  const nodes: GraphNode[] = [];
+  for (const line of lines) {
+    for (const field of LINE_SOURCE_FIELDS) {
+      nodes.push(constantNode(lineFieldNodeId(line.id, field), line[field]));
+    }
+  }
+  return nodes;
+}

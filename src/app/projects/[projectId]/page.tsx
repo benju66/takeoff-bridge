@@ -14,10 +14,13 @@ import {
   computeTakeoffSummary,
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
-  computeLinkedDivisionTotals,
 } from "@/lib/calculations";
+import {
+  computeLinkedDivisionTotalsViaEngine,
+  computeImportedLinkedDivisionTotalsViaEngine,
+} from "@/lib/bindings/registry";
 import { isLinkedDivisionRow } from "@/lib/constants";
-import { linkedTotalsFromRows, sectionTotalsFromLinked } from "@/lib/importEstimate";
+import { sectionTotalsFromLinked } from "@/lib/importEstimate";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
@@ -140,19 +143,24 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // IMPORTED projects (finding G-2): a finished bid's GC/Site-Ops lump sums are
   // hand-authored and cannot be re-derived from staffing inputs, so the saved
   // linked-division rows ARE the authority — derive the linked totals from those
-  // rows (linkedTotalsFromRows) instead of recomputing from STEP 2/3. This is
-  // what lets a reopened import still tie to the cent.
+  // rows instead of recomputing from STEP 2/3. This is what lets a reopened import
+  // still tie to the cent.
+  //
+  // Both branches now flow through the Linked Values binding engine (registry.ts) as
+  // a drop-in: app-born = 10 lookups into the STEP 2/3 source nodes; imported = the
+  // linked nodes are CONSTANTS from the saved rows (never STEP 2/3 lookups — §6). The
+  // numbers are identical to the legacy bridge (proven in bindingRegistry.test.ts).
   const linkedDivisionTotals = React.useMemo(
     () => project?.isImported
-      ? linkedTotalsFromRows(rows)
-      : computeLinkedDivisionTotals(personnel.calcResult, infrastructure.calcResult),
+      ? computeImportedLinkedDivisionTotalsViaEngine(rows)
+      : computeLinkedDivisionTotalsViaEngine(personnel.calcResult, infrastructure.calcResult),
     [project?.isImported, rows, personnel.calcResult, infrastructure.calcResult]
   );
 
   // Stray typed dollars on linked rows count nowhere (trap closure) — surface
   // them in the EstimateTable banner instead of silently dropping. For an
   // imported project those typed dollars are the AUTHORITATIVE linked statics
-  // (counted via linkedTotalsFromRows above), not stray, so none are flagged.
+  // (counted via the imported engine branch above), not stray, so none are flagged.
   const strayLinkedRows = React.useMemo(
     () =>
       project?.isImported
@@ -249,8 +257,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // derived from the saved linked rows — personnel.totalGCs / infrastructure
   // .siteOperationsTotal are PARAMETRIC DEFAULTS for imports, and persisting
   // them would overwrite the as-imported totals on the first workspace edit.
-  // Derives from the linkedDivisionTotals memo above (for imported projects it
-  // IS linkedTotalsFromRows(rows)) — no second walk of the row set.
+  // Derives from the linkedDivisionTotals memo above (for imported projects that
+  // memo is the engine's saved-row constants) — no second walk of the row set.
   const importedSectionTotals = React.useMemo(
     () => (project?.isImported ? sectionTotalsFromLinked(linkedDivisionTotals) : null),
     [project?.isImported, linkedDivisionTotals]

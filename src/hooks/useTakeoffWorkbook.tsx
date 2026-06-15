@@ -45,7 +45,8 @@ import {
 import { primeRateCard, resolveCatalogPrice } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
-import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
+import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
+import { computeLinkedDivisionTotalsViaEngine } from "@/lib/bindings/registry";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -590,7 +591,7 @@ export function useTakeoffWorkbook(
   const linkedTotalByItemId = useMemo(() => {
     const map = new Map<string, { total: number; sourceLabel: string }>();
     const labels = new Map(LINKED_DIVISION_ROWS.map((c) => [c.itemId, c.sourceLabel]));
-    for (const l of computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult)) {
+    for (const l of computeLinkedDivisionTotalsViaEngine(gcCalcResult, siteOpsCalcResult)) {
       map.set(l.itemId, { total: l.total, sourceLabel: labels.get(l.itemId) || "" });
     }
     return map;
