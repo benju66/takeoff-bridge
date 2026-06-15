@@ -25,11 +25,10 @@ const mockSelect = vi.fn(() => ({ eq: mockSelectEq }));
 const mockDeleteEq2 = vi.fn();
 const mockDeleteEq1 = vi.fn(() => ({ eq: mockDeleteEq2 }));
 const mockDelete = vi.fn(() => ({ eq: mockDeleteEq1 }));
-const mockFrom = vi.fn(() => ({
-  upsert: mockUpsert,
-  select: mockSelect,
-  delete: mockDelete,
-}));
+const mockFrom = vi.fn((...args: unknown[]) => {
+  void args; // rest param keeps the spread at the call site type-safe; args are recorded by vi.fn
+  return { upsert: mockUpsert, select: mockSelect, delete: mockDelete };
+});
 const mockGetSession = vi.fn();
 
 vi.mock("../supabase", () => ({

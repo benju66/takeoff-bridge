@@ -33,6 +33,7 @@ import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
+import { useEstimateBindings } from "@/hooks/useEstimateBindings";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
@@ -77,6 +78,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // is Phase 5 (this is the read+apply wiring only).
   const { activeOverrides, overrideRecords, refresh: refreshOverrides } = useEstimateOverrides(projectId, isLoaded);
 
+  // Linked Values Phase 4: persisted bindings (lookups/rollups). Owned here and passed
+  // into the workbook so SET_BINDING / CLEAR_BINDING share its undo history. `[]` =
+  // inert (no bound cells; summary + export untouched → goldens tie $0.00).
+  const { bindings, setBindings } = useEstimateBindings(projectId, isLoaded);
+
   // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
   const isNewEstimate = !projectEstimate;
@@ -103,7 +109,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
   // export handlers — gc-siteops Phase 3)
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides);
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,
@@ -124,6 +130,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     columnFilters,
     scrollToRowRef,
     selection,
+    boundRowIds, createDevBinding, clearBindingForRow,
   } = workbook;
 
   // Step 4: Takeoff Summary
@@ -627,11 +634,16 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       <ErrorBoundary>
         <ContextMenuPortal
           contextMenu={contextMenu}
-          rows={rows}
+          // filteredRows so the menu's rowIndex (a filtered-model position) resolves to
+          // the correct row under an active grid filter (identical to rows when unfiltered).
+          rows={filteredRows}
           lockedCells={lockedCells}
+          boundRowIds={boundRowIds}
           onToggleCellLock={handleToggleCellLock}
           onInsertRow={insertManualRow}
           onDeleteRow={deleteRow}
+          onCreateBinding={createDevBinding}
+          onClearBinding={clearBindingForRow}
           onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
         />
       </ErrorBoundary>

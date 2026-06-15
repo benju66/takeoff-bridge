@@ -23,6 +23,7 @@
 
 import { compileBindingToNode, lineFieldNodeId } from "./compile";
 import { evaluateGraph } from "./graph";
+import { recomputeBindingValues } from "./recompute";
 import type { Basis, Binding, BindingLine, GraphNode, RollupField } from "./types";
 import {
   LINKED_DIVISION_ROWS,
@@ -281,4 +282,87 @@ export function lineFieldSourceNodes(lines: readonly BindingLine[]): GraphNode[]
     }
   }
   return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — recompute USER bindings into the grid (display + lifecycle)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recomputes every persisted USER binding FROM SOURCE for the grid display. This is
+ * the Phase 4 load-side entry point: the app builds the live STEP 2/3 + STEP 4 source
+ * nodes, folds in the persisted bindings, and evaluates the whole graph in dependency
+ * order. Returns target node id → recomputed value (e.g. `line:<rowId>:total` → value).
+ *
+ * INERT when `bindings` is empty: returns an empty map and builds NO source nodes, so a
+ * project with no user bindings carries ZERO overhead and the export goldens tie $0.00.
+ *
+ * Collision precedence (the §6 Phase-4 decision), resolved here so the kind-blind graph
+ * core (graph.ts) is never handed two nodes with the same id:
+ *  - **Reserved linked rows win.** The 10 hardcoded linked-division rows are system-
+ *    managed (registry lookups into STEP 2/3). A user binding targeting one of their
+ *    total nodes is SKIPPED (logged) — the hardcoded bridge stays authoritative.
+ *  - **User binding wins over a plain line.** For any other row, the binding REPLACES
+ *    that line's constant `line:<id>:total` source node (the cell becomes derived/
+ *    read-only). The colliding constant is dropped before evaluation.
+ *
+ * Stays KIND-BLIND: kind knowledge lives only in `compileBinding` (via
+ * recomputeBindingValues). This module only decides WHICH nodes enter the graph.
+ */
+export function recomputeLineBindingValues(
+  bindings: readonly Binding[],
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult,
+  rows: readonly ProcessedTakeoffRow[]
+): Map<string, number> {
+  if (bindings.length === 0) return new Map();
+
+  // Reserved target node ids: the total node of every linked-division row present.
+  const reserved = new Set<string>();
+  for (const r of rows) {
+    if (isLinkedDivisionRow(r.itemId)) reserved.add(lineFieldNodeId(r.id, "total"));
+  }
+
+  const effective: Binding[] = [];
+  for (const b of bindings) {
+    if (reserved.has(b.targetNodeId)) {
+      // Collision with a system-managed linked row → skip (the bridge wins).
+      console.warn(
+        `Skipping user binding on reserved linked-division node ${b.targetNodeId}`
+      );
+      continue;
+    }
+    effective.push(b);
+  }
+  if (effective.length === 0) return new Map();
+
+  const lines = rows.map(projectLine);
+  const dropTargets = new Set(effective.map((b) => b.targetNodeId));
+  // Source nodes minus any constant a surviving binding now computes (binding wins).
+  const sourceNodes = [
+    ...gcSiteOpsSourceNodes(gc, siteOps),
+    ...lineFieldSourceNodes(lines),
+  ].filter((n) => !dropTargets.has(n.id));
+
+  return recomputeBindingValues(effective, sourceNodes, lines);
+}
+
+/**
+ * A short human-readable "depends-on" summary for a binding's badge/tooltip (Phase 4
+ * is display + plumbing; Phase 5's Links tab renders the rich dependency view). The
+ * ONE kind-aware spot outside compile.ts that the grid uses — intentionally a pure
+ * label, never a graph decision.
+ */
+export function describeBindingDependency(binding: Binding): string {
+  const def = binding.definition;
+  if (def.kind === "rollup") {
+    return `${def.op} of ${def.field ?? "total"}`;
+  }
+  // lookup (the only other v1 kind) — `source` mirrored, with an optional ×/+ transform.
+  const t = def.transform;
+  const suffix =
+    t && (t.multiply != null || t.add != null)
+      ? ` (×${t.multiply ?? 1}${t.add ? ` +${t.add}` : ""})`
+      : "";
+  return `${def.source}${suffix}`;
 }

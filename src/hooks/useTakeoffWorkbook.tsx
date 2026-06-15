@@ -14,7 +14,7 @@ import {
 } from "@tanstack/react-table";
 import { getCatalogItems, primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
-import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap } from "@/types";
+import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, PasteCommand, EstimateOverrideMap, WorkbookCommand } from "@/types";
 import { ExportBlocker } from "@/lib/exporter";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import { StringCellInput } from "@/components/workspace/StringCellInput";
@@ -46,7 +46,14 @@ import { primeRateCard, resolveCatalogPrice } from "@/lib/rateResolver";
 import { getFuzzySuggestions } from "@/lib/similarity";
 import { MASTER_TEMPLATE_NAME, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "@/lib/constants";
 import { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
-import { computeLinkedDivisionTotalsViaEngine } from "@/lib/bindings/registry";
+import {
+  computeLinkedDivisionTotalsViaEngine,
+  recomputeLineBindingValues,
+  describeBindingDependency,
+} from "@/lib/bindings/registry";
+import { lineFieldNodeId } from "@/lib/bindings/compile";
+import { findBindingByTarget } from "@/lib/bindings/store";
+import type { Binding } from "@/lib/bindings/types";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -125,6 +132,14 @@ export interface UseTakeoffWorkbookReturn {
   handleUndo: () => void;
   handleRedo: () => void;
 
+  // Linked Values Phase 4 — bindings in the grid (display + dev/test lifecycle)
+  /** Rows whose total is user-bound (read-only derived cell) — for the context menu. */
+  boundRowIds: Set<string>;
+  /** Dev/test path: bind a row's total to the nearest preceding bindable row (undoable). */
+  createDevBinding: (rowId: string) => void;
+  /** Clear the binding on a row's total (undoable; no-op when unbound). */
+  clearBindingForRow: (rowId: string) => void;
+
   // Import modal
   pendingImport: PendingImport | null;
   confirmImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
@@ -142,7 +157,12 @@ export function useTakeoffWorkbook(
   siteOpsCalcResult: SiteOpsCalcResult,
   // Phase 5 (INV-1): active estimator overrides, forwarded to the export handlers
   // so exported numbers match the on-screen/saved summary. `{}` = inert.
-  activeOverrides: EstimateOverrideMap = {}
+  activeOverrides: EstimateOverrideMap = {},
+  // Linked Values Phase 4: persisted bindings (owned by useEstimateBindings in page.tsx)
+  // + their optimistic setter, so SET_BINDING / CLEAR_BINDING share the workbook's undo
+  // history. `[]` = inert (no bound cells; goldens tie).
+  bindings: Binding[] = [],
+  setBindings: React.Dispatch<React.SetStateAction<Binding[]>> = () => {}
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -290,12 +310,12 @@ export function useTakeoffWorkbook(
   };
 
   const {
-    handleUndo, handleRedo,
+    handleUndo, handleRedo, applyCommandForward,
   } = useCommandDispatch(
     commandHistory, projectId,
     setRows, setUserRegistry, setGlobalRegistry,
     setColumnDefs, setLockedCells, setUnmappedTakeoffClassifications,
-    globalRegistry,
+    globalRegistry, setBindings,
   );
 
   // ---------------------------------------------------------------------------
@@ -597,27 +617,129 @@ export function useTakeoffWorkbook(
     return map;
   }, [gcCalcResult, siteOpsCalcResult]);
 
-  /** null for normal rows; linked-row display state otherwise. */
+  // ---------------------------------------------------------------------------
+  // Linked Values Phase 4 — USER bindings folded into the grid display.
+  // Recompute persisted bindings FROM SOURCE (recomputeLineBindingValues handles
+  // collision precedence + stays kind-blind). INERT when there are no bindings:
+  // returns an empty map and builds no source nodes, so the grid is byte-identical
+  // and the export goldens tie $0.00. Display-only — the bound value drives the grid
+  // cell, NOT the summed/export total (that integration is Phase 5).
+  // ---------------------------------------------------------------------------
+  const bindingValuesByNodeId = useMemo(
+    () => recomputeLineBindingValues(bindings, gcCalcResult, siteOpsCalcResult, rows),
+    [bindings, gcCalcResult, siteOpsCalcResult, rows]
+  );
+
+  /** rowId → bound-cell display state, for rows carrying a `line:<id>:total` binding. */
+  const boundRowState = useMemo(() => {
+    const map = new Map<string, { value: number; label: string }>();
+    if (bindings.length === 0) return map;
+    for (const row of rows) {
+      // Linked-division rows are reserved (system-managed) — never user-bound.
+      if (isLinkedDivisionRow(row.itemId)) continue;
+      const nodeId = lineFieldNodeId(row.id, "total");
+      const binding = findBindingByTarget(bindings, nodeId);
+      if (!binding) continue;
+      map.set(row.id, {
+        value: bindingValuesByNodeId.get(nodeId) ?? 0,
+        label: describeBindingDependency(binding),
+      });
+    }
+    return map;
+  }, [bindings, rows, bindingValuesByNodeId]);
+
+  /** Rows whose total is user-bound (read-only derived cell) — for the context menu. */
+  const boundRowIds = useMemo(() => new Set(boundRowState.keys()), [boundRowState]);
+
+  /**
+   * null for normal rows; derived (read-only) display state otherwise. Covers BOTH the
+   * 10 hardcoded linked-division rows (`kind: 'linked'`) and Phase-4 user bindings on a
+   * plain row's total (`kind: 'binding'`). The cell renderers consume value/sourceLabel/
+   * stray uniformly; only the badge distinguishes the two via `kind`.
+   */
   const getLinkedRowState = (row: ProcessedTakeoffRow) => {
-    if (!isLinkedDivisionRow(row.itemId)) return null;
-    // IMPORTED projects (finding G-2): the saved linked row carries the bid's
-    // authoritative GC/Site-Ops lump sum (its stored qty×unitPrice), not a stray
-    // typed value — show that as the linked value and keep the row read-only so
-    // the displayed total ties the reopened import.
-    if (project?.isImported) {
-      const cfg = LINKED_DIVISION_ROWS.find((c) => c.itemId === (row.itemId || "").trim());
+    if (isLinkedDivisionRow(row.itemId)) {
+      // IMPORTED projects (finding G-2): the saved linked row carries the bid's
+      // authoritative GC/Site-Ops lump sum (its stored qty×unitPrice), not a stray
+      // typed value — show that as the linked value and keep the row read-only so
+      // the displayed total ties the reopened import.
+      if (project?.isImported) {
+        const cfg = LINKED_DIVISION_ROWS.find((c) => c.itemId === (row.itemId || "").trim());
+        return {
+          value: row.matchedQty * row.unitPrice,
+          sourceLabel: cfg?.sourceLabel ?? "",
+          stray: false,
+          kind: "linked" as const,
+        };
+      }
+      const entry = linkedTotalByItemId.get((row.itemId || "").trim());
       return {
-        value: row.matchedQty * row.unitPrice,
-        sourceLabel: cfg?.sourceLabel ?? "",
-        stray: false,
+        value: entry?.total ?? 0,
+        sourceLabel: entry?.sourceLabel ?? "",
+        stray: row.matchedQty * row.unitPrice !== 0,
+        kind: "linked" as const,
       };
     }
-    const entry = linkedTotalByItemId.get((row.itemId || "").trim());
-    return {
-      value: entry?.total ?? 0,
-      sourceLabel: entry?.sourceLabel ?? "",
-      stray: row.matchedQty * row.unitPrice !== 0,
+    // Phase 4: a persisted binding on this row's total makes it a derived read-only cell.
+    const bound = boundRowState.get(row.id);
+    if (bound) {
+      return { value: bound.value, sourceLabel: bound.label, stray: false, kind: "binding" as const };
+    }
+    return null;
+  };
+
+  // ---------------------------------------------------------------------------
+  // Linked Values Phase 4 — SET_BINDING / CLEAR_BINDING creators (undoable).
+  // pushCommand BEFORE the execution boundary, then apply forward — one shared path
+  // for the live edit and (via the command stack) redo (AGENTS.md history rule).
+  // ---------------------------------------------------------------------------
+
+  /** Volatile parser ids are `row-<index>` (unstable across re-parse). Template
+   *  (`row-<itemId>`), manual (uuid), and saved rows are stable — the §6 gate. */
+  const isStableRowId = (id: string) => !/^row-\d+$/.test(id);
+  /** Bindable = a plain (non-linked) row with a stable id (row-id-stability decision). */
+  const isBindableRow = (row: ProcessedTakeoffRow) =>
+    !isLinkedDivisionRow(row.itemId) && isStableRowId(row.id);
+
+  const commitBinding = (cmd: WorkbookCommand) => {
+    commandHistory.pushCommand(cmd);
+    applyCommandForward(cmd);
+  };
+
+  /**
+   * Dev/test affordance (NOT the Phase-5 authoring panel): bind a row's total to the
+   * nearest preceding bindable row's total as a `lookup`. Enough to exercise create →
+   * recompute → clear end-to-end. Gated to stable-id, non-linked rows. Keyed by rowId
+   * (not a filter-relative grid index) so it is correct under an active grid filter.
+   */
+  const createDevBinding = (rowId: string) => {
+    const targetRowIndex = rows.findIndex((r) => r.id === rowId);
+    const target = rows[targetRowIndex];
+    if (!target || !isBindableRow(target)) return;
+    let src: ProcessedTakeoffRow | undefined;
+    for (let i = targetRowIndex - 1; i >= 0; i--) {
+      if (isBindableRow(rows[i])) { src = rows[i]; break; }
+    }
+    if (!src) return;
+    const nextBinding: Binding = {
+      targetNodeId: lineFieldNodeId(target.id, "total"),
+      basis: "currency",
+      definition: { kind: "lookup", source: lineFieldNodeId(src.id, "total") },
     };
+    commitBinding({
+      type: "SET_BINDING",
+      targetNodeId: nextBinding.targetNodeId,
+      prevBinding: findBindingByTarget(bindings, nextBinding.targetNodeId) ?? null,
+      nextBinding,
+    });
+  };
+
+  /** Clear the binding on a row's total (undoable). No-op if the row is not bound. */
+  const clearBindingForRow = (rowId: string) => {
+    const targetNodeId = lineFieldNodeId(rowId, "total");
+    const prev = findBindingByTarget(bindings, targetNodeId);
+    if (!prev) return;
+    commitBinding({ type: "CLEAR_BINDING", targetNodeId, prevBinding: prev });
   };
 
   // ---------------------------------------------------------------------------
@@ -1038,10 +1160,15 @@ export function useTakeoffWorkbook(
                   <span className="truncate">{row.description || <span className="text-slate-400 dark:text-slate-600">...</span>}</span>
                   {linked && !linked.stray && (
                     <span
+                      data-testid={linked.kind === "binding" ? "binding-badge" : "linked-badge"}
                       className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none"
-                      title={`Read-only — linked live from ${linked.sourceLabel}`}
+                      title={
+                        linked.kind === "binding"
+                          ? `Read-only — bound, depends on ${linked.sourceLabel}`
+                          : `Read-only — linked live from ${linked.sourceLabel}`
+                      }
                     >
-                      🔗 {linked.sourceLabel}
+                      🔗 {linked.kind === "binding" ? "bound" : linked.sourceLabel}
                     </span>
                   )}
                 </div>
@@ -1276,13 +1403,22 @@ export function useTakeoffWorkbook(
             header: def.header,
             ...getSizeConfig(def),
             filterFn: multiSelect,
-            cell: (info) => (
-              <div className="text-center font-black font-mono">
-                <span className={info.getValue() > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}>
-                  ${info.getValue().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-            ),
+            // Compute the displayed total LIVE from the row (not info.getValue()): TanStack
+            // memoizes accessor results per row, and a binding/linked change is external
+            // to the row object — so the cached accessor would show a stale value. The
+            // accessor above stays for filter/sort; the cell renders the live value.
+            cell: (info) => {
+              const row = info.row.original;
+              const linked = getLinkedRowState(row);
+              const total = linked ? (linked.stray ? 0 : linked.value) : row.total;
+              return (
+                <div id={`cell-${row.id}-total`} className="text-center font-black font-mono">
+                  <span className={total > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}>
+                    ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              );
+            },
           });
         case "costPerUnit":
           return columnHelper.accessor((row) => {
@@ -1321,7 +1457,7 @@ export function useTakeoffWorkbook(
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit, linkedTotalByItemId]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
+  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit, linkedTotalByItemId, boundRowState]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
 
   // Filter state (Phase 4)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -1427,5 +1563,8 @@ export function useTakeoffWorkbook(
     handleExportExcelWorkbook,
     handleUndo,
     handleRedo,
+    boundRowIds,
+    createDevBinding,
+    clearBindingForRow,
   };
 }

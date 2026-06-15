@@ -1,3 +1,5 @@
+import type { Binding } from "@/lib/bindings/types";
+
 export interface TogalRowPayload {
   Classification: string;
   "Quantity 1": string | number;
@@ -274,6 +276,27 @@ export interface UpdateColumnCommand {
   nextDef: ColumnDefinition;
 }
 
+/**
+ * Linked Values System Phase 4 — create/replace a binding on a target node, undoably.
+ * Carries the FULL prev/next binding so undo restores the exact prior state (prev=null
+ * when the target had no binding → undo deletes it). `Binding` is pure data (no
+ * functions), so the command stays serializable on the history stack.
+ */
+export interface SetBindingCommand {
+  type: "SET_BINDING";
+  targetNodeId: string;
+  prevBinding: Binding | null;
+  nextBinding: Binding;
+}
+
+/** Linked Values System Phase 4 — clear the binding on a target node, undoably. */
+export interface ClearBindingCommand {
+  type: "CLEAR_BINDING";
+  targetNodeId: string;
+  /** The binding being removed — re-applied verbatim on undo. */
+  prevBinding: Binding;
+}
+
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
@@ -284,7 +307,9 @@ export type WorkbookCommand =
   | AddColumnCommand
   | ToggleCellLockCommand
   | MergeTakeoffDataCommand
-  | UpdateColumnCommand;
+  | UpdateColumnCommand
+  | SetBindingCommand
+  | ClearBindingCommand;
 
 export interface GridSelectionState {
   rowId: string | null;
