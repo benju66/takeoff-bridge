@@ -13,33 +13,18 @@ import procoreValidCodes from "@/lib/procore-valid-codes.json";
 // template's Importer Data Fields sheet. The template-import path reads that
 // sheet, so the JSON must not rot — regenerate with `npm run sync-codes`.
 //
-// SECOND assertion (Phase 4, NEW): the JSON is now only a warn-only baseline —
-// the DB (`procore_cost_codes`, 217 active) is the live validation oracle. The
-// template/JSON still carry 224 codes; the new Procore master list
-// (docs/reference/Procore Cost Codes.xlsx, 217) drops exactly 7. This pins that
-// delta to the SPECIFIC 7 known retired-by-absence codes, so the test stays
-// green today and goes red ONLY if the delta CHANGES (an unexpected add/drop) —
-// the real regression risk. Eliminating the delta at the source (removing the 7
-// dead template codes) is the follow-on Template + Catalog Reconciliation
-// workstream, not Phase 4.
+// SECOND assertion (Template + Catalog Reconciliation Phase 6, ZERO DRIFT):
+// the 7 dead codes have been removed from the template's Importer Data Fields
+// sheet, so the JSON/template (now 217) and the Procore master list
+// (docs/reference/Procore Cost Codes.xlsx, 217) agree EXACTLY — the standing
+// drift is gone, eliminated at the source. This used to pin a known 7-code
+// delta (Phase 4); Phase 6 drove it to zero. The guard now goes red if ANY
+// code is added or dropped on EITHER side (an unexpected divergence) — the real
+// regression risk now that the lists are meant to be identical.
 // ---------------------------------------------------------------------------
 
 const IMPORTER_SHEET = "Importer Data Fields";
 const PROCORE_CODE_RE = /^\d{1,2}-\d{4,6}\.\d{3}$/;
-
-// The 7 codes the new Procore master list drops vs. the old 224-code JSON/template.
-// Architect-approved retire-by-absence (Phase 4); see the Phase 1 reconciliation
-// report. Only `2-20000.000` had live references (the 8 linked-division summaries,
-// which never export); the other 6 had zero references anywhere.
-const KNOWN_DROPPED_CODES = [
-  "1-10440.000",
-  "2-20000.000",
-  "2-29406.000",
-  "6-66119.000",
-  "8-87000.000",
-  "11-110000.000",
-  "60-605000.000",
-];
 
 const REFERENCE_XLSX_PATH = path.join(
   __dirname,
@@ -85,19 +70,21 @@ describe("procore-valid-codes.json ↔ template Importer Data Fields sync", () =
     expect(procoreValidCodes).toEqual(fromTemplate);
   });
 
-  it("warn-only drift check: JSON − reference-xlsx === exactly the 7 retired-by-absence codes", async () => {
+  it("zero drift: JSON, template Importer sheet, and the Procore master list all carry the same 217 codes", async () => {
     const referenceCodes = await readReferenceCodes();
     expect(referenceCodes.size).toBe(217);
 
     const jsonCodes = new Set((procoreValidCodes as { code: string }[]).map((c) => c.code));
+    expect(jsonCodes.size).toBe(217);
 
-    // Every code in the new master list must still exist in the JSON/template
-    // (the reference list is a strict subset — no additions to chase).
+    // No master-list code is missing from the JSON ...
     const addedByXlsx = [...referenceCodes].filter((c) => !jsonCodes.has(c));
     expect(addedByXlsx).toEqual([]);
 
-    // The JSON-only codes are EXACTLY the 7 known dropped codes — no more, no less.
+    // ... and no JSON code is absent from the master list. Both directions empty
+    // ⇒ the sets are identical: the 7 retired-by-absence codes are gone for good
+    // (removed from the template's Importer Data Fields sheet in Phase 6).
     const droppedFromJson = [...jsonCodes].filter((c) => !referenceCodes.has(c)).sort();
-    expect(droppedFromJson).toEqual([...KNOWN_DROPPED_CODES].sort());
+    expect(droppedFromJson).toEqual([]);
   });
 });

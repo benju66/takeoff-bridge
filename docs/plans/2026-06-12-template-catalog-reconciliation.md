@@ -1,5 +1,21 @@
 # Template + Catalog Reconciliation — Plan of Record
-_2026-06-12 · status: PROPOSED_
+_2026-06-12 · status: **COMPLETE** — all 6 phases shipped (Phase 6 closed 2026-06-14)_
+
+> **Phase 6 outcome (2026-06-14):** the 7 dead codes were surgically removed from
+> the template's Importer Data Fields sheet (col-A/col-B cells only, preserving the
+> per-column dropdown lists; only `xl/worksheets/sheet18.xml` changed). The harvest
+> gate now exempts `steps-2-3`-basis (linked-division) rows so the retired
+> `2-20000.000` base no longer aborts the harvest. `procore-valid-codes.json` is
+> 224→217 and the drift test now asserts a **zero** delta (JSON ≡ template ≡ the 217
+> Procore master list). Both goldens stayed **$0.00**. **Two findings the plan did
+> not anticipate** (see the closure handoff): (1) `src/lib/estimate-catalog.json` is
+> NOT a pure harvest artifact — it carries 6 architect-confirmed manual built-in
+> additions (227 = 221 harvested + 6) that `npm run sync-codes` would clobber, so it
+> was deliberately **left at HEAD, not re-committed**; (2) removing the 7 dead codes
+> aligned the Importer set exactly with the Budget Line Items set (217 ≡ 217), which
+> obsoleted one `export-integrity.test.ts` "append a valid-but-missing code" fixture
+> (repointed `2-20000.000` → `4-40000.000`). Next workstream = #3 Actuals
+> cost-history discovery (`docs/plans/2026-06-12-actuals-cost-history-discovery.md`).
 
 ## Goal
 When this is done, the estimate side genuinely agrees with the now-authoritative

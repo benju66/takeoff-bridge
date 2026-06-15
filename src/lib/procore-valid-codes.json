@@ -64,10 +64,6 @@
     "description": "Asst. Superintendent"
   },
   {
-    "code": "1-10440.000",
-    "description": "General Labor"
-  },
-  {
     "code": "1-10510.000",
     "description": "Project Assistant"
   },
@@ -154,10 +150,6 @@
   {
     "code": "1-17010.000",
     "description": "Legal Fees"
-  },
-  {
-    "code": "2-20000.000",
-    "description": "Site Operations"
   },
   {
     "code": "2-23200.000",
@@ -266,10 +258,6 @@
   {
     "code": "2-29405.000",
     "description": "Material Hoist / Trash Chute"
-  },
-  {
-    "code": "2-29406.000",
-    "description": "Trash Chute"
   },
   {
     "code": "2-29410.000",
@@ -392,10 +380,6 @@
     "description": "Solid Surfacing and Ctops"
   },
   {
-    "code": "6-66119.000",
-    "description": "Quartz Surface"
-  },
-  {
     "code": "6-67300.000",
     "description": "Composite Decking"
   },
@@ -514,10 +498,6 @@
   {
     "code": "8-86000.000",
     "description": "Roof Windows and Skylights"
-  },
-  {
-    "code": "8-87000.000",
-    "description": "Hardware"
   },
   {
     "code": "8-88000.000",
@@ -654,10 +634,6 @@
   {
     "code": "10-109000.000",
     "description": "Golf Simulator"
-  },
-  {
-    "code": "11-110000.000",
-    "description": "Equipment"
   },
   {
     "code": "11-111313.000",
@@ -886,10 +862,6 @@
   {
     "code": "60-604000.000",
     "description": "Fee"
-  },
-  {
-    "code": "60-605000.000",
-    "description": "Miscellaneous"
   },
   {
     "code": "80-800001.000",

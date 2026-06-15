@@ -426,7 +426,19 @@ async function main() {
             break; // template-sumif: authoritative, not a gap
         }
 
-        if (!isDuplicateRow && resolution.procoreCode && !importerCodes.has(resolution.procoreCode)) {
+        // Linked-division rows (steps-2-3 basis) are EXEMPT from the valid-code
+        // gate. These are exactly the LINKED_DIVISION_ROWS / isLinkedDivisionRow
+        // set (src/lib/constants.ts): their dollars roll up from the STEP 2 - GCs
+        // and STEP 3 - SITE OPS sheets, and they are export-skipped at runtime, so
+        // their division-base destination is a never-exported fallback. When that
+        // base is retired from the Importer sheet (e.g. 2-20000.000), it must NOT
+        // trip the hard abort — mirroring the runtime export-skip.
+        if (
+          !isDuplicateRow &&
+          resolution.procoreCode &&
+          resolution.basis !== "steps-2-3" &&
+          !importerCodes.has(resolution.procoreCode)
+        ) {
           gaps.invalidProcoreCodes.push({
             internalCode: rawCode, procoreCode: resolution.procoreCode, basis: resolution.basis
           });
