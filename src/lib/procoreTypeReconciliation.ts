@@ -18,23 +18,27 @@
  */
 
 import type { ProcoreCostCodeType } from "@/types/db";
-import { isLinkedDivisionRow } from "@/lib/constants";
+import {
+  isLinkedDivisionRow,
+  SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_DYNAMIC_DEFAULTS,
+} from "@/lib/constants";
 
 /**
- * Estimate-side cost-type vocabulary (L/M/S) → Procore type. The estimate catalog
- * carries only Labor/Material/Subcontract; Procore additionally has **Equipment**,
- * which has NO estimate counterpart. That gap is intentional: an estimate code can
- * never *be* Equipment, so any estimate code mapped to an Equipment-typed Procore
- * base always reads as a mismatch here. Resolving the Equipment gap (extending the
- * estimate vocabulary) is deferred to the follow-on reconciliation workstream.
+ * Estimate-side cost-type vocabulary (L/M/S/E) → Procore type. Equipment joined
+ * the estimate vocabulary in the Template + Catalog Reconciliation workstream
+ * (Phase 1), closing the gap where an estimate code mapped to an Equipment-typed
+ * Procore base could never agree. No estimate data carries 'E' yet — the bulk
+ * type corrections that use it are the workstream's later phases.
  */
 export const ESTIMATE_TO_PROCORE_TYPE: Readonly<Record<string, ProcoreCostCodeType>> = {
   L: "Labor",
   M: "Material",
   S: "Subcontract",
+  E: "Equipment",
 };
 
-/** Map an estimate costType (L/M/S, case/space-insensitive) to a Procore type, or null. */
+/** Map an estimate costType (L/M/S/E, case/space-insensitive) to a Procore type, or null. */
 export function estimateCostTypeToProcore(costType: string): ProcoreCostCodeType | null {
   return ESTIMATE_TO_PROCORE_TYPE[(costType ?? "").trim().toUpperCase()] ?? null;
 }
@@ -127,4 +131,50 @@ export function computeTypeReconciliation(
   mismatches.sort((a, b) => a.internalCode.localeCompare(b.internalCode));
   missingBase.sort((a, b) => a.internalCode.localeCompare(b.internalCode));
   return { mismatches, missingBase };
+}
+
+/**
+ * Number of granular STEP-3 Site-Ops lines covered by the type drift check
+ * (the dynamic + manual configs in constants.ts). Surfaced on /cost-codes so the
+ * "N lines checked" label stays honest if a config row is added/removed.
+ */
+export const SITE_OPS_TYPE_CHECKED_CODE_COUNT =
+  SITE_OPS_DYNAMIC_DEFAULTS.length + SITE_OPS_MANUAL_DEFAULTS.length;
+
+/**
+ * STEP-3 Site-Ops type reconciliation (Template + Catalog Reconciliation Phase 4).
+ *
+ * The granular STEP-3 Site-Ops lines hard-code BOTH their Procore code AND their
+ * cost type in constants.ts (SITE_OPS_DYNAMIC_DEFAULTS / SITE_OPS_MANUAL_DEFAULTS).
+ * Unlike STEP-4 catalog rows, they bypass cost_code_map AND the catalog cost-type
+ * overlay entirely — so a bad hand-edit to a line's `costType` would silently ship
+ * a type that disagrees with Procore. This runs the SAME comparison the STEP-4
+ * advisory uses (reusing computeTypeReconciliation's single core) over those lines,
+ * keyed by each line's `code` → its inline `costType`.
+ *
+ * Scope note: the 10 LINKED_DIVISION_ROWS are intentionally NOT checked here. They
+ * carry no independent cost type (their value is a STEP-2/3 rollup), and their
+ * itemIds already ride the STEP-4 cost_code_map reconciliation — where their
+ * retired 2-20000.000 base is the enumerated missing-base set the
+ * `exemptLinkedDivision` option suppresses. Re-checking them here would duplicate
+ * that, not add coverage.
+ *
+ * Today this returns 0 mismatches / 0 missing-base: every Site-Ops line's type
+ * already agrees with its Procore base (the 02.G equipment-rental lines —
+ * scaffolding, crane, forklift, etc. — are Material in the Procore master list,
+ * NOT Equipment; only 10-102113.000 Toilet Partitions is Equipment-typed
+ * repo-wide). The check exists so future drift is caught, not because there is
+ * any today.
+ */
+export function computeSiteOpsTypeReconciliation(
+  procoreTypeByCode: ReadonlyMap<string, ProcoreCostCodeType>,
+): TypeReconciliation {
+  const lines = [...SITE_OPS_DYNAMIC_DEFAULTS, ...SITE_OPS_MANUAL_DEFAULTS];
+  const mappings: MappingForReconciliation[] = lines.map((l) => ({
+    internalCode: l.code,
+    procoreCode: l.procoreCode,
+  }));
+  const catalogByInternalCode: Record<string, { costType: string }> = {};
+  for (const l of lines) catalogByInternalCode[l.code] = { costType: l.costType };
+  return computeTypeReconciliation(mappings, catalogByInternalCode, procoreTypeByCode);
 }

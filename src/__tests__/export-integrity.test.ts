@@ -356,8 +356,13 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
   });
 
   // Fixture: two Div-03 rows sharing 3-30000.000 (incl. former orphan
-  // 03-0000.002 Footings) + one Div-02 row on the 2-20000.000 fallback code
-  // (absent from the template's Budget Line Items sheet → exercises append).
+  // 03-0000.002 Footings) + one Div-04 row on the 4-40000.000 division base
+  // (a real Budget Line Items row → its computed value is written in place).
+  // NOTE: the old 2-20000.000 fallback this once used was retired from the
+  // template in Template + Catalog Reconciliation Phase 6 (the 7 dead Importer
+  // codes), which aligned the Importer set exactly with the Budget Line Items
+  // set — so there is no longer a valid code absent from the BLI sheet to
+  // exercise the append branch; every mapped code now matches an existing row.
   const concreteRow = baseRow({
     id: "row-03-0000.001", itemId: "03-0000.001",
     procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
@@ -369,12 +374,12 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
     description: "Footings", matchedQty: 80, unitPrice: 180, total: 14400, uom: "CY",
   });
   // NOTE (Phase 5): itemId must NOT be a linked division row (02-0000.001 et
-  // al. are excluded from the rollup) — this fixture exercises the BLI-append
-  // path for a mapped code absent from the sheet, so it uses a manual itemId.
-  const div02Row = baseRow({
-    id: "row-02-1000.001", itemId: "02-1000.001",
-    procoreParentCode: "2-20000.000", procoreCode: "2-20000.000",
-    description: "Demolition Allowance", matchedQty: 1, unitPrice: 5000, total: 5000,
+  // al. are excluded from the rollup) — this is a plain mapped row, so it uses
+  // a manual itemId.
+  const div04Row = baseRow({
+    id: "row-04-4000.001", itemId: "04-4000.001",
+    procoreParentCode: "4-40000.000", procoreCode: "4-40000.000",
+    description: "Masonry Allowance", matchedQty: 1, unitPrice: 5000, total: 5000,
     source: "manual",
   });
   const unmappedWithDollars = baseRow({
@@ -407,21 +412,21 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
   });
 
   it("reconciliation ties out on a fully mapped fixture", () => {
-    const readiness = validateExportReadiness([concreteRow, footingsRow, div02Row], zeroGcResult(), zeroSiteOpsResult());
+    const readiness = validateExportReadiness([concreteRow, footingsRow, div04Row], zeroGcResult(), zeroSiteOpsResult());
     expect(readiness.ok).toBe(true);
     expect(readiness.blockers).toHaveLength(0);
     expect(readiness.reconciliation.lineItemTotal).toBeCloseTo(37400, 2);
     expect(readiness.reconciliation.rollupTotal).toBeCloseTo(37400, 2);
     expect(Math.abs(readiness.reconciliation.delta)).toBeLessThanOrEqual(0.01);
 
-    const rollup = rollupByProcoreCode([concreteRow, footingsRow, div02Row]);
+    const rollup = rollupByProcoreCode([concreteRow, footingsRow, div04Row]);
     expect(rollup["3-30000.000"]).toBeCloseTo(32400, 2);
-    expect(rollup["2-20000.000"]).toBeCloseTo(5000, 2);
+    expect(rollup["4-40000.000"]).toBeCloseTo(5000, 2);
   });
 
-  it("writes computed values into Budget Line Items and appends missing mapped codes", async () => {
+  it("writes computed values into Budget Line Items for every mapped code", async () => {
     const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
-    const rows = [concreteRow, footingsRow, div02Row];
+    const rows = [concreteRow, footingsRow, div04Row];
 
     const blob = await generateExcelWorkbook(
       rows,
@@ -458,10 +463,10 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
     expect(typeof gcVal).toBe("number");
     expect(gcVal as number).toBeCloseTo(0, 2);
 
-    // Missing mapped code 2-20000.000 is appended with its rollup value
-    const div02Val = byCode.get("2-20000.000");
-    expect(typeof div02Val).toBe("number");
-    expect(div02Val as number).toBeCloseTo(5000, 2);
+    // Mapped code 4-40000.000 has its rollup value written to its BLI row
+    const div04Val = byCode.get("4-40000.000");
+    expect(typeof div04Val).toBe("number");
+    expect(div04Val as number).toBeCloseTo(5000, 2);
 
     // gc-siteops Phase 3: NO live SUMIF survives in Budget Line Items — every
     // row carries a computed value (zero-input GC/Site Ops → $0 rows).
@@ -487,13 +492,13 @@ describe("Procore Rollup & Export Gates (Phase 2)", () => {
       const cols = line.split(",");
       const code = cols[0].replace(/^"|"$/g, "");
       // Detail rows only — modifier rows use the template modifier codes (no division prefix match)
-      if (code === "3-30000.000" || code === "2-20000.000") {
+      if (code === "3-30000.000" || code === "4-40000.000") {
         csvCodes.add(code);
         csvDetailTotal += parseFloat(cols[cols.length - 1].replace(/^"|"$/g, ""));
       }
     }
-    expect(csvCodes).toEqual(new Set(["3-30000.000", "2-20000.000"]));
-    const bliWrittenTotal = (concreteVal as number) + (div02Val as number);
+    expect(csvCodes).toEqual(new Set(["3-30000.000", "4-40000.000"]));
+    const bliWrittenTotal = (concreteVal as number) + (div04Val as number);
     expect(csvDetailTotal).toBeCloseTo(bliWrittenTotal, 2);
     expect(csvDetailTotal).toBeCloseTo(37400, 2);
 

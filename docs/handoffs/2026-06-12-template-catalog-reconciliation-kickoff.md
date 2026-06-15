@@ -58,6 +58,28 @@ Read first:
 - `docs/plans/2026-06-12-procore-cost-codes-reconciliation.md` (per-code disposition table)
 - `docs/plans/2026-06-12-procore-cost-codes-phase-4-cutover.md` (what Phase 4 did)
 
+## Known issue carried forward (from code review 2026-06-12)
+
+**Re-activating a retired Procore code via the `/procore-codes` import is rejected by the
+DB lifecycle guard — fix when the retire/merge lifecycle work is done.**
+
+- Path: the import diff (`diffProcoreCostCodes`) classifies a code that exists in the DB
+  as **non-active** but reappears in the imported file as a `changed` "re-activation"
+  (the UI even renders "re-activate"). `applyProcoreCostCodesImport` (db.ts) upserts it
+  with `status:'active'` via `ON CONFLICT DO UPDATE`.
+- But `procore_cost_codes_lifecycle_guard` (BEFORE UPDATE, supabase_schema.sql) raises
+  `Code % is %; only active codes can be retired or merged.` for any `retired/merged →
+  active` transition. ON CONFLICT DO UPDATE fires BEFORE-UPDATE triggers, so the guard
+  rejects it — and because the upsert is one atomic statement, **a single reappearing
+  retired code blocks the entire import** (all adds/changes in that file fail too).
+- **Severity: low today, medium once codes are retired.** Unreachable right now (zero
+  codes are retired). It only bites after you've ticked a "proposed retirement" and then
+  re-import a file where that code returns.
+- **Fix (architect's call, ~1 file + test):** either relax the guard to allow
+  `retired/merged → active` reactivation, or route reactivations through a dedicated
+  path and stop the diff/UI/tests promising automatic reactivation. Natural fit for
+  whichever phase finishes the retire/merge lifecycle.
+
 ## How to run it
 
 - This is a NEW multi-phase plan. **Start with `/plan-phases`** — write the plan to

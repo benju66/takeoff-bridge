@@ -15,9 +15,9 @@ import {
   GitCompareArrows,
   Tags,
 } from "lucide-react";
-import { getCatalogItems, isBuiltInCatalogCode } from "@/lib/catalog";
+import { getCatalogItems, isBuiltInCatalogCode, primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
-import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions, getProcoreCostCodes } from "@/lib/db";
+import { getCostCodeMap, updateCostCodeMapping, getCatalogAdditions, getCatalogCostTypeOverrides, getProcoreCostCodes } from "@/lib/db";
 import { primeCostCodeResolver } from "@/lib/costCodeResolver";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import {
@@ -26,8 +26,13 @@ import {
   isValidProcoreCode,
 } from "@/lib/procoreValidCodes";
 import { primeProcoreValidCodesFromList } from "@/lib/procoreValidCodesPrime";
-import { computeTypeReconciliation } from "@/lib/procoreTypeReconciliation";
+import {
+  computeTypeReconciliation,
+  computeSiteOpsTypeReconciliation,
+  SITE_OPS_TYPE_CHECKED_CODE_COUNT,
+} from "@/lib/procoreTypeReconciliation";
 import { CostCodeMapEntry, CatalogAddition, ProcoreCostCode, ProcoreCostCodeType } from "@/types/db";
+import { InternalEstimateItem } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Cost Code Mapping editor (Phase 3c) — global view/edit of cost_code_map,
@@ -112,6 +117,15 @@ export default function CostCodeMappingDashboard() {
    * code list so the editor keeps working, just without the type-aware extras.
    */
   const [procoreCodes, setProcoreCodes] = useState<ProcoreCostCode[]>([]);
+  /**
+   * Render-time snapshot of the merged STEP 4 catalog (getCatalogItems()). The
+   * overlay primes are effects that mutate MODULE state only — no re-render —
+   * so anything computed from the catalog in a memo would go stale the moment
+   * an overlay lands (Phase 3: the seeded cost-type corrections must drop the
+   * mismatch advisory 67 → 2 on this page). Each prime effect re-snapshots
+   * after priming; the advisory memo keys on this state.
+   */
+  const [catalogItems, setCatalogItems] = useState<Record<string, InternalEstimateItem>>(() => getCatalogItems());
 
   // Load the live mapping on mount (single gateway: db.ts)
   useEffect(() => {
@@ -145,9 +159,30 @@ export default function CostCodeMappingDashboard() {
         if (cancelled) return;
         setAdditions(loaded);
         primeCatalogAdditionOverlays(loaded);
+        setCatalogItems(getCatalogItems());
       })
       .catch((err) => {
         console.error("Failed to load catalog additions (read-only display skipped):", err);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Prime the built-in cost-type override overlay independently (Reconciliation
+  // Phase 2 — fail-soft). Phase 3's seeded corrections reach the type-mismatch
+  // advisory through this prime (the advisory reads getCatalogItems()). LABEL
+  // ONLY — moves no dollars; empty = identity.
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogCostTypeOverrides()
+      .then((loaded) => {
+        // Prime even if unmounted — the overlay is session-wide module state;
+        // only the local snapshot setState is gated on the mount.
+        primeCatalogCostTypeOverrides(loaded);
+        if (cancelled) return;
+        setCatalogItems(getCatalogItems());
+      })
+      .catch((err) => {
+        console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
       });
     return () => { cancelled = true; };
   }, []);
@@ -209,13 +244,27 @@ export default function CostCodeMappingDashboard() {
       return { mismatches: [], missingBase: [] };
     return computeTypeReconciliation(
       entries.map((e) => ({ internalCode: e.internalCode, procoreCode: e.procoreCode })),
-      getCatalogItems(),
+      // The catalogItems STATE snapshot (not a live getCatalogItems() call):
+      // keying on it is what recomputes the advisory once the cost-type
+      // override prime lands (the prime itself triggers no re-render).
+      catalogItems,
       procoreTypeByCode,
       // Phase 4: linked-division summaries map to the retired 2-20000.000 base
       // but never export — exempt them so the advisory's missing-base drops 8 → 0.
       { exemptLinkedDivision: true },
     );
-  }, [entries, procoreActive, procoreTypeByCode]);
+  }, [entries, procoreActive, procoreTypeByCode, catalogItems]);
+
+  // STEP-3 Site-Ops type drift monitor (Template + Catalog Reconciliation Phase 4).
+  // The granular Site-Ops lines hard-code their cost type in constants.ts and
+  // bypass cost_code_map + the catalog overlay, so this is a separate check from
+  // the STEP-4 advisory above. Static source (no overlay) → keyed only on the
+  // async Procore master list. Clean today (0 drift); flips to a list if a
+  // hand-edit ever diverges a Site-Ops type from Procore.
+  const siteOpsRecon = useMemo(() => {
+    if (procoreActive.length === 0) return { mismatches: [], missingBase: [] };
+    return computeSiteOpsTypeReconciliation(procoreTypeByCode);
+  }, [procoreActive, procoreTypeByCode]);
 
   const handleMappingChange = async (internalCode: string, newProcoreCode: string) => {
     if (!entries) return;
@@ -255,7 +304,7 @@ export default function CostCodeMappingDashboard() {
     if (!entries) return [];
     const query = searchQuery.trim().toLowerCase();
     if (!query) return entries;
-    const catalog = getCatalogItems();
+    const catalog = catalogItems;
     return entries.filter((e) => {
       const internalDescription = catalog[e.internalCode]?.description || "";
       const procoreDesc = procoreDescription(e.procoreCode) || "";
@@ -269,7 +318,7 @@ export default function CostCodeMappingDashboard() {
         e.source.toLowerCase().includes(query)
       );
     });
-  }, [entries, searchQuery, procoreDescription, procoreTypeByCode]);
+  }, [entries, searchQuery, procoreDescription, procoreTypeByCode, catalogItems]);
 
   // Divergence diagnostic: BUILT-IN catalog itemIds with NO cost_code_map row
   // resolve to "" at row creation (export blocker) and are editable nowhere —
@@ -282,10 +331,10 @@ export default function CostCodeMappingDashboard() {
   const catalogCodesMissingFromMap = useMemo(() => {
     if (!entries || entries.length === 0) return [];
     const mapped = new Set(entries.map((e) => e.internalCode));
-    return Object.keys(getCatalogItems())
+    return Object.keys(catalogItems)
       .filter((id) => isBuiltInCatalogCode(id) && !mapped.has(id))
       .sort();
-  }, [entries]);
+  }, [entries, catalogItems]);
 
   // Read-only additions for display, joined to their Procore description and
   // search-filtered with the same query as the editable map table.
@@ -448,6 +497,90 @@ export default function CostCodeMappingDashboard() {
         </div>
       )}
 
+      {/* STEP-3 Site-Ops type drift monitor (Reconciliation Phase 4) — READ-ONLY.
+          The granular STEP-3 Site-Ops lines hard-code their cost type in
+          constants.ts and bypass cost_code_map + the catalog overlay, so the
+          STEP-4 advisory above never sees them. This brings the same
+          type-vs-Procore check to those lines so a bad hand-edit is caught.
+          Clean today: every Site-Ops type already matches its Procore base (the
+          02.G equipment-rental lines are Material in Procore, not Equipment). */}
+      {procoreActive.length > 0 && (
+        siteOpsRecon.mismatches.length === 0 && siteOpsRecon.missingBase.length === 0 ? (
+          <div className="bg-emerald-50/40 dark:bg-emerald-950/10 border border-emerald-200 dark:border-emerald-900/50 rounded-xl mb-2 px-4 py-2.5 flex items-center gap-2">
+            <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+              STEP-3 Site-Ops cost types — 0 type drift vs Procore
+            </span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              ({SITE_OPS_TYPE_CHECKED_CODE_COUNT} hard-coded lines checked)
+            </span>
+            <span className="ml-auto text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Advisory · read-only</span>
+          </div>
+        ) : (
+          <div className="bg-amber-50/40 dark:bg-amber-950/10 border border-amber-200 dark:border-amber-900/50 rounded-xl mb-2 overflow-hidden">
+            <div className="px-4 py-3 border-b border-amber-200/70 dark:border-amber-900/50 flex items-center gap-2">
+              <GitCompareArrows size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+              <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                STEP-3 Site-Ops type drift — {siteOpsRecon.mismatches.length} type mismatch{siteOpsRecon.mismatches.length === 1 ? "" : "es"}, {siteOpsRecon.missingBase.length} missing base{siteOpsRecon.missingBase.length === 1 ? "" : "s"}
+              </h4>
+              <span className="ml-auto text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Advisory · read-only</span>
+            </div>
+            <p className="px-4 pt-3 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+              The granular Site-Ops lines hard-code their cost type in the app (constants.ts) and bypass the mapping table —
+              a type here disagrees with the Procore master list (<a href="/procore-codes" className="font-bold text-blue-600 dark:text-blue-400 hover:underline">/procore-codes</a>).
+              Fix the line&apos;s cost type in code; nothing here changes export behavior.
+            </p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
+              <div className="bg-card border border-grid-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-grid-border bg-background/60 flex items-center gap-2">
+                  <Tags size={13} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                    Type mismatches ({siteOpsRecon.mismatches.length})
+                  </span>
+                </div>
+                {siteOpsRecon.mismatches.length === 0 ? (
+                  <p className="px-3 py-3 text-[11px] text-slate-500 italic">None — every Site-Ops type agrees with Procore.</p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto divide-y divide-grid-border/50">
+                    {siteOpsRecon.mismatches.map((m) => (
+                      <div key={m.internalCode} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                        <span className="font-mono font-bold text-blue-600 dark:text-blue-400 w-32 shrink-0">{m.internalCode}</span>
+                        <span className="text-slate-600 dark:text-slate-400">
+                          estimate says <span className="font-bold text-foreground">{m.estimateType ?? m.estimateCostType}</span>
+                          {" · "}Procore says <span className="font-bold text-foreground">{m.procoreType}</span>
+                        </span>
+                        <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{m.procoreCode}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="bg-card border border-grid-border rounded-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-grid-border bg-background/60 flex items-center gap-2">
+                  <AlertTriangle size={13} className="text-rose-500 shrink-0" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-foreground">
+                    Procore base not in master list ({siteOpsRecon.missingBase.length})
+                  </span>
+                </div>
+                {siteOpsRecon.missingBase.length === 0 ? (
+                  <p className="px-3 py-3 text-[11px] text-slate-500 italic">None — every Site-Ops base exists.</p>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto divide-y divide-grid-border/50">
+                    {siteOpsRecon.missingBase.map((m) => (
+                      <div key={m.internalCode} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
+                        <span className="font-mono font-bold text-blue-600 dark:text-blue-400 w-32 shrink-0">{m.internalCode}</span>
+                        <span className="text-slate-600 dark:text-slate-400">→ base</span>
+                        <span className="ml-auto font-mono text-[10px] text-rose-500 shrink-0">{m.procoreCode}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      )}
+
       {/* KPI Cards Panel */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="bg-card border border-grid-border text-card-foreground p-5 rounded-xl shadow-sm relative overflow-hidden">
@@ -527,7 +660,7 @@ export default function CostCodeMappingDashboard() {
                     </tr>
                   ) : (
                     filteredEntries.map((entry) => {
-                      const internalDescription = getCatalogItems()[entry.internalCode]?.description || "—";
+                      const internalDescription = catalogItems[entry.internalCode]?.description || "—";
                       const procoreDesc = procoreDescription(entry.procoreCode);
                       const procoreType = procoreTypeByCode.get(entry.procoreCode);
                       const badge = SOURCE_BADGES[entry.source] || SOURCE_BADGES.template;

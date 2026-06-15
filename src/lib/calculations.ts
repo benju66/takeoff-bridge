@@ -537,14 +537,15 @@ export function computeDivisionBreakdown(
 }
 
 /**
- * Computes cost-type budget breakdown (Materials / Labor / Subcontract).
+ * Computes cost-type budget breakdown (Materials / Labor / Subcontract /
+ * Equipment). Display-only aggregation — an unknown type still buckets to "M".
  */
 export function computeCostTypeBreakdown(
   rows: ProcessedTakeoffRow[],
   subtotal: number,
   linkedTotals?: LinkedDivisionTotal[]
 ): CostTypeAggregation[] {
-  const costTotals: Record<string, number> = { M: 0, L: 0, S: 0 };
+  const costTotals: Record<string, number> = { M: 0, L: 0, S: 0, E: 0 };
   const effectiveAmount = makeEffectiveAmount(linkedTotals);
 
   rows.forEach((row) => {
@@ -561,6 +562,7 @@ export function computeCostTypeBreakdown(
     { key: "M", label: "Materials", total: costTotals.M, percentage: (costTotals.M / (subtotal || 1)) * 100 },
     { key: "L", label: "Labor", total: costTotals.L, percentage: (costTotals.L / (subtotal || 1)) * 100 },
     { key: "S", label: "Subcontract", total: costTotals.S, percentage: (costTotals.S / (subtotal || 1)) * 100 },
+    { key: "E", label: "Equipment", total: costTotals.E, percentage: (costTotals.E / (subtotal || 1)) * 100 },
   ];
 }
 

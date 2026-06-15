@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   getCatalogItems,
   primeCatalogAdditions,
+  primeCatalogCostTypeOverrides,
   resetCatalog,
   catalogAdditionDriftState,
 } from "../catalog";
@@ -66,6 +67,86 @@ describe("catalog chokepoint", () => {
     primeCatalogAdditions([addition("99-9999.999")]);
     expect(getCatalogItems()).not.toBe(ESTIMATE_ITEMS_MASTER);
     resetCatalog();
+    expect(getCatalogItems()).toBe(ESTIMATE_ITEMS_MASTER);
+  });
+});
+
+describe("cost-type override overlay (Template + Catalog Reconciliation Phase 2)", () => {
+  afterEach(() => resetCatalog());
+
+  /** A built-in code plus a costType GUARANTEED different from its harvested one. */
+  const builtInAndFlippedType = (): { code: string; builtIn: InternalEstimateItem; flipped: string } => {
+    const code = Object.keys(ESTIMATE_ITEMS_MASTER)[0];
+    const builtIn = ESTIMATE_ITEMS_MASTER[code];
+    return { code, builtIn, flipped: builtIn.costType === "E" ? "M" : "E" };
+  };
+
+  // The keystone identity contract survives the new overlay: with nothing
+  // primed (including an EMPTY override list) the chokepoint IS the built-in
+  // master, reference-identical — the Phase 2 mechanism ships fully inert.
+  it("treats an empty override prime as nothing primed (identity preserved)", () => {
+    primeCatalogCostTypeOverrides([]);
+    expect(getCatalogItems()).toBe(ESTIMATE_ITEMS_MASTER);
+  });
+
+  it("flips exactly one built-in's costType and nothing else", () => {
+    const { code, builtIn, flipped } = builtInAndFlippedType();
+    primeCatalogCostTypeOverrides([{ itemId: code, costType: flipped, note: "" }]);
+
+    const merged = getCatalogItems();
+    // The overridden item: costType wins, every other field keeps the harvested value.
+    expect(merged[code].costType).toBe(flipped);
+    expect(merged[code]).toEqual({ ...builtIn, costType: flipped });
+    // The built-in master itself is NEVER mutated (the patch clones).
+    expect(ESTIMATE_ITEMS_MASTER[code]).toBe(builtIn);
+    expect(builtIn.costType).not.toBe(flipped);
+    // Every OTHER item is the same reference as the master's (no needless clones).
+    for (const [otherCode, item] of Object.entries(ESTIMATE_ITEMS_MASTER)) {
+      if (otherCode !== code) expect(merged[otherCode]).toBe(item);
+    }
+    expect(Object.keys(merged).length).toBe(Object.keys(ESTIMATE_ITEMS_MASTER).length);
+  });
+
+  it("ignores an override naming a non-built-in code (inert, never invents an item)", () => {
+    expect(ESTIMATE_ITEMS_MASTER["99-9999.999"]).toBeUndefined();
+    primeCatalogCostTypeOverrides([{ itemId: "99-9999.999", costType: "E", note: "" }]);
+
+    const merged = getCatalogItems();
+    expect(merged["99-9999.999"]).toBeUndefined();
+    expect(merged).toEqual(ESTIMATE_ITEMS_MASTER);
+  });
+
+  it("keeps the built-in reference when the override matches the harvested type", () => {
+    const { code, builtIn } = builtInAndFlippedType();
+    primeCatalogCostTypeOverrides([{ itemId: code, costType: builtIn.costType, note: "" }]);
+    expect(getCatalogItems()[code]).toBe(builtIn);
+  });
+
+  it("composes with primed additions (addition layered, built-in patched)", () => {
+    const { code, builtIn, flipped } = builtInAndFlippedType();
+    const novelCode = "99-9999.999";
+    primeCatalogAdditions([addition(novelCode)]);
+    primeCatalogCostTypeOverrides([{ itemId: code, costType: flipped, note: "" }]);
+
+    const merged = getCatalogItems();
+    expect(merged[novelCode]?.description).toBe(`Addition ${novelCode}`);
+    expect(merged[code]).toEqual({ ...builtIn, costType: flipped });
+    expect(Object.keys(merged).length).toBe(Object.keys(ESTIMATE_ITEMS_MASTER).length + 1);
+  });
+
+  it("resetCatalog clears the override overlay (identity restored)", () => {
+    const { code, flipped } = builtInAndFlippedType();
+    primeCatalogCostTypeOverrides([{ itemId: code, costType: flipped, note: "" }]);
+    expect(getCatalogItems()).not.toBe(ESTIMATE_ITEMS_MASTER);
+    resetCatalog();
+    expect(getCatalogItems()).toBe(ESTIMATE_ITEMS_MASTER);
+  });
+
+  it("re-priming replaces the previous override set (latest prime wins)", () => {
+    const { code, flipped } = builtInAndFlippedType();
+    primeCatalogCostTypeOverrides([{ itemId: code, costType: flipped, note: "" }]);
+    expect(getCatalogItems()[code].costType).toBe(flipped);
+    primeCatalogCostTypeOverrides([]);
     expect(getCatalogItems()).toBe(ESTIMATE_ITEMS_MASTER);
   });
 });

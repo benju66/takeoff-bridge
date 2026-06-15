@@ -22,10 +22,12 @@ import {
   getImportedStep23History,
   getCustomStep23LineDefs,
   getCatalogAdditions,
+  getCatalogCostTypeOverrides,
 } from "@/lib/db";
 import { step23Observations } from "@/lib/step23Normalization";
 import { primeRateCard } from "@/lib/rateResolver";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
+import { primeCatalogCostTypeOverrides } from "@/lib/catalog";
 import {
   groupRateCardRows,
   parseRateInput,
@@ -273,6 +275,17 @@ export default function RateCardDashboard() {
         console.error("Failed to load catalog additions (read-only display skipped):", err);
       });
     return () => { cancelled = true; };
+  }, []);
+
+  // Prime the built-in cost-type override overlay independently (Reconciliation
+  // Phase 2 — fail-soft) so the in-session catalog stays consistent with the
+  // other prime sites. LABEL ONLY — moves no dollars; empty = identity.
+  useEffect(() => {
+    getCatalogCostTypeOverrides()
+      .then((loaded) => primeCatalogCostTypeOverrides(loaded))
+      .catch((err) => {
+        console.error("Failed to load catalog cost-type overrides (harvested types kept):", err);
+      });
   }, []);
 
   // Re-prime on refocus (mirror /cost-codes resolver wiring): pull the latest

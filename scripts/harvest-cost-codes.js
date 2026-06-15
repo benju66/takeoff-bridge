@@ -426,7 +426,19 @@ async function main() {
             break; // template-sumif: authoritative, not a gap
         }
 
-        if (!isDuplicateRow && resolution.procoreCode && !importerCodes.has(resolution.procoreCode)) {
+        // Linked-division rows (steps-2-3 basis) are EXEMPT from the valid-code
+        // gate. These are exactly the LINKED_DIVISION_ROWS / isLinkedDivisionRow
+        // set (src/lib/constants.ts): their dollars roll up from the STEP 2 - GCs
+        // and STEP 3 - SITE OPS sheets, and they are export-skipped at runtime, so
+        // their division-base destination is a never-exported fallback. When that
+        // base is retired from the Importer sheet (e.g. 2-20000.000), it must NOT
+        // trip the hard abort — mirroring the runtime export-skip.
+        if (
+          !isDuplicateRow &&
+          resolution.procoreCode &&
+          resolution.basis !== "steps-2-3" &&
+          !importerCodes.has(resolution.procoreCode)
+        ) {
           gaps.invalidProcoreCodes.push({
             internalCode: rawCode, procoreCode: resolution.procoreCode, basis: resolution.basis
           });
@@ -474,6 +486,17 @@ async function main() {
   }
 
   // Write out JSON
+  //
+  // WARNING / FOOTGUN: this OVERWRITES src/lib/estimate-catalog.json with the PURE
+  // template harvest (currently 221 codes). The committed file is 227 = 221
+  // harvested + 6 architect-confirmed MANUAL built-in additions (2026-06-10)
+  // that do NOT exist in the template's STEP 4 sheet and so are NOT re-harvested:
+  //   03-3543.002, 07-1000.003, 09-9000.002, 26-0000.006, 32-1613.007, 01-0230.002
+  // Running sync-codes silently DROPS those 6 and breaks catalogPriceLookup.test
+  // + catalogRateSeed.test (both pin 227). After running, either restore the file
+  // (`git checkout -- src/lib/estimate-catalog.json`) and re-apply only the
+  // genuinely new harvested codes, or migrate the 6 manual additions off this
+  // harvested file (see the catalog-manual-additions migration backlog item).
   fs.writeFileSync(jsonOutputPath, JSON.stringify(catalog, null, 2), 'utf-8');
 
   // Valid-code artifact (Phase 3c): the Importer Data Fields list is the ONLY
