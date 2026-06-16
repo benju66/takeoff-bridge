@@ -30,7 +30,19 @@ col H) are written as VALUES; the dependent line formulas survive and recompute.
 ## The gap to "fully standalone" (the ~25–35% that's static — all intentional)
 1. **BLI rollup sheet** — restore live `SUMIF`-by-Procore-code so the Procore rollup
    recomputes from edited detail. Biggest single piece; was flattened on purpose for
-   upload determinism / floating-point tie-out.
+   upload determinism / floating-point tie-out. **FEASIBILITY (confirmed 2026-06-12):** the
+   per-row Procore code today exists ONLY in app memory — `rollupByProcoreCode(rows)`
+   computes the sum and the BLI cell is written as a flat value (`exporter.ts:2053`); the
+   code is NEVER a sheet cell. So a live SUMIF requires:
+   - **(a) Add a Procore-code column** to the detail sheets (STEP 4 + STEP 2/3) — the
+     enabling change; without it SUMIF has no criteria range.
+   - **(b) BLI cell = live SUMIF** across both sheets, e.g.
+     `=SUMIF(Step4!$Pcol, bliCode, Step4!$Icol) + SUMIF(SiteOps!$Pcol, bliCode, SiteOps!$Icol)`.
+   - **(c) Exclude linked-division summaries** from the SUMIF range (no matchable code /
+     sentinel) or they double-count — mirrors `exporter.ts:503` / `rollupByProcoreCode`.
+   - **(d) Recalc golden** proving the live SUMIF == `rollupByProcoreCode + rollupGcSiteOps`
+     to the cent. This re-expresses the code's rollup AUTHORITY as formulas; the golden is
+     the only guard against the two drifting. Pushes this piece to the upper end of MEDIUM.
 2. **STEP 2/3 subtotals** — restore `SUM` formulas (flattened for bit-identical tie-out).
    The round-trip feature already does live STEP 2/3 formulas — reuse/extend.
 3. **Modifier freeze under overrides** — decide whether standalone mode keeps modifier

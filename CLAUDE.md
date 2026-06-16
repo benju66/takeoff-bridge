@@ -7,6 +7,21 @@ with a structured web app that exports to Procore via template-mapped XLSX files
 Next.js 16 · React 19 · TypeScript · Supabase (Postgres + RLS) · TanStack Table ·
 ExcelJS · PapaParse · Vitest · Playwright
 
+## Response Style (for the architect)
+The primary reader is the system architect and domain expert — not a software developer.
+When responding in chat:
+- **Lead with a plain-language summary**: what changed (or what I'm proposing) and what it
+  means for the product / estimating workflow — before any code or implementation detail.
+- **Two layers, never dumbed down**: keep full technical depth, but place it *below* the
+  summary under a "Technical detail" heading the architect can skip. Never replace the plain
+  summary with a jargon-only one.
+- **Define jargon on first use** in a few words (e.g. "RLS — the database's per-tenant access rules").
+- **Be concise**: lead with the answer/recommendation; don't narrate options I'm not taking.
+- When presenting choices, always mark one **(Recommended)** with a one-line reason.
+
+This governs conversational explanation only. It does NOT shorten required work products —
+the implementation plan table, the 5-step verification, and handoff docs (per AGENTS.md) stay as specified.
+
 ## Shell & Encoding Rules
 - This is a Windows machine: always use the PowerShell tool (not Bash) for shell commands. Never mix PowerShell here-string syntax (`@'...'@`) inside the Bash tool.
 - Never use emoji in PowerShell scripts (cp1252 encoding mangles them).

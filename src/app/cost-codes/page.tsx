@@ -451,16 +451,22 @@ export default function CostCodeMappingDashboard() {
                 <p className="px-3 py-3 text-[11px] text-slate-500 italic">None — every mapped type agrees with Procore.</p>
               ) : (
                 <div className="max-h-72 overflow-y-auto divide-y divide-grid-border/50">
-                  {reconciliation.mismatches.map((m) => (
+                  {reconciliation.mismatches.map((m) => {
+                    const desc = catalogItems[m.internalCode]?.description;
+                    return (
                     <div key={m.internalCode} className="flex items-center gap-2 px-3 py-1.5 text-[11px]">
-                      <span className="font-mono font-bold text-blue-600 dark:text-blue-400 w-32 shrink-0">{m.internalCode}</span>
-                      <span className="text-slate-600 dark:text-slate-400">
+                      <span className="shrink-0 max-w-[16rem] truncate" title={desc ? `${m.internalCode} - ${desc}` : m.internalCode}>
+                        <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{m.internalCode}</span>
+                        {desc && <span className="text-slate-500 dark:text-slate-400"> - {desc}</span>}
+                      </span>
+                      <span className="text-slate-600 dark:text-slate-400 shrink-0">
                         estimate says <span className="font-bold text-foreground">{m.estimateType ?? m.estimateCostType}</span>
                         {" · "}Procore says <span className="font-bold text-foreground">{m.procoreType}</span>
                       </span>
                       <span className="ml-auto font-mono text-[10px] text-slate-400 shrink-0">{m.procoreCode}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
