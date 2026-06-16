@@ -28,7 +28,13 @@ import {
 } from "../bindings/registry";
 import { lineFieldNodeId } from "../bindings/compile";
 import { evaluateGraph } from "../bindings/graph";
-import { summaryNodeId, type Binding, type GraphNode, type SummaryNodeField } from "../bindings/types";
+import {
+  gcSubtotalNodeId,
+  summaryNodeId,
+  type Binding,
+  type GraphNode,
+  type SummaryNodeField,
+} from "../bindings/types";
 import { LINKED_DIVISION_ROWS } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -207,5 +213,39 @@ describe("assembleBindingGraphNodes - collision precedence (user binding > engin
     const values = evaluateGraph(nodes);
     // The reserved linked node kept its own constant (the bridge wins, not the user binding).
     expect(values.get(lineFieldNodeId(linkedRowId, "total"))).toBeCloseTo(500, 8);
+  });
+});
+
+describe("assembleBindingGraphNodes - engine gc:* node wins over the bare gc:* source constant", () => {
+  // Phase 3 is the FIRST tier whose engine ids overlap the bare gc:* source nodes (LD-B5).
+  // With the fold ON (the default tier set now includes "gc") the richer engine node must
+  // REPLACE the bare constant — engine > source — so the GC tree wiring is what shows.
+  const folded = assembleBindingGraphNodes([], gc, siteOps, rows, {
+    includeEngineGraph: true,
+    summary,
+  });
+
+  it("gc:grandTotal appears once and is the ENGINE node (edged to its 4 subtotals), not the bare constant", () => {
+    const grand = folded.filter((n) => n.id === GC_GRAND_TOTAL_NODE_ID);
+    expect(grand).toHaveLength(1);
+    // The bare source constant has NO inputs; the surviving engine node declares the 4 subtotals.
+    expect(grand[0].inputs).toEqual([
+      gcSubtotalNodeId("staff"),
+      gcSubtotalNodeId("ops"),
+      gcSubtotalNodeId("equipment"),
+      gcSubtotalNodeId("manual"),
+    ]);
+  });
+
+  it("folds in the GC tree (group subtotals + leaf nodes) with NO duplicate ids", () => {
+    expect(folded.some((n) => n.id === gcSubtotalNodeId("staff"))).toBe(true);
+    expect(folded.some((n) => n.id.startsWith("gc:staff:"))).toBe(true);
+    const ids = allIds(folded);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("the folded gc:grandTotal evaluates to gc.grandTotal through the kind-blind graph", () => {
+    const values = evaluateGraph(folded);
+    expect(values.get(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gc.grandTotal, 8);
   });
 });

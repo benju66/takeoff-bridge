@@ -28,7 +28,18 @@ import {
 import { computeLinkedDivisionTotalsViaEngine } from "../bindings/registry";
 import { describeEngineGraph } from "../bindings/engineGraph";
 import { evaluateGraph, findCycle } from "../bindings/graph";
-import { summaryNodeId, type GraphNode, type SummaryNodeField } from "../bindings/types";
+import {
+  GC_GENERAL_NODE_ID,
+  GC_GRAND_TOTAL_NODE_ID,
+  GC_SUPERVISION_NODE_ID,
+  gcLeafNodeId,
+  gcSubtotalNodeId,
+  summaryNodeId,
+  type GcSubtotalGroup,
+  type GraphNode,
+  type SummaryNodeField,
+} from "../bindings/types";
+import { SUPERVISION_STAFF_CODES } from "../constants";
 import type { EstimateOverrideMap, ProcessedTakeoffRow } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -272,6 +283,196 @@ describe("engineGraph — evaluates through the kind-blind graph to the engine v
       const values = evaluateGraph(fx.nodes);
       for (const field of ALL_SUMMARY_FIELDS) {
         expect(values.get(summaryNodeId(field))).toBeCloseTo(fx.summary[field], 8);
+      }
+    });
+  }
+});
+
+// ===========================================================================
+// GC tier (Phase 3) — the STEP 2 General Conditions decomposition tree
+// ===========================================================================
+
+// A second GC fixture (different durations, utilizations, rate overrides, and extra
+// manual/equipment entries). It proves the descriptor ECHOES the engine's result across
+// varied inputs — never a re-derivation of defaults (the LD-B2 faithfulness guard, the GC
+// analog of the summary override fixture above).
+const gcAlt: PersonnelCalcResult = computePersonnelCosts(
+  18,
+  52000,
+  { ex: 75, srPm: 40, pm: 100, srSu: 60, su: 100, asstSu: 50 },
+  { dumpsters: 2500, toilets: 1800, electric: 4200 },
+  { designArch: 42000, projectSigns: 3, legalFees: 2 },
+  { ex: 210, su: 132 }
+);
+
+/** Build the GC-tier nodes + an id→node map for one PersonnelCalcResult (the tier ignores
+ * `summary`/`rows`; any in-scope summary works). */
+function gcBuild(gcRes: PersonnelCalcResult): {
+  nodes: GraphNode[];
+  byId: Map<string, GraphNode>;
+} {
+  const nodes = describeEngineGraph(gcRes, siteOps, [], populated.summary, "gc");
+  return { nodes, byId: new Map(nodes.map((n) => [n.id, n])) };
+}
+
+/** Σ the supervision staff leaf totals exactly as the engine/oracle does. */
+function supervisionOf(gcRes: PersonnelCalcResult): number {
+  return gcRes.staffLines
+    .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+    .reduce((s, l) => s + l.total, 0);
+}
+
+/** The three qty×rate groups (equipment is lump-sum, asserted separately). */
+const QTY_RATE_GROUPS = ["staff", "ops", "manual"] as const;
+type LeafLine = { code: string; qty: number; rate: number; total: number };
+function groupLines(gcRes: PersonnelCalcResult, group: GcSubtotalGroup): LeafLine[] {
+  switch (group) {
+    case "staff":
+      return gcRes.staffLines;
+    case "ops":
+      return gcRes.operationalLines;
+    case "manual":
+      return gcRes.manualLines;
+    case "equipment":
+      return gcRes.equipmentLines.map((l) => ({ ...l, qty: 0, rate: 0 }));
+  }
+}
+
+describe("engineGraph gc tier — echo equals computePersonnelCosts (the engine is the authority)", () => {
+  for (const [label, gcRes] of [
+    ["populated", gc],
+    ["rate-override", gcAlt],
+  ] as const) {
+    const { byId } = gcBuild(gcRes);
+    const val = (id: string): number => {
+      const n = byId.get(id);
+      if (!n) throw new Error(`missing gc node ${id}`);
+      return n.evaluate(new Map());
+    };
+
+    it(`echoes every staff/ops/manual leaf line (total, qty, rate) — ${label}`, () => {
+      for (const group of QTY_RATE_GROUPS) {
+        for (const l of groupLines(gcRes, group)) {
+          expect(val(gcLeafNodeId(group, l.code, "total"))).toBeCloseTo(l.total, 8);
+          expect(val(gcLeafNodeId(group, l.code, "qty"))).toBeCloseTo(l.qty, 8);
+          expect(val(gcLeafNodeId(group, l.code, "rate"))).toBeCloseTo(l.rate, 8);
+        }
+      }
+    });
+
+    it(`echoes each equipment leaf total (lump sum, no qty/rate node) — ${label}`, () => {
+      for (const l of gcRes.equipmentLines) {
+        expect(val(gcLeafNodeId("equipment", l.code, "total"))).toBeCloseTo(l.total, 8);
+        expect(byId.has(gcLeafNodeId("equipment", l.code, "qty"))).toBe(false);
+        expect(byId.has(gcLeafNodeId("equipment", l.code, "rate"))).toBe(false);
+      }
+    });
+
+    it(`echoes the four subtotals, grand total, supervision, and general — ${label}`, () => {
+      const sup = supervisionOf(gcRes);
+      expect(val(gcSubtotalNodeId("staff"))).toBeCloseTo(
+        gcRes.staffLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(gcSubtotalNodeId("ops"))).toBeCloseTo(
+        gcRes.operationalLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(gcSubtotalNodeId("equipment"))).toBeCloseTo(gcRes.equipmentTotal, 8);
+      expect(val(gcSubtotalNodeId("manual"))).toBeCloseTo(
+        gcRes.manualLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal, 8);
+      expect(val(GC_SUPERVISION_NODE_ID)).toBeCloseTo(sup, 8);
+      expect(val(GC_GENERAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal - sup, 8);
+    });
+  }
+
+  it("the populated fixture exercises non-zero values across all four groups", () => {
+    expect(gc.staffLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(gc.operationalLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(gc.equipmentTotal).toBeGreaterThan(0);
+    expect(gc.manualLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(supervisionOf(gc)).toBeGreaterThan(0);
+  });
+});
+
+describe("engineGraph gc tier — authored edges (the depends-on / used-by wiring)", () => {
+  const { byId } = gcBuild(gc);
+  const inputs = (id: string): string[] => byId.get(id)!.inputs;
+
+  it("grand total reads the four group subtotals, in order", () => {
+    expect(inputs(GC_GRAND_TOTAL_NODE_ID)).toEqual([
+      gcSubtotalNodeId("staff"),
+      gcSubtotalNodeId("ops"),
+      gcSubtotalNodeId("equipment"),
+      gcSubtotalNodeId("manual"),
+    ]);
+  });
+
+  it("each group subtotal reads its own group's leaf totals", () => {
+    for (const group of ["staff", "ops", "equipment", "manual"] as const) {
+      expect(inputs(gcSubtotalNodeId(group))).toEqual(
+        groupLines(gc, group).map((l) => gcLeafNodeId(group, l.code, "total"))
+      );
+    }
+  });
+
+  it("each qty×rate leaf total reads its qty + rate; lump-sum equipment leaves read nothing", () => {
+    for (const l of gc.staffLines) {
+      expect(inputs(gcLeafNodeId("staff", l.code, "total"))).toEqual([
+        gcLeafNodeId("staff", l.code, "qty"),
+        gcLeafNodeId("staff", l.code, "rate"),
+      ]);
+    }
+    for (const l of gc.equipmentLines) {
+      expect(inputs(gcLeafNodeId("equipment", l.code, "total"))).toEqual([]);
+    }
+  });
+
+  it("qty and rate are leaf source nodes (no inputs)", () => {
+    for (const l of gc.staffLines) {
+      expect(inputs(gcLeafNodeId("staff", l.code, "qty"))).toEqual([]);
+      expect(inputs(gcLeafNodeId("staff", l.code, "rate"))).toEqual([]);
+    }
+  });
+
+  it("supervision reads its supervision staff leaf totals; general reads grand total + supervision", () => {
+    const supIds = gc.staffLines
+      .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+      .map((l) => gcLeafNodeId("staff", l.code, "total"));
+    expect(inputs(GC_SUPERVISION_NODE_ID)).toEqual(supIds);
+    expect(inputs(GC_GENERAL_NODE_ID)).toEqual([GC_GRAND_TOTAL_NODE_ID, GC_SUPERVISION_NODE_ID]);
+  });
+
+  it("no dangling edges (every input id is also emitted by the tier)", () => {
+    const ids = new Set(byId.keys());
+    for (const n of byId.values()) {
+      for (const dep of n.inputs) expect(ids.has(dep)).toBe(true);
+    }
+  });
+});
+
+describe("engineGraph gc tier — acyclicity + evaluates through the kind-blind graph", () => {
+  for (const [label, gcRes] of [
+    ["populated", gc],
+    ["rate-override", gcAlt],
+  ] as const) {
+    const { nodes } = gcBuild(gcRes);
+
+    it(`the authored edge set is acyclic — ${label}`, () => {
+      expect(findCycle(nodes)).toBeNull();
+    });
+
+    it(`evaluateGraph resolves grand total / supervision / general + leaves to the engine value — ${label}`, () => {
+      const values = evaluateGraph(nodes);
+      const sup = supervisionOf(gcRes);
+      expect(values.get(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal, 8);
+      expect(values.get(GC_SUPERVISION_NODE_ID)).toBeCloseTo(sup, 8);
+      expect(values.get(GC_GENERAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal - sup, 8);
+      for (const l of gcRes.staffLines) {
+        expect(values.get(gcLeafNodeId("staff", l.code, "total"))).toBeCloseTo(l.total, 8);
       }
     });
   }

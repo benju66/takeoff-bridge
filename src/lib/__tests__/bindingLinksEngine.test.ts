@@ -18,7 +18,16 @@ import {
 } from "../calculations";
 import { buildLinksModel, focusFieldToNodeId } from "../trustInspector";
 import { computeLinkedDivisionTotalsViaEngine } from "../bindings/registry";
-import { summaryNodeId, type SummaryNodeField } from "../bindings/types";
+import {
+  GC_GENERAL_NODE_ID,
+  GC_GRAND_TOTAL_NODE_ID,
+  GC_SUPERVISION_NODE_ID,
+  gcLeafNodeId,
+  gcSubtotalNodeId,
+  summaryNodeId,
+  type SummaryNodeField,
+} from "../bindings/types";
+import { SUPERVISION_STAFF_CODES } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
 const gc: PersonnelCalcResult = computePersonnelCosts(
@@ -164,5 +173,69 @@ describe("buildLinksModel - a cross-page leaf and the omitted-summary fallback",
     expect(model.dependsOn).toEqual([]);
     expect(model.usedBy).toEqual([]);
     expect(model.focus.value).toBeUndefined();
+  });
+});
+
+describe("buildLinksModel - GC tree traversal (Phase 3, summary supplied)", () => {
+  it("gc:grandTotal depends on the 4 group subtotals and is used by gc:general", () => {
+    const model = buildLinksModel({
+      focusNodeId: GC_GRAND_TOTAL_NODE_ID,
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.isBound).toBe(false);
+    expect(model.isDerived).toBe(true); // a read-only engine value
+    expect(model.focus.value).toBeCloseTo(gc.grandTotal, 8);
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual([
+      gcSubtotalNodeId("staff"),
+      gcSubtotalNodeId("ops"),
+      gcSubtotalNodeId("equipment"),
+      gcSubtotalNodeId("manual"),
+    ]);
+    expect(model.usedBy.map((u) => u.nodeId)).toContain(GC_GENERAL_NODE_ID);
+  });
+
+  it("a supervision staff leaf total depends on its qty + rate, and feeds both its subtotal and supervision", () => {
+    const code = SUPERVISION_STAFF_CODES[1]; // Superintendent (01-0420.001) — utilized, non-zero
+    const totalId = gcLeafNodeId("staff", code, "total");
+    const model = buildLinksModel({
+      focusNodeId: totalId,
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual([
+      gcLeafNodeId("staff", code, "qty"),
+      gcLeafNodeId("staff", code, "rate"),
+    ]);
+    const usedBy = model.usedBy.map((u) => u.nodeId);
+    expect(usedBy).toContain(gcSubtotalNodeId("staff"));
+    expect(usedBy).toContain(GC_SUPERVISION_NODE_ID);
+    // labelled to the leaf via the shared node labeller (not the raw id)
+    expect(model.focus.label).toContain("STEP 2");
+  });
+
+  it("gc:general depends on grand total + supervision and echoes grandTotal - supervision", () => {
+    const model = buildLinksModel({
+      focusNodeId: GC_GENERAL_NODE_ID,
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual([
+      GC_GRAND_TOTAL_NODE_ID,
+      GC_SUPERVISION_NODE_ID,
+    ]);
+    const supervision = gc.staffLines
+      .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+      .reduce((s, l) => s + l.total, 0);
+    expect(model.focus.value).toBeCloseTo(gc.grandTotal - supervision, 8);
   });
 });

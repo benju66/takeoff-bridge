@@ -196,6 +196,50 @@ export function summaryNodeId(field: SummaryNodeField): string {
 }
 
 // ---------------------------------------------------------------------------
+// GC (STEP 2) node-ID scheme — the canonical `gc:*` IDs + the Bucket B Phase 3 tree
+// ---------------------------------------------------------------------------
+
+/**
+ * The `gc:` node-ID prefix (a STEP 2 General Conditions computed value). Declared in
+ * this leaf module so BOTH registry.ts (the source-node + linked-division path) and
+ * engineGraph.ts (the Bucket B decomposition tier) reference one definition without a
+ * `registry → engineGraph → registry` import cycle. registry.ts re-exports the three
+ * canonical constants below for its existing import sites.
+ */
+export const GC_NODE_PREFIX = "gc:";
+
+/** STEP 2 — personnel grand total (all GC lines). */
+export const GC_GRAND_TOTAL_NODE_ID = "gc:grandTotal";
+/** STEP 2 — Σ supervision staff lines (template "Total Supervision", I16). */
+export const GC_SUPERVISION_NODE_ID = "gc:supervisionSubtotal";
+/** STEP 2 — Design/PM/GCs (grand total − supervision; a DERIVED value, not a raw subtotal). */
+export const GC_GENERAL_NODE_ID = "gc:general";
+
+/**
+ * The four GC cost groups whose leaf lines roll up into `gc:<group>Subtotal`
+ * (Bucket B Phase 3). One per `PersonnelCalcResult` array: staff labour, operational
+ * expenses, lump-sum equipment, and manual GC entries.
+ */
+export type GcSubtotalGroup = "staff" | "ops" | "equipment" | "manual";
+
+/** Stable node ID for a GC group subtotal: `gc:<group>Subtotal`. */
+export function gcSubtotalNodeId(group: GcSubtotalGroup): string {
+  return `${GC_NODE_PREFIX}${group}Subtotal`;
+}
+
+/** The echo-able fields of one GC leaf line. Lump-sum equipment lines expose `total` only. */
+export type GcLeafField = "total" | "qty" | "rate";
+
+/**
+ * Stable node ID for one GC leaf line's field: `gc:<group>:<code>:<field>`
+ * (e.g. `gc:staff:01-0310.001:total`). The `code` is the line's template criterion
+ * code — unique within its group — never a cell position (by-ID, not by-position).
+ */
+export function gcLeafNodeId(group: GcSubtotalGroup, code: string, field: GcLeafField): string {
+  return `${GC_NODE_PREFIX}${group}:${code}:${field}`;
+}
+
+// ---------------------------------------------------------------------------
 // Graph node — the ONLY shape the kind-blind graph engine understands (spec §2.1)
 // ---------------------------------------------------------------------------
 
