@@ -98,11 +98,18 @@ and verifies performance at the full node count.
   (summary + gc + siteOps). Add any remaining engine value that lacks a node (e.g. confirm
   the GC equipment subtotal, any summary field, any cross-page edge). The coverage map doc
   is the deliverable that proves completeness.
-- **"Complete picture" affordance.** e.g. a Links-tab cross-page path trail (a line ->
-  division -> summary trail), OR optional per-cell badges on the GC/Site-Ops pages that
-  dispatch `tb:inspect-binding` focused on the relevant engine node (per-cell GC/Site-Ops
-  badges were explicitly deferred FROM Phases 3/4 TO here). **If you add a UI entry point,
-  add ONE Playwright e2e** (Phases 3/4 added none because they had no UI affordance).
+- **Per-cell GC/Site-Ops Links entry point (REQUIRED this phase).** A badge/affordance on the
+  GC (STEP 2) and Site-Ops (STEP 3) pages that opens the Trust Inspector Links tab focused on
+  that cell's engine node (`gc:*` / `siteops:*`). **Architect decision (2026-06-16): the Phase 4
+  visual spot-check was deliberately HELD to Phase 5 because no such entry point exists yet** -
+  today `tb:inspect-binding` only carries a `rowId` -> `line:<id>:total` and the summary
+  affordance only reaches `summary:<field>`; NO UI path focuses a `gc:*`/`siteops:*` node, and
+  Links-tab dependency rows only re-focus to grid rows. So this badge is what finally makes the
+  manual /verify possible. Reuse the existing pattern (dispatch a focus event that the
+  `EstimateTable` listener maps to a node id; extend it to accept a raw node id, not just a
+  rowId). **Add ONE Playwright e2e** clicking a Site-Ops value and asserting the Links tab shows
+  its depends-on/used-by. (Consider also a "complete picture" Links-tab path trail line -> division
+  -> summary, but the per-cell entry point is the must-have.)
 - **Performance check at the full node count.** ~240 nodes + edges evaluated on Links-tab
   open. Expected fine; verify (a test or a measured note). If not, the kind-blind graph
   supports lazy/subgraph evaluation later - note it, don't pre-optimize.
