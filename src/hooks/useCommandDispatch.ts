@@ -3,9 +3,16 @@
 import React, { useCallback } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition, WorkbookCommand } from "@/types";
 import { UseCommandHistoryReturn } from "./useCommandHistory";
-import { saveProjectRegistry, saveGlobalRegistry } from "@/lib/db";
+import {
+  saveProjectRegistry,
+  saveGlobalRegistry,
+  saveEstimateBinding,
+  deleteEstimateBinding,
+} from "@/lib/db";
 import { evaluateDataFidelity } from "@/lib/calculations";
 import { applyMergeForward, applyMergeInverse } from "@/lib/mergeTakeoff";
+import type { Binding } from "@/lib/bindings/types";
+import { upsertBinding, removeBinding } from "@/lib/bindings/store";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -32,7 +39,27 @@ export function useCommandDispatch(
   setLockedCells: React.Dispatch<React.SetStateAction<Record<string, boolean>>>,
   setUnmappedTakeoffClassifications: React.Dispatch<React.SetStateAction<string[]>>,
   globalRegistry: Record<string, string>,
+  // Linked Values Phase 4: optimistic binding state for SET_BINDING / CLEAR_BINDING.
+  setBindings: React.Dispatch<React.SetStateAction<Binding[]>>,
 ): UseCommandDispatchReturn {
+
+  // Persist a binding write (fire-and-forget, mirrors the registry-delta pattern):
+  // the optimistic in-memory state already updated; a DB failure logs but never blocks
+  // undo/redo. THROWN errors from the gateway are caught here.
+  const persistBinding = useCallback(
+    (binding: Binding | null, targetNodeId: string) => {
+      if (binding) {
+        saveEstimateBinding(projectId, binding).catch((err) =>
+          console.error("Failed to persist binding:", err)
+        );
+      } else {
+        deleteEstimateBinding(projectId, targetNodeId).catch((err) =>
+          console.error("Failed to delete binding:", err)
+        );
+      }
+    },
+    [projectId]
+  );
 
   // ---------------------------------------------------------------------------
   // applyCommandForward — Execute a command's FORWARD (next) effect on state
@@ -190,8 +217,20 @@ export function useCommandDispatch(
         setUnmappedTakeoffClassifications(cmd.nextUnmapped);
         break;
       }
+      case "SET_BINDING": {
+        // Forward = create/replace the binding on the target node (Phase 4).
+        setBindings((prev) => upsertBinding(prev, cmd.nextBinding));
+        persistBinding(cmd.nextBinding, cmd.targetNodeId);
+        break;
+      }
+      case "CLEAR_BINDING": {
+        // Forward = remove the binding from the target node (Phase 4).
+        setBindings((prev) => removeBinding(prev, cmd.targetNodeId));
+        persistBinding(null, cmd.targetNodeId);
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -373,8 +412,25 @@ export function useCommandDispatch(
         setUnmappedTakeoffClassifications(cmd.prevUnmapped);
         break;
       }
+      case "SET_BINDING": {
+        // Undo = restore the prior binding (prev=null → the target had none, so delete).
+        if (cmd.prevBinding) {
+          setBindings((prev) => upsertBinding(prev, cmd.prevBinding!));
+          persistBinding(cmd.prevBinding, cmd.targetNodeId);
+        } else {
+          setBindings((prev) => removeBinding(prev, cmd.targetNodeId));
+          persistBinding(null, cmd.targetNodeId);
+        }
+        break;
+      }
+      case "CLEAR_BINDING": {
+        // Undo = re-add the cleared binding verbatim.
+        setBindings((prev) => upsertBinding(prev, cmd.prevBinding));
+        persistBinding(cmd.prevBinding, cmd.targetNodeId);
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding]);
 
   // ---------------------------------------------------------------------------
   // handleUndo — Pop from undo stack and apply inverse

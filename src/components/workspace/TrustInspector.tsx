@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock, ArrowRight, RotateCcw, ClipboardList } from "lucide-react";
+import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock, ArrowRight, RotateCcw, ClipboardList, Link2, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { Project } from "@/types/db";
 import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
-import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair, FlagsModel, FlagsRowRef, FlagsAuditEntry } from "@/lib/trustInspector";
+import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair, FlagsModel, FlagsRowRef, FlagsAuditEntry, LinksModel, LinkNodeRef } from "@/lib/trustInspector";
 import {
   selectPristineComputedValue,
   validateOverrideInput,
@@ -47,7 +47,9 @@ interface TrustInspectorProps {
   reconciliation?: ReconciliationModel;
   /** 5c Flags worklist — needs-review rows, unmapped imports, override audit log. */
   flagsModel?: FlagsModel;
-  /** Jump the grid to a flagged row (closes the inspector + scrolls). */
+  /** Links view (Phase 5) — the focused node's depends-on / used-by (built by the page). */
+  linksModel?: LinksModel;
+  /** Jump the grid to a flagged/linked row (closes the inspector + scrolls). */
   onViewRow?: (rowId: string) => void;
   /**
    * B-4 (slice 5b) — assign a Procore code to an unmapped import row in place. Routes
@@ -84,6 +86,7 @@ export function TrustInspector({
   takeoffRowCount,
   reconciliation,
   flagsModel,
+  linksModel,
   onViewRow,
   onAssignCode,
   onViewTakeoffRows,
@@ -149,9 +152,9 @@ export function TrustInspector({
 
   const tabs = (
     <div className="flex items-stretch border-b border-grid-border bg-card text-[11px] font-bold uppercase tracking-wider">
-      {(["trace", "reconcile", "flags"] as TrustTab[]).map((t) => {
+      {(["trace", "links", "reconcile", "flags"] as TrustTab[]).map((t) => {
         const active = tab === t;
-        const label = t === "trace" ? "Trace" : t === "reconcile" ? "Reconcile" : "Flags";
+        const label = t === "trace" ? "Trace" : t === "links" ? "Links" : t === "reconcile" ? "Reconcile" : "Flags";
         return (
           <button
             key={t}
@@ -181,6 +184,16 @@ export function TrustInspector({
           onSaveOverride={onSaveOverride}
           onViewTakeoffRows={onViewTakeoffRows}
         />
+      )}
+      {tab === "links" && (
+        linksModel ? (
+          <LinksTab model={linksModel} onViewRow={onViewRow} />
+        ) : (
+          <Placeholder
+            title="Linked values"
+            note="Dependency data is unavailable for this view."
+          />
+        )
       )}
       {tab === "reconcile" && (
         reconciliation ? (
@@ -938,6 +951,118 @@ function AuditEntry({ entry }: { entry: FlagsAuditEntry }) {
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+// ---------------------------------------------------------------------------
+// Links tab (Phase 5, LD-2) — the focused cell's depends-on / used-by.
+//
+// Trace decomposes a TOTAL top-down; Links shows what ONE cell reads and what feeds off
+// it (one hop each way) — two views of the same kind-blind dependency graph. Pure view
+// over `buildLinksModel`; clicking a line node jumps the grid to that row (onViewRow).
+// ---------------------------------------------------------------------------
+
+function LinksTab({ model, onViewRow }: { model: LinksModel; onViewRow?: (rowId: string) => void }) {
+  const { focus, isBound, dependsOn, usedBy } = model;
+  return (
+    <div className="p-4 font-sans text-xs text-foreground space-y-5">
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+          <Link2 size={13} className="text-blue-600 dark:text-blue-400" /> Focused value
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-foreground font-semibold">{focus.label}</span>
+          {focus.value != null && (
+            <span className="font-mono text-emerald-600 dark:text-emerald-400 shrink-0">{fmtUSD(focus.value)}</span>
+          )}
+        </div>
+        {isBound ? (
+          <p className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
+            Derived (read-only) — a linked value. It shows a live figure but does not add to the
+            estimate total (that would double-count its source).
+          </p>
+        ) : (
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Not a linked value — this cell holds its own number.
+          </p>
+        )}
+      </div>
+
+      <LinkSection
+        title="Depends on"
+        note="The values this cell reads to compute itself."
+        icon={<ArrowDownLeft size={13} className="text-blue-600 dark:text-blue-400" />}
+        refs={dependsOn}
+        emptyNote={isBound ? "No dependencies." : "Nothing — this cell is not linked."}
+        onViewRow={onViewRow}
+      />
+      <LinkSection
+        title="Used by"
+        note="The links that read this cell."
+        icon={<ArrowUpRight size={13} className="text-blue-600 dark:text-blue-400" />}
+        refs={usedBy}
+        emptyNote="Nothing feeds off this cell yet."
+        onViewRow={onViewRow}
+      />
+    </div>
+  );
+}
+
+function LinkSection({
+  title,
+  note,
+  icon,
+  refs,
+  emptyNote,
+  onViewRow,
+}: {
+  title: string;
+  note: string;
+  icon: React.ReactNode;
+  refs: LinkNodeRef[];
+  emptyNote: string;
+  onViewRow?: (rowId: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        {icon}
+        <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">{title}</span>
+        <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400">({refs.length})</span>
+      </div>
+      <p className="text-[11px] text-slate-500 dark:text-slate-400">{note}</p>
+      {refs.length === 0 ? (
+        <p className="text-[11px] text-slate-500 dark:text-slate-500 italic">{emptyNote}</p>
+      ) : (
+        <div className="space-y-1">
+          {refs.map((r) => (
+            <LinkRow key={r.nodeId} node={r} onViewRow={onViewRow} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkRow({ node, onViewRow }: { node: LinkNodeRef; onViewRow?: (rowId: string) => void }) {
+  const jumpable = !!node.rowId && !!onViewRow;
+  return (
+    <button
+      type="button"
+      onClick={() => { if (node.rowId && onViewRow) onViewRow(node.rowId); }}
+      disabled={!jumpable}
+      className="w-full flex items-center justify-between gap-3 rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-1.5 text-left hover:bg-card disabled:cursor-default cursor-pointer transition-colors"
+    >
+      <span className="min-w-0 truncate text-foreground">{node.label}</span>
+      <span className="flex items-center gap-2 shrink-0">
+        {node.value != null && (
+          <span className="font-mono text-slate-500 dark:text-slate-400">{fmtUSD(node.value)}</span>
+        )}
+        {jumpable && (
+          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">view</span>
+        )}
+      </span>
+    </button>
+  );
 }
 
 function Placeholder({ title, note }: { title: string; note: string }) {

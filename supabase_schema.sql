@@ -6,17 +6,17 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 20 (added catalog_cost_type_overrides — Template + Catalog
---   Reconciliation Phase 2)
+-- Tables: 21 (added estimate_bindings — Linked Values System Phase 3)
 -- RPC Functions: 4 (save_estimate_line_items, save_estimate,
 --   create_estimate_version, submit_estimate_version)
--- Trigger Functions: 7 (custom_step23_line_defs lifecycle guard + updated_at touch
+-- Trigger Functions: 8 (custom_step23_line_defs lifecycle guard + updated_at touch
 --   — Catalog Manager Phase 2; catalog_additions updated_at touch — Phase 6;
 --   estimate_versions freeze guard — Estimate Versioning; procore_cost_codes
 --   lifecycle guard + updated_at touch — Procore Cost Codes Phase 1;
---   catalog_cost_type_overrides updated_at touch — Reconciliation Phase 2)
--- RLS Policies: 38 (added catalog_cost_type_overrides SELECT/INSERT/UPDATE —
---   Reconciliation Phase 2)
+--   catalog_cost_type_overrides updated_at touch — Reconciliation Phase 2;
+--   estimate_bindings updated_at touch — Linked Values System Phase 3)
+-- RLS Policies: 39 (added estimate_bindings FOR ALL tenant policy —
+--   Linked Values System Phase 3)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -27,7 +27,16 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-12 (Template + Catalog Reconciliation Phase 2: new
+-- Last updated: 2026-06-15 (Linked Values System Phase 3: new estimate_bindings
+-- table — persisted authored bindings (lookups + rollups) for the Linked Values
+-- System, the generalization of the hardcoded 10 linked-division rows. MUTABLE
+-- (UPDATE/DELETE allowed, unlike append-only estimate_overrides; LD-3), one binding
+-- per (project_id, target_node_id). kind is FREE TEXT / no CHECK (open enum, mirrors
+-- estimate_overrides.field) so a future 'expression' kind needs zero schema change;
+-- the DB is blind to binding kind, the full rule lives in the definition JSONB.
+-- Single FOR ALL tenant policy mirroring estimate_line_items + an updated_at touch
+-- trigger. Stored binding values are never trusted — recomputed from source on load;
+-- export goldens unaffected. Earlier — Template + Catalog Reconciliation Phase 2: new
 -- catalog_cost_type_overrides table — the runtime cost-type override overlay
 -- for BUILT-IN STEP 4 catalog codes. Patches a built-in's costType (label only,
 -- moves no dollars) at the catalog chokepoint; survives template re-harvest.
@@ -1685,3 +1694,90 @@ CREATE TRIGGER catalog_cost_type_overrides_touch_updated_at_trg
   BEFORE UPDATE ON catalog_cost_type_overrides
   FOR EACH ROW
   EXECUTE FUNCTION touch_catalog_cost_type_overrides_updated_at();
+
+-- ─────────────────────────────────────────────────
+-- Table 19: estimate_bindings (Linked Values System — Phase 3)
+-- ─────────────────────────────────────────────────
+--
+-- Persisted authored bindings — the generalization of the hardcoded 10 linked-division
+-- rows (computeLinkedDivisionTotals) into the open binding model. A binding says "this
+-- node's value is COMPUTED from other nodes": a lookup (mirror one source node, optional
+-- ×multiply +add transform) or a rollup (sum/count/avg/min/max over the lines a SetRule
+-- predicate matches). Stored binding VALUES are never trusted — every binding is
+-- recomputed FROM SOURCE on load (consistent with the app's "stored derived values are
+-- cache" philosophy). The export tie-out goldens are unaffected: a binding changes HOW a
+-- value computes, not the export skeleton.
+--
+-- target_node_id: the stable node ID this binding computes (spec §2.2 — e.g.
+--   'line:<uuid>:total', 'gc:supervisionSubtotal'). One binding per
+--   (project_id, target_node_id).
+--
+-- kind: the binding kind — FREE TEXT, OPEN enum, NO CHECK (mirrors the
+--   estimate_overrides.field precedent) so a future kind (e.g. 'expression' →
+--   HyperFormula) needs ZERO schema change. The DB is BLIND to binding kind; the full
+--   rule lives in the definition JSONB and only the app's compileBinding narrows it
+--   (LD-4 — the load-bearing open-enum constraint, expressed at the DB layer).
+--
+-- definition: JSONB payload = { basis, rule } — the value's unit/dimension (Basis) plus
+--   the kind-specific rule (lookup source/transform | rollup op/set/field). target_node_id
+--   and kind are denormalized PROJECTIONS of this payload for the UNIQUE key and the
+--   open-enum-at-the-column-level; db.ts is the single writer and derives them from one
+--   Binding, so they cannot drift.
+--
+-- MUTABLE (unlike append-only estimate_overrides; LD-3): UPDATE/DELETE are allowed — a
+-- binding is edited in place or cleared. Written SEPARATELY from the atomic save_estimate
+-- line-item RPC, so a binding survives the line-item DELETE+INSERT.
+
+CREATE TABLE estimate_bindings (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  target_node_id TEXT NOT NULL,
+  kind           TEXT NOT NULL,              -- free text, OPEN enum (no CHECK; mirrors estimate_overrides.field)
+  definition     JSONB NOT NULL,             -- { basis, rule } — value basis + the kind-specific rule
+  created_by     UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, target_node_id)
+);
+-- The UNIQUE (project_id, target_node_id) btree backs the only hot query
+-- (WHERE project_id = ?, leftmost prefix) — no separate index needed.
+
+ALTER TABLE estimate_bindings ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped, MUTABLE: a single FOR ALL policy (SELECT/INSERT/UPDATE/DELETE) gated by
+-- the projects tenant-join — mirrors line_items_tenant_policy exactly (NOT the append-only
+-- override split). A real tenant predicate (not USING(true)), so it does not trip the
+-- rls_policy_always_true advisor.
+CREATE POLICY "estimate_bindings_tenant_policy" ON estimate_bindings
+  FOR ALL
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM projects
+    WHERE projects.id = estimate_bindings.project_id
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM projects
+    WHERE projects.id = estimate_bindings.project_id
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+-- updated_at touch (BEFORE UPDATE), mirroring the catalog_cost_type_overrides /
+-- catalog_additions pattern. SET search_path = '' pins schema resolution (only
+-- pg_catalog built-ins referenced) — keeps function_search_path_mutable clean.
+-- SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION touch_estimate_bindings_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER estimate_bindings_touch_updated_at_trg
+  BEFORE UPDATE ON estimate_bindings
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_estimate_bindings_updated_at();

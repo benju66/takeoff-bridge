@@ -14,10 +14,13 @@ import {
   computeTakeoffSummary,
   computeDivisionBreakdown,
   computeCostTypeBreakdown,
-  computeLinkedDivisionTotals,
 } from "@/lib/calculations";
+import {
+  computeLinkedDivisionTotalsViaEngine,
+  computeImportedLinkedDivisionTotalsViaEngine,
+} from "@/lib/bindings/registry";
 import { isLinkedDivisionRow } from "@/lib/constants";
-import { linkedTotalsFromRows, sectionTotalsFromLinked } from "@/lib/importEstimate";
+import { sectionTotalsFromLinked } from "@/lib/importEstimate";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
@@ -30,6 +33,7 @@ import { useTakeoffWorkbook } from "@/hooks/useTakeoffWorkbook";
 import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
+import { useEstimateBindings } from "@/hooks/useEstimateBindings";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
@@ -37,6 +41,7 @@ import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingSte
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
+import { DefineLinkPanel } from "@/components/workspace/DefineLinkPanel";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { ProjectSettingsStep } from "@/components/workspace/ProjectSettingsStep";
 import { ExportOverrideModal } from "@/components/workspace/ExportOverrideModal";
@@ -74,6 +79,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // is Phase 5 (this is the read+apply wiring only).
   const { activeOverrides, overrideRecords, refresh: refreshOverrides } = useEstimateOverrides(projectId, isLoaded);
 
+  // Linked Values Phase 4: persisted bindings (lookups/rollups). Owned here and passed
+  // into the workbook so SET_BINDING / CLEAR_BINDING share its undo history. `[]` =
+  // inert (no bound cells; summary + export untouched → goldens tie $0.00).
+  const { bindings, setBindings } = useEstimateBindings(projectId, isLoaded);
+
   // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
   const isNewEstimate = !projectEstimate;
@@ -100,7 +110,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
   // export handlers — gc-siteops Phase 3)
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides);
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,
@@ -121,7 +131,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     columnFilters,
     scrollToRowRef,
     selection,
+    boundRowIds, commitBinding, clearBindingForRow,
   } = workbook;
+
+  // Linked Values Phase 5: the "Define link…" authoring panel target (a row id) or null.
+  // Opened from the grid context menu; the panel writes through the workbook command path.
+  const [defineLinkRowId, setDefineLinkRowId] = React.useState<string | null>(null);
+  const defineLinkRow = defineLinkRowId ? rows.find((r) => r.id === defineLinkRowId) ?? null : null;
 
   // Step 4: Takeoff Summary
   // Amendment F: When a filter is active, summaries reflect only visible rows
@@ -140,19 +156,24 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // IMPORTED projects (finding G-2): a finished bid's GC/Site-Ops lump sums are
   // hand-authored and cannot be re-derived from staffing inputs, so the saved
   // linked-division rows ARE the authority — derive the linked totals from those
-  // rows (linkedTotalsFromRows) instead of recomputing from STEP 2/3. This is
-  // what lets a reopened import still tie to the cent.
+  // rows instead of recomputing from STEP 2/3. This is what lets a reopened import
+  // still tie to the cent.
+  //
+  // Both branches now flow through the Linked Values binding engine (registry.ts) as
+  // a drop-in: app-born = 10 lookups into the STEP 2/3 source nodes; imported = the
+  // linked nodes are CONSTANTS from the saved rows (never STEP 2/3 lookups — §6). The
+  // numbers are identical to the legacy bridge (proven in bindingRegistry.test.ts).
   const linkedDivisionTotals = React.useMemo(
     () => project?.isImported
-      ? linkedTotalsFromRows(rows)
-      : computeLinkedDivisionTotals(personnel.calcResult, infrastructure.calcResult),
+      ? computeImportedLinkedDivisionTotalsViaEngine(rows)
+      : computeLinkedDivisionTotalsViaEngine(personnel.calcResult, infrastructure.calcResult),
     [project?.isImported, rows, personnel.calcResult, infrastructure.calcResult]
   );
 
   // Stray typed dollars on linked rows count nowhere (trap closure) — surface
   // them in the EstimateTable banner instead of silently dropping. For an
   // imported project those typed dollars are the AUTHORITATIVE linked statics
-  // (counted via linkedTotalsFromRows above), not stray, so none are flagged.
+  // (counted via the imported engine branch above), not stray, so none are flagged.
   const strayLinkedRows = React.useMemo(
     () =>
       project?.isImported
@@ -249,8 +270,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // derived from the saved linked rows — personnel.totalGCs / infrastructure
   // .siteOperationsTotal are PARAMETRIC DEFAULTS for imports, and persisting
   // them would overwrite the as-imported totals on the first workspace edit.
-  // Derives from the linkedDivisionTotals memo above (for imported projects it
-  // IS linkedTotalsFromRows(rows)) — no second walk of the row set.
+  // Derives from the linkedDivisionTotals memo above (for imported projects that
+  // memo is the engine's saved-row constants) — no second walk of the row set.
   const importedSectionTotals = React.useMemo(
     () => (project?.isImported ? sectionTotalsFromLinked(linkedDivisionTotals) : null),
     [project?.isImported, linkedDivisionTotals]
@@ -558,6 +579,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
+            bindings={bindings}
+            gcCalcResult={personnel.calcResult}
+            siteOpsCalcResult={infrastructure.calcResult}
             reconciliation={reconciliation}
             overrideRecords={overrideRecords}
             isFiltered={isFiltered}
@@ -619,14 +643,35 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       <ErrorBoundary>
         <ContextMenuPortal
           contextMenu={contextMenu}
-          rows={rows}
+          // filteredRows so the menu's rowIndex (a filtered-model position) resolves to
+          // the correct row under an active grid filter (identical to rows when unfiltered).
+          rows={filteredRows}
           lockedCells={lockedCells}
+          boundRowIds={boundRowIds}
           onToggleCellLock={handleToggleCellLock}
           onInsertRow={insertManualRow}
           onDeleteRow={deleteRow}
+          onDefineLink={setDefineLinkRowId}
           onDismiss={() => setContextMenu((prev) => ({ ...prev, visible: false }))}
         />
       </ErrorBoundary>
+
+      {/* Linked Values "Define link…" authoring panel (Phase 5). Writes through the
+          workbook command path (commitBinding / clearBindingForRow) — undoable. */}
+      {defineLinkRow && (
+        <ErrorBoundary>
+          <DefineLinkPanel
+            targetRow={defineLinkRow}
+            rows={rows}
+            bindings={bindings}
+            gc={personnel.calcResult}
+            siteOps={infrastructure.calcResult}
+            onCommit={commitBinding}
+            onClear={clearBindingForRow}
+            onClose={() => setDefineLinkRowId(null)}
+          />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }
