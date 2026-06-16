@@ -17,7 +17,7 @@ import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/l
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
-import { buildFlagsModel, buildLinksModel, focusFieldToNodeId } from "@/lib/trustInspector";
+import { buildFlagsModel } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
@@ -207,6 +207,16 @@ interface EstimateTableProps {
   cancelImport: () => void;
   reParseWithSheet: (sheetName: string) => Promise<void>;
   handleProjectParamChange?: (field: string, value: string | number) => void;
+
+  /**
+   * Cross-step Links request (Bucket B Phase 5). When a GC (STEP 2) / Site-Ops (STEP 3)
+   * EngineLinkBadge is clicked, the page coordinator navigates here and passes the focused
+   * engine node id. The `seq` bumps per request so a repeat click on the same node still
+   * reopens the inspector. `onInspectConsumed` clears it once handled (one-shot). When STEP 4
+   * is already mounted, EstimateTable's own `tb:inspect-binding` listener handles it instead.
+   */
+  pendingInspect?: { nodeId: string; seq: number } | null;
+  onInspectConsumed?: () => void;
 }
 
 export function EstimateTable({
@@ -260,6 +270,8 @@ export function EstimateTable({
   cancelImport,
   reParseWithSheet,
   handleProjectParamChange,
+  pendingInspect,
+  onInspectConsumed,
 }: EstimateTableProps) {
   const {
     subtotal,
@@ -307,33 +319,31 @@ export function EstimateTable({
   // Phase 5: the grid's 🔗 binding badge dispatches "tb:inspect-binding" to open Trust on
   // the Links tab focused on that cell's total node — decoupled from the cell renderer
   // (which lives in the workbook hook), same pattern as the header's "toggle-sidebar".
+  // Bucket B Phase 5 widens it to a raw engine `nodeId` (the GC/Site-Ops EngineLinkBadge,
+  // when STEP 4 is already mounted) in addition to the grid's `rowId` → line:<id>:total.
   useEffect(() => {
     const onInspect = (e: Event) => {
-      const detail = (e as CustomEvent<{ rowId: string }>).detail;
-      if (detail?.rowId) openTrust(lineFieldNodeId(detail.rowId, "total"), "links");
+      const detail = (e as CustomEvent<{ rowId?: string; nodeId?: string }>).detail;
+      if (detail?.nodeId) openTrust(detail.nodeId, "links");
+      else if (detail?.rowId) openTrust(lineFieldNodeId(detail.rowId, "total"), "links");
     };
     window.addEventListener("tb:inspect-binding", onInspect);
     return () => window.removeEventListener("tb:inspect-binding", onInspect);
   }, [openTrust]);
 
-  // Links view-model (Phase 5) for the focused node — the depends-on / used-by the Links
-  // tab renders, INCLUDING the read-only engine wiring (summary:* + cross-page nodes) via
-  // the opt-in fold. Built only while the inspector is open (gated on trustOpen) so the
-  // closed/idle grid path stays cheap; undefined when closed.
-  const linksModel = useMemo(
-    () =>
-      trustOpen
-        ? buildLinksModel({
-            focusNodeId: focusFieldToNodeId(trustField),
-            bindings,
-            gc: gcCalcResult,
-            siteOps: siteOpsCalcResult,
-            rows,
-            summary: takeoffSummary,
-          })
-        : undefined,
-    [trustOpen, trustField, bindings, gcCalcResult, siteOpsCalcResult, rows, takeoffSummary]
-  );
+  // Bucket B Phase 5 — cross-step Links request: when a GC/Site-Ops badge was clicked on
+  // another step, the page coordinator mounted us (STEP 4) and passed the focused engine
+  // node. Open the Links tab on it, then notify the parent to clear the one-shot request.
+  useEffect(() => {
+    if (pendingInspect?.nodeId) {
+      openTrust(pendingInspect.nodeId, "links");
+      onInspectConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingInspect?.seq]);
+
+  // The Links view-model is now built INSIDE the Trust Inspector (from the raw inputs below),
+  // so it can re-focus on any node as the user walks the graph without a round-trip here.
 
   // [view rows] — clear any active filter so all contributing takeoff rows are
   // visible, then scroll the grid to the top. Reuses globalFilter + scrollToRowRef.
@@ -1211,7 +1221,10 @@ export function EstimateTable({
         takeoffRowCount={takeoffRowCount}
         reconciliation={reconciliation}
         flagsModel={flagsModel}
-        linksModel={linksModel}
+        bindings={bindings}
+        gc={gcCalcResult}
+        siteOps={siteOpsCalcResult}
+        rows={rows}
         onViewRow={handleViewRow}
         onAssignCode={handleAssignCode}
         onViewTakeoffRows={handleViewTakeoffRows}

@@ -23,6 +23,7 @@ import {
   GC_GRAND_TOTAL_NODE_ID,
   GC_SUPERVISION_NODE_ID,
   SITEOPS_GRAND_TOTAL_NODE_ID,
+  divisionTotalNodeId,
   gcLeafNodeId,
   gcSubtotalNodeId,
   siteOpsLeafNodeId,
@@ -31,6 +32,7 @@ import {
   summaryNodeId,
   type SummaryNodeField,
 } from "../bindings/types";
+import { lineFieldNodeId } from "../bindings/compile";
 import { SITE_OPS_MANUAL_DEFAULTS, SUPERVISION_STAFF_CODES } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -304,5 +306,52 @@ describe("buildLinksModel - Site-Ops tree traversal (Phase 4, summary supplied)"
     );
     // 02-4100.001 demolition = qty 500 × rate 6 = 3000; 02-4100.002 sawcutting (lumpSum) = 950.
     expect(model.focus.value).toBeCloseTo(3950, 8);
+  });
+});
+
+describe("buildLinksModel — division rollup traversal (Phase 5, the line → division path trail)", () => {
+  // takeoffRows[0] is the Drywall line (09-2100.001); takeoffRows[1] is Concrete (03-3000.001).
+  const drywall = takeoffRows[0];
+  const concrete = takeoffRows[1];
+
+  it("a STEP 4 line total is USED BY its division rollup", () => {
+    const model = buildLinksModel({
+      focusNodeId: lineFieldNodeId(drywall.id, "total"),
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.usedBy.map((u) => u.nodeId)).toContain(divisionTotalNodeId("09"));
+  });
+
+  it("a division rollup DEPENDS ON its member line totals and echoes their Σ", () => {
+    const model = buildLinksModel({
+      focusNodeId: divisionTotalNodeId("09"),
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.isDerived).toBe(true); // a read-only engine rollup
+    expect(model.dependsOn.map((d) => d.nodeId)).toContain(lineFieldNodeId(drywall.id, "total"));
+    // 09 contains only the Drywall takeoff row here → its total echoes that row's total.
+    expect(model.focus.value).toBeCloseTo(drywall.total, 6);
+    // labelled as a Division via the shared node labeller, not the raw id.
+    expect(model.focus.label).toContain("Division 09");
+  });
+
+  it("division 03 reads the Concrete line total", () => {
+    const model = buildLinksModel({
+      focusNodeId: divisionTotalNodeId("03"),
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.dependsOn.map((d) => d.nodeId)).toContain(lineFieldNodeId(concrete.id, "total"));
   });
 });

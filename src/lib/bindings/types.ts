@@ -297,6 +297,29 @@ export function siteOpsLeafNodeId(
 }
 
 // ---------------------------------------------------------------------------
+// Division (STEP 4) node-ID scheme — the Bucket B Phase 5 division rollup tier
+// ---------------------------------------------------------------------------
+
+/**
+ * The `division:` node-ID prefix (a STEP 4 division rollup). Declared in this leaf module
+ * — like the `gc:*` / `siteops:*` IDs above — so engineGraph.ts (the Bucket B Phase 5
+ * division tier) and registry.ts (the `describeSourceNode` labeller) reference one
+ * definition without an import cycle.
+ */
+export const DIVISION_NODE_PREFIX = "division:";
+
+/**
+ * Stable node ID for a STEP 4 division rollup total: `division:<NN>:total` (e.g.
+ * `division:09:total`). The `<NN>` is the 2-digit CSI division from `getDivisionCode`
+ * (src/lib/division.ts) — never a cell position. The Phase 5 `division` echo tier emits one
+ * such node per present division; it ECHOES the Σ of its member lines' `line:<id>:total`
+ * source nodes (REUSING those canonical ids as edges — no duplicate leaves).
+ */
+export function divisionTotalNodeId(code: string): string {
+  return `${DIVISION_NODE_PREFIX}${code}:total`;
+}
+
+// ---------------------------------------------------------------------------
 // Graph node — the ONLY shape the kind-blind graph engine understands (spec §2.1)
 // ---------------------------------------------------------------------------
 

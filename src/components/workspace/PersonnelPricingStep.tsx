@@ -7,6 +7,8 @@ import {
   EQUIPMENT_DEFAULTS,
   GC_MANUAL_DEFAULTS,
 } from "@/lib/constants";
+import { GC_GRAND_TOTAL_NODE_ID, gcLeafNodeId } from "@/lib/bindings/types";
+import { EngineLinkBadge } from "./EngineLinkBadge";
 
 // ---------------------------------------------------------------------------
 // PersonnelPricingStep — Step 2 Panel
@@ -122,7 +124,10 @@ export function PersonnelPricingStep({
             </div>
           </td>
           <td className={qtyCellClass}>—</td>
-          <td className={totalCellClass}>{fmt(line?.total ?? 0)}</td>
+          <td className={totalCellClass}>
+            {fmt(line?.total ?? 0)}
+            <EngineLinkBadge nodeId={gcLeafNodeId("manual", cfg.code, "total")} label={cfg.label} />
+          </td>
         </tr>
       );
     });
@@ -138,7 +143,10 @@ export function PersonnelPricingStep({
           <td className={rateCellClass}>${cfg.rate.toFixed(2)}</td>
           <td className={autoCellClass}>auto</td>
           <td className={qtyCellClass}>{(line?.qty ?? 0).toFixed(2)} {cfg.unit}</td>
-          <td className={totalCellClass}>{fmt(line?.total ?? 0)}</td>
+          <td className={totalCellClass}>
+            {fmt(line?.total ?? 0)}
+            <EngineLinkBadge nodeId={gcLeafNodeId("ops", cfg.code, "total")} label={cfg.description} />
+          </td>
         </tr>
       );
     });
@@ -222,7 +230,10 @@ export function PersonnelPricingStep({
                     </div>
                   </td>
                   <td className={qtyCellClass}>{line.qty.toFixed(1)} hrs</td>
-                  <td className={totalCellClass}>{fmt(line.total)}</td>
+                  <td className={totalCellClass}>
+                    {fmt(line.total)}
+                    <EngineLinkBadge nodeId={gcLeafNodeId("staff", row.code, "total")} label={row.role} />
+                  </td>
                 </tr>
               );
             })}
@@ -254,7 +265,10 @@ export function PersonnelPricingStep({
                     </div>
                   </td>
                   <td className={qtyCellClass}>—</td>
-                  <td className={totalCellClass}>{fmt(val)}</td>
+                  <td className={totalCellClass}>
+                    {fmt(val)}
+                    <EngineLinkBadge nodeId={gcLeafNodeId("equipment", eq.code, "total")} label={eq.label} />
+                  </td>
                 </tr>
               );
             })}
@@ -277,6 +291,7 @@ export function PersonnelPricingStep({
               <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-600 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 01 General Conditions Cost</td>
               <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
                 {fmt(totalGCs)}
+                <EngineLinkBadge nodeId={GC_GRAND_TOTAL_NODE_ID} label="Personnel grand total" />
               </td>
             </tr>
           </tbody>
