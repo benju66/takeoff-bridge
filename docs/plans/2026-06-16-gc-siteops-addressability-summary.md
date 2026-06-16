@@ -1,5 +1,9 @@
 # GC / Site-Ops Addressability & Grid Convergence — Summary & Direction
-_2026-06-16 · status: DIRECTION SET, plan not yet written_
+_2026-06-16 · status: DIRECTION LOCKED (decisions D1–D4 settled), plan not yet written_
+
+> **Direction:** a **structured-first uniform grid with a validated free-form escape
+> hatch** — Steps 2/3 match `EstimateTable`, but structure (clean exports, comparable
+> jobs, protected calc IP) is preserved. See locked decisions D1–D4 in §3.
 
 > This is a **decision + scoping summary**, not a phased plan of record. It captures
 > the problem, the current ground truth, the architect's chosen end-state, and the
@@ -74,19 +78,37 @@ that can be a binding *target* and a rollup *member*, not just a read-only aggre
 
 ## 3. The chosen end-state (architect's direction, 2026-06-16)
 
-> **Supersedes** the earlier "fixed-catalog-but-addressable" recommendation in chat.
+> **Direction settled via architect interview, 2026-06-16.** This supersedes both the
+> earlier "fixed-catalog-but-addressable" chat recommendation **and** the first-draft
+> "free-form everything" framing of this doc. The agreed goal is narrower and safer:
+> **a structured-first uniform grid with a *validated* free-form escape hatch.**
 
-**Free-form everything.** Steps 2 and 3 should eventually become **full TanStack
-tables whose functionality and UI match `EstimateTable`** — including:
-- arbitrary row **insert / delete** (context-menu, like Step 4's manual rows),
-- per-cell **editing, keyboard nav, copy/paste**, cell **locks**,
-- **undo/redo** through the same `WorkbookCommand` history,
-- **provenance glyphs**, **override ⚑ flags**, and **🔗 binding badges**,
-- the **Trust Inspector** trace working over these lines like any other.
+Steps 2 and 3 should become **full TanStack tables whose functionality and UI match
+`EstimateTable`** — one uniform spreadsheet surface end to end (insert/delete, per-cell
+editing, keyboard nav, copy/paste, cell locks, undo/redo via `WorkbookCommand`,
+provenance glyphs, override ⚑ flags, 🔗 binding badges, Trust Inspector trace). The
+estimate stops having three different kinds of page.
 
-In other words, the estimate stops having three different kinds of page and becomes
-**one uniform spreadsheet surface** end to end. The fixed catalog becomes seed/default
-content, not a hard ceiling.
+But "uniform grid" does **not** mean "anything goes." The structure that makes the app
+worth more than Excel — clean exports, comparable jobs, protected estimating IP — is
+preserved by the four locked decisions below.
+
+### Locked decisions (architect, 2026-06-16)
+
+| # | Decision | What it means |
+|---|---|---|
+| **D1** | **One-off lines must carry a valid Procore code before export.** | The escape hatch is *structured*: an estimator can add a line that isn't in the catalog, but it must resolve to a valid `procore_cost_codes` entry (with a cost type) before it counts in the export — exactly the discipline Step 4 manual rows already enforce. Keeps exports clean and jobs comparable. |
+| **D2** | **Standard catalog lines are removable and easily re-added.** | The fixed catalog (`STAFF_ROLE_DEFAULTS`, `GC_MANUAL_DEFAULTS`, `EQUIPMENT_DEFAULTS`, `SITE_OPS_MANUAL_DEFAULTS`) becomes a **helpful default, not a forced checklist**: estimators can hide/remove lines that don't apply on a job and pull standard lines back from a picker anytime. |
+| **D3** | **Auto-calculated rows allow type-over, recorded as an audited override.** | The staffing / linked rows still compute from inputs (utilization, rates, duration) and stay the default, but an estimator **may type a number over the computed result**. The app keeps the computed value, layers the manual value on top, and records it via the append-only `estimate_overrides` audit model (the Trust Inspector glass box shows both). |
+| **D4** | **Imported past bids stay a locked historical record; reuse = "copy to new."** | An imported bid remains frozen (its hand-authored GC/Site-Ops values are never re-derived). To reuse one, the estimator makes a copy that becomes a fresh editable estimate. Protects the historical data asset. |
+
+**Scope consequence of D3 — read this:** allowing type-over pulls the **override-audit
+trail into core scope**, not "eventual parity." Good news: this is *not* new
+architecture — `estimate_overrides` already does exactly this for summary fields
+(append-only, keeps computed + manual side by side, shown in the Trust Inspector). It
+just has to cover GC/Site-Ops lines once they are addressable (D-dependent on Track A).
+It also preserves recompute-from-source: an un-overridden row still derives live; an
+overridden row derives live *underneath* a visible manual layer.
 
 ---
 
@@ -110,20 +132,28 @@ are *derived* (utilization × rate × hours × months; qty × rate). The app's l
 derived values are cache). So Track A gives the *computed nodes stable IDs while keeping
 them derived* — it must not freeze a dollar that should move when a rate card changes.
 
-### Track B — Free-form TanStack convergence (the UI/UX rebuild)
-Once the data model is addressable and proven, rebuild Steps 2 and 3 as TanStack tables
-matching `EstimateTable`, and lift the fixed catalog into seed content so the estimator
-can insert/delete arbitrary lines. Because Track A already proved the engine, Track B
-carries little financial risk — it's mostly grid wiring and reuse of existing Step 4
-components.
+### Track A+ — Override-with-audit on calc rows (pulled into core by D3)
+Decision **D3** (type-over allowed on auto-calculated rows) makes this a *required* part
+of the core, riding directly on Track A's addressability. Once each calc row has a stable
+ID, an estimator type-over writes an append-only `estimate_overrides` record against that
+row's node; the computed value is retained and both are shown in the Trust Inspector.
+This reuses an existing, proven mechanism — no new audit architecture — and preserves
+recompute-from-source (the row still derives live underneath the manual layer).
 
-**Going free-form forces three real decisions** (deferred to the plan, flagged here):
-1. **Export mapping** currently leans on the fixed catalog (every line has a known
-   `code`/`procoreCode`). Free-form lines need a code-assignment + validation path
-   (likely the same Procore-cost-code authority Step 4 uses).
+### Track B — Structured-first TanStack convergence (the UI/UX rebuild)
+Once the data model is addressable and proven, rebuild Steps 2 and 3 as TanStack tables
+matching `EstimateTable`, with the fixed catalog as **removable/re-addable seed content**
+(D2) and a **validated escape hatch** for one-off lines (D1). Because Track A already
+proved the engine, Track B carries little financial risk — it's mostly grid wiring and
+reuse of existing Step 4 components.
+
+**The escape hatch forces three real decisions** (deferred to the plan, flagged here):
+1. **Export mapping / code assignment (D1).** One-off lines must resolve to a valid
+   `procore_cost_codes` entry before export — reuse the same Procore-cost-code authority
+   and validation Step 4 manual rows already use; an uncoded line is blocked from export.
 2. **Calc engine shape.** `computePersonnelCosts` / `computeSiteOperations` derive a
-   *fixed* set of lines from inputs. Free-form means the engine must compute over a
-   *variable* line set — a real refactor of those two functions (kept pure).
+   *fixed* set of lines from inputs. A removable/extensible line set means the engine must
+   compute over a *variable* line set — a real refactor of those two functions (kept pure).
 3. **Row-id stability vs. churn** for inserted lines, mirroring Step 4's
    `isStableBindingRowId` rule (only DB-UUID rows are bindable).
 
@@ -160,58 +190,78 @@ components.
 
 ---
 
-## 7. Open decisions for the plan to settle (not yet decided)
+## 7. Decision status
 
+**Product decisions — SETTLED** (architect interview, 2026-06-16): the four locked
+decisions D1–D4 in §3 close every product/domain question. No further architect input is
+required to begin planning.
+
+**Implementation decisions — the planner's to make** (not architect-facing):
 1. **Storage model for addressable GC/Site-Ops lines** — extend `estimate_line_items`
    with a section/origin discriminator, or a **new dedicated table** per step? (Trade:
    reuse the proven RPC + sort-order machinery vs. clean separation from takeoff lines.)
 2. **Migration strategy** — backfill blobs → rows lazily on first load, or a one-shot
-   migration RPC? (Trade: zero-downtime drip vs. clean cutover.)
+   migration RPC? Default: **invisible/lossless** to the estimator either way.
 3. **How much of `EstimateTable` is extracted vs. duplicated** for Steps 2/3 — factor
    out a shared grid, or instantiate `EstimateTable` with a section-scoped row set?
-4. **Free-form code assignment UX** — how an estimator picks/validates a Procore code
-   for a brand-new GC/Site-Ops line.
-5. **Calc engine refactor boundary** — how `computePersonnelCosts` /
+4. **Calc engine refactor boundary** — how `computePersonnelCosts` /
    `computeSiteOperations` move from fixed-set to variable-set while staying pure and
    reproducing current totals exactly.
 
+**Open roadmap question — non-blocking** (does not affect this doc; decide at plan time):
+**sequencing** — does this GC/Site-Ops workstream run immediately after the
+addressability/Linked-Values track, or do the cold-start "estimator speed" features
+(assemblies, smarter classification) come first?
+
 ---
 
-## 8. `/ultraplan` prompt (paste into a fresh session when ready)
+## 8. Planning kickoff prompt (paste into a fresh session when ready)
 
-> **Use `/ultraplan` to produce the full multi-phase plan-of-record for "GC/Site-Ops
-> Addressability & Grid Convergence."** Read this summary first:
-> `docs/plans/2026-06-16-gc-siteops-addressability-summary.md`, and the Linked Values
-> plan it extends: `docs/plans/2026-06-15-linked-values-system.md` (honor decision LD-1
-> and the kind-blind-graph constraint LD-4).
+> Works with **`/plan-phases`** (recommended — see §9) or `/ultraplan` for a deeper pass.
+> **Produce the full multi-phase plan-of-record for "GC/Site-Ops Addressability & Grid
+> Convergence."** Read this summary first:
+> `docs/plans/2026-06-16-gc-siteops-addressability-summary.md` (especially the locked
+> decisions D1–D4 in §3), and the Linked Values plan it extends:
+> `docs/plans/2026-06-15-linked-values-system.md` (honor decision LD-1 and the
+> kind-blind-graph constraint LD-4).
 >
 > **Goal:** make Step 2 (GC Personnel) and Step 3 (Site Operations) values first-class
-> addressable lines, then converge both pages onto **free-form TanStack tables whose
-> functionality and UI match `EstimateTable`** — uniform spreadsheet surface end to end,
-> with the fixed catalog (`STAFF_ROLE_DEFAULTS`, `GC_MANUAL_DEFAULTS`,
-> `EQUIPMENT_DEFAULTS`, `SITE_OPS_MANUAL_DEFAULTS`) demoted to seed/default content the
-> estimator can insert into and delete from.
+> addressable lines, then converge both pages onto a **structured-first uniform grid that
+> matches `EstimateTable`'s functionality and UI, with a *validated* free-form escape
+> hatch** — NOT free-form-everything. The fixed catalog (`STAFF_ROLE_DEFAULTS`,
+> `GC_MANUAL_DEFAULTS`, `EQUIPMENT_DEFAULTS`, `SITE_OPS_MANUAL_DEFAULTS`) becomes
+> removable/re-addable seed content (D2), one-off lines require a valid Procore code
+> before export (D1), auto-calc rows allow audited type-over (D3), and imported past bids
+> stay locked/"copy-to-new" (D4).
 >
-> **Structure the plan as two decoupled tracks:**
+> **The four locked decisions are settled — do NOT re-litigate them; design to them.**
+> The planning skill's "surface decisions" step should cover only the *implementation*
+> choices below, not the product decisions.
+>
+> **Structure the plan as two decoupled tracks plus the D3 bridge:**
 > - **Track A — Addressability (financial-risk-bearing).** Give every GC/Site-Ops value
 >   a stable ID and surface each line as a `BindingLine` (binding target + rollup
 >   member), behind the *existing forms*, with strangler-fig dual-read/dual-write and a
 >   **"reproduce every total to the cent, zero export-golden movement"** gate on every
 >   phase. Give computed nodes stable IDs but keep them **DERIVED** (recompute-from-source;
 >   `calculations.ts` stays the sole financial authority — never freeze dollars).
-> - **Track B — Free-form TanStack convergence (low financial risk).** Rebuild Steps 2/3
->   as TanStack tables reusing `EstimateTable` machinery (insert/delete, locks, undo/redo
->   via `WorkbookCommand`, provenance glyphs, override ⚑, 🔗 binding badges, Trust
->   Inspector). Wire GC/Site-Ops edits into the **command history** and the **append-only
->   `estimate_overrides`** audit model — neither exists on these pages today.
+> - **Track A+ — Override-with-audit on calc rows (D3, core not optional).** Once rows are
+>   addressable, wire type-over to append-only `estimate_overrides` (computed value
+>   retained, both shown in Trust Inspector). Reuse the existing summary-override
+>   mechanism — no new audit architecture.
+> - **Track B — Structured-first TanStack convergence (low financial risk).** Rebuild
+>   Steps 2/3 as TanStack tables reusing `EstimateTable` machinery (insert/delete, locks,
+>   undo/redo via `WorkbookCommand`, provenance glyphs, override ⚑, 🔗 binding badges,
+>   Trust Inspector), with removable/re-addable catalog seed (D2) and the validated
+>   escape hatch (D1). Wire GC/Site-Ops edits into the **command history** — it does not
+>   exist on these pages today.
 >
-> **Settle these open decisions first (Step 2 of the planning skill), one
+> **Settle these IMPLEMENTATION decisions first (planning-skill Step 2), one
 > recommendation each:** (1) storage model — extend `estimate_line_items` with a section
 > discriminator vs. a new per-step table; (2) backfill — lazy-on-load vs. one-shot
-> migration RPC; (3) shared-grid extraction vs. `EstimateTable` re-instantiation;
-> (4) free-form Procore-code assignment + validation UX (reuse the `procore_cost_codes`
-> authority); (5) the `computePersonnelCosts` / `computeSiteOperations` fixed-set →
-> variable-set refactor boundary, kept pure.
+> migration RPC (default invisible/lossless); (3) shared-grid extraction vs.
+> `EstimateTable` re-instantiation; (4) the `computePersonnelCosts` /
+> `computeSiteOperations` fixed-set → variable-set refactor boundary, kept pure.
 >
 > **Hard constraints:** all DB access via `src/lib/db.ts`; DDL behind the schema gate
 > (`supabase_schema.sql` first, show exact SQL, **stop for approval**) with **backfill of
@@ -221,3 +271,24 @@ components.
 > provenance + `getDivisionCode()` rules. Each phase sized for one fresh session, with
 > `npm run test` green + `npx tsc --noEmit` clean + a `/handoff` doc as exit criteria.
 > Branch the workstream per AGENTS.md LD-5 convention; do not build on `main`.
+
+---
+
+## 9. Advice: `/plan-phases` vs `/ultraplan` for this workstream
+
+**`/plan-phases` is adequate — recommended as the primary tool.** This workstream is
+large but it is *not* under-specified: the product decisions are settled (D1–D4), it
+decomposes cleanly into Track A / A+ / B, and each track breaks into one-session phases
+with obvious approval gates (the schema DDL) and a sharp, testable exit bar ("to the
+cent, zero golden movement"). That is exactly the shape `/plan-phases` is built for, and
+it already enforces the investigate → surface-decisions → phased-plan flow this needs.
+
+**Where a deeper `/ultraplan` pass would add value — optional, and only here:** the two
+genuinely hard *design* problems are (a) the **storage model + lossless backfill** of
+every saved project off the legacy blob keys, and (b) the **calc-engine fixed-set →
+variable-set refactor** that must reproduce every total exactly. If you want maximum-rigor
+exploration of alternatives and failure modes, point the heavier planning pass at *those
+two sub-problems specifically* — not the whole workstream.
+
+**Bottom line:** plan the workstream with `/plan-phases`; reserve `/ultraplan` (if used at
+all) for a focused deep-dive on the storage/backfill and calc-refactor phases.
