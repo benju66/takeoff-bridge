@@ -72,9 +72,10 @@ test.describe("Linked Values Bucket B Phase 2 - open the Links tab from a summar
       await expect(inspector.getByText("Depends on", { exact: true })).toBeVisible();
 
       // The engine descriptor wires subtotal <- takeoffSubtotal + linkedDivisionsTotal.
-      // describeSourceNode labels them "Summary . <field>", so both names appear.
-      await expect(inspector.getByText("takeoffSubtotal", { exact: false }).first()).toBeVisible();
-      await expect(inspector.getByText("linkedDivisionsTotal", { exact: false }).first()).toBeVisible();
+      // describeSourceNode labels them with friendly names ("Summary . Takeoff subtotal" /
+      // "Summary . Linked divisions total"), so both appear.
+      await expect(inspector.getByText("Takeoff subtotal", { exact: false }).first()).toBeVisible();
+      await expect(inspector.getByText("Linked divisions", { exact: false }).first()).toBeVisible();
     } finally {
       // ---- Cleanup: delete the scratch project -------------------------------
       await page.goto("/projects");

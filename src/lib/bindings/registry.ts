@@ -35,6 +35,7 @@ import {
 } from "./types";
 import {
   DIVISION_NAMES,
+  ESTIMATE_MODIFIERS,
   EQUIPMENT_DEFAULTS,
   GC_MANUAL_DEFAULTS,
   LINKED_DIVISION_ROWS,
@@ -518,8 +519,8 @@ const GC_SUBTOTAL_LABELS: Record<string, string> = {
 /**
  * GC leaf-line criterion code → its template label, harvested from the four
  * `PersonnelCalcResult` source arrays (Bucket B Phase 3). Lets the Links view read a GC
- * leaf node (`gc:<group>:<code>:<field>`) as e.g. "STEP 2 · Project Executive (rate)"
- * instead of the raw id. Codes are unique within a group; cross-group reuse is harmless.
+ * leaf node (`gc:<group>:<code>:<field>`) as e.g. "STEP 2 · 01-0310.001 · Project Executive
+ * (rate)" instead of the raw id. Codes are unique within a group; cross-group reuse is harmless.
  */
 const GC_LEAF_LABELS: Record<string, string> = (() => {
   const m: Record<string, string> = {};
@@ -541,9 +542,9 @@ const SITE_OPS_AGGREGATE_LABELS: Record<string, string> = {
 /**
  * Site-Ops leaf-line criterion code → its template label, harvested from the two
  * `SITE_OPS_*_DEFAULTS` source arrays (Bucket B Phase 4). Lets the Links view read a
- * Site-Ops leaf node (`siteops:<group>:<code>:<field>`) as e.g. "STEP 3 · Demolition
- * (rate)" instead of the raw id. Codes are unique within a group; cross-group reuse is
- * harmless.
+ * Site-Ops leaf node (`siteops:<group>:<code>:<field>`) as e.g. "STEP 3 · 02-4100.001 ·
+ * Demolition (rate)" instead of the raw id. Codes are unique within a group; cross-group
+ * reuse is harmless.
  */
 const SITE_OPS_LEAF_LABELS: Record<string, string> = (() => {
   const m: Record<string, string> = {};
@@ -551,6 +552,23 @@ const SITE_OPS_LEAF_LABELS: Record<string, string> = (() => {
   for (const cfg of SITE_OPS_MANUAL_DEFAULTS) m[cfg.code] = cfg.label;
   return m;
 })();
+
+/**
+ * Friendly labels for the 13 `summary:<field>` nodes (Bucket B), so the Links view reads a
+ * STEP 4 summary value as e.g. "Summary · 60-4000.001 · Fee" or "Summary · Cost / SF" instead
+ * of the raw internal field key. The 7 modifiers reuse `ESTIMATE_MODIFIERS` (label + STEP 4
+ * code, drift-free); the computed rollups (subtotal / total / cost-per-metric) carry no single
+ * cost code, so they show their friendly name only.
+ */
+const SUMMARY_FIELD_LABELS: Record<string, string> = {
+  takeoffSubtotal: "Takeoff subtotal",
+  linkedDivisionsTotal: "Linked divisions total",
+  subtotal: "Subtotal",
+  totalEstimatedCost: "Total Estimated Cost",
+  costPerSf: "Cost / SF",
+  costPerUnit: "Cost / Unit",
+  ...Object.fromEntries(ESTIMATE_MODIFIERS.map((m) => [m.key, `${m.code} · ${m.label}`])),
+};
 
 /** A node resolved to a display label, with the line's rowId when it is a line node (for click-to-jump). */
 export interface NodeLabel {
@@ -577,11 +595,13 @@ export function describeSourceNode(
     const rest = nodeId.slice("gc:".length);
     // Group subtotal: gc:<group>Subtotal.
     if (GC_SUBTOTAL_LABELS[rest]) return { label: `STEP 2 · ${GC_SUBTOTAL_LABELS[rest]}` };
-    // Leaf line: gc:<group>:<code>:<field> (code carries no colon).
+    // Leaf line: gc:<group>:<code>:<field> (code carries no colon). Show the criterion code
+    // AND its name (the same code the STEP 2 grid's Code column shows).
     const parts = rest.split(":");
     if (parts.length === 3) {
       const [, code, field] = parts;
-      const base = GC_LEAF_LABELS[code] ?? code;
+      const name = GC_LEAF_LABELS[code];
+      const base = name ? `${code} · ${name}` : code;
       return { label: field === "total" ? `STEP 2 · ${base}` : `STEP 2 · ${base} (${field})` };
     }
     return { label: `STEP 2 · ${nodeId}` };
@@ -595,11 +615,13 @@ export function describeSourceNode(
     if (SITE_OPS_AGGREGATE_LABELS[nodeId]) {
       return { label: `STEP 3 · ${SITE_OPS_AGGREGATE_LABELS[nodeId]}` };
     }
-    // Leaf line: siteops:<group>:<code>:<field> (code carries no colon).
+    // Leaf line: siteops:<group>:<code>:<field> (code carries no colon). Show the criterion
+    // code AND its name (the same code the STEP 3 grid's Code column shows).
     const parts = rest.split(":");
     if (parts.length === 3) {
       const [, code, field] = parts;
-      const base = SITE_OPS_LEAF_LABELS[code] ?? code;
+      const name = SITE_OPS_LEAF_LABELS[code];
+      const base = name ? `${code} · ${name}` : code;
       return { label: field === "total" ? `STEP 3 · ${base}` : `STEP 3 · ${base} (${field})` };
     }
     return { label: `STEP 3 · ${rest}` };
@@ -619,7 +641,8 @@ export function describeSourceNode(
     };
   }
   if (nodeId.startsWith("summary:")) {
-    return { label: `Summary · ${nodeId.slice("summary:".length)}` };
+    const field = nodeId.slice("summary:".length);
+    return { label: `Summary · ${SUMMARY_FIELD_LABELS[field] ?? field}` };
   }
   if (nodeId.startsWith("division:")) {
     // division:<NN>:total — the STEP 4 division rollup (Bucket B Phase 5).
