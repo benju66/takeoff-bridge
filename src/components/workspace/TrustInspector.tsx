@@ -962,7 +962,7 @@ function formatTimestamp(iso: string): string {
 // ---------------------------------------------------------------------------
 
 function LinksTab({ model, onViewRow }: { model: LinksModel; onViewRow?: (rowId: string) => void }) {
-  const { focus, isBound, dependsOn, usedBy } = model;
+  const { focus, isBound, isDerived, dependsOn, usedBy } = model;
   return (
     <div className="p-4 font-sans text-xs text-foreground space-y-5">
       <div>
@@ -979,6 +979,11 @@ function LinksTab({ model, onViewRow }: { model: LinksModel; onViewRow?: (rowId:
           <p className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
             Derived (read-only) — a linked value. It shows a live figure but does not add to the
             estimate total (that would double-count its source).
+          </p>
+        ) : isDerived ? (
+          <p className="mt-1 text-[11px] text-blue-700 dark:text-blue-300">
+            Computed by the estimating engine from the values below — read-only here. The engine is
+            the authority; this shows how the number is wired, not an editable formula.
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">

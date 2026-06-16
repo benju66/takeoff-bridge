@@ -1160,13 +1160,20 @@ export function useTakeoffWorkbook(
                         🔗 bound
                       </button>
                     ) : (
-                      <span
+                      <button
+                        type="button"
                         data-testid="linked-badge"
-                        className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.dispatchEvent(
+                            new CustomEvent("tb:inspect-binding", { detail: { rowId: row.id } })
+                          );
+                        }}
+                        className="ml-2 shrink-0 text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase tracking-wider select-none hover:underline cursor-pointer"
                         title={`Read-only — linked live from ${linked.sourceLabel}`}
                       >
                         🔗 {linked.sourceLabel}
-                      </span>
+                      </button>
                     )
                   )}
                 </div>
