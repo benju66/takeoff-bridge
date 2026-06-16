@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock, ArrowRight, RotateCcw, ClipboardList, Link2, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import React, { useEffect, useMemo, useCallback, useState } from "react";
+import { Search, Maximize2, Minimize2, X, ChevronRight, ChevronDown, Pencil, Settings, CheckCircle2, AlertTriangle, Info, Lock, ArrowRight, ArrowLeft, RotateCcw, ClipboardList, Link2, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { Project } from "@/types/db";
-import type { LinkedDivisionTotal, TakeoffSummary } from "@/lib/calculations";
-import { buildTraceModel, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair, FlagsModel, FlagsRowRef, FlagsAuditEntry, LinksModel, LinkNodeRef } from "@/lib/trustInspector";
+import type { LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "@/lib/calculations";
+import type { ProcessedTakeoffRow } from "@/types";
+import type { Binding } from "@/lib/bindings/types";
+import { describeSourceNode } from "@/lib/bindings/registry";
+import { buildTraceModel, buildLinksModel, buildNodeSearchIndex, filterNodeSearch, focusFieldToNodeId, TrustTab, TraceModifierNode, TraceModel, ReconciliationModel, OverridePair, FlagsModel, FlagsRowRef, FlagsAuditEntry, LinksModel, LinkNodeRef, NodeSearchEntry } from "@/lib/trustInspector";
 import {
   selectPristineComputedValue,
   validateOverrideInput,
@@ -47,8 +50,16 @@ interface TrustInspectorProps {
   reconciliation?: ReconciliationModel;
   /** 5c Flags worklist — needs-review rows, unmapped imports, override audit log. */
   flagsModel?: FlagsModel;
-  /** Links view (Phase 5) — the focused node's depends-on / used-by (built by the page). */
-  linksModel?: LinksModel;
+  /**
+   * Links view (Phase 5 + QoL): the inspector builds the depends-on / used-by graph itself
+   * from these raw inputs (mirroring how it builds the Trace model), so it can re-focus on any
+   * node as the user walks the graph without a round-trip to the page. The initial focus is
+   * `focusField`; `summary` (above) is the effective summary the engine echo nodes read.
+   */
+  bindings: Binding[];
+  gc: PersonnelCalcResult;
+  siteOps: SiteOpsCalcResult;
+  rows: ProcessedTakeoffRow[];
   /** Jump the grid to a flagged/linked row (closes the inspector + scrolls). */
   onViewRow?: (rowId: string) => void;
   /**
@@ -86,7 +97,10 @@ export function TrustInspector({
   takeoffRowCount,
   reconciliation,
   flagsModel,
-  linksModel,
+  bindings,
+  gc,
+  siteOps,
+  rows,
   onViewRow,
   onAssignCode,
   onViewTakeoffRows,
@@ -98,6 +112,43 @@ export function TrustInspector({
   // affordance / chip reliably lands on its tab without a setState-in-effect.
   const [tab, setTab] = useState<TrustTab>(initialTab);
   const [expanded, setExpanded] = useState(false);
+
+  // Links-tab focus + history (QoL). The focus stack starts at the clicked node and grows as
+  // the user walks the graph (depends-on / used-by / search re-focus); `‹ back` and the
+  // breadcrumb pop/truncate it. Because the inspector REMOUNTS per entry-point open
+  // (key={trustSeq}), this resets to the freshly clicked node every time — desired.
+  const [focusStack, setFocusStack] = useState<string[]>(() => [focusFieldToNodeId(focusField)]);
+  const [query, setQuery] = useState("");
+  const focusNodeId = focusStack[focusStack.length - 1];
+
+  const focusNode = useCallback((id: string) => {
+    setFocusStack((s) => (s[s.length - 1] === id ? s : [...s, id]));
+  }, []);
+  const focusBack = useCallback(() => {
+    setFocusStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+  }, []);
+  const focusCrumb = useCallback((i: number) => {
+    setFocusStack((s) => (i >= 0 && i < s.length - 1 ? s.slice(0, i + 1) : s));
+  }, []);
+
+  // The depends-on / used-by view-model for the CURRENT focus, rebuilt locally on each hop
+  // (~1ms for the full graph), and the whole-estimate search index. Both are gated on the
+  // Links tab being open (`linksActive`) so the always-mounted-but-closed inspector — and the
+  // Trace/Reconcile/Flags tabs — never pay to assemble the graph (parity with the old
+  // trustOpen gate). The body only renders LinksTab when this is true, so `null` is unused there.
+  const linksActive = open && tab === "links";
+  const linksModel = useMemo(
+    () => (linksActive ? buildLinksModel({ focusNodeId, bindings, gc, siteOps, rows, summary }) : null),
+    [linksActive, focusNodeId, bindings, gc, siteOps, rows, summary]
+  );
+  const searchIndex = useMemo(
+    () => (linksActive ? buildNodeSearchIndex({ bindings, gc, siteOps, rows, summary }) : []),
+    [linksActive, bindings, gc, siteOps, rows, summary]
+  );
+  const crumbs = useMemo(
+    () => focusStack.map((id) => ({ nodeId: id, label: describeSourceNode(id, rows).label })),
+    [focusStack, rows]
+  );
 
   // Escape: collapse the full-screen modal back to the slide-over first, else close.
   useEffect(() => {
@@ -185,15 +236,18 @@ export function TrustInspector({
           onViewTakeoffRows={onViewTakeoffRows}
         />
       )}
-      {tab === "links" && (
-        linksModel ? (
-          <LinksTab model={linksModel} onViewRow={onViewRow} />
-        ) : (
-          <Placeholder
-            title="Linked values"
-            note="Dependency data is unavailable for this view."
-          />
-        )
+      {tab === "links" && linksModel && (
+        <LinksTab
+          model={linksModel}
+          onViewRow={onViewRow}
+          onFocusNode={focusNode}
+          crumbs={crumbs}
+          onBack={focusBack}
+          onCrumb={focusCrumb}
+          searchIndex={searchIndex}
+          query={query}
+          setQuery={setQuery}
+        />
       )}
       {tab === "reconcile" && (
         reconciliation ? (
@@ -954,17 +1008,120 @@ function formatTimestamp(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Links tab (Phase 5, LD-2) — the focused cell's depends-on / used-by.
+// Links tab (Phase 5, LD-2 + QoL) — the focused cell's depends-on / used-by, now WALKABLE.
 //
-// Trace decomposes a TOTAL top-down; Links shows what ONE cell reads and what feeds off
-// it (one hop each way) — two views of the same kind-blind dependency graph. Pure view
-// over `buildLinksModel`; clicking a line node jumps the grid to that row (onViewRow).
+// Trace decomposes a TOTAL top-down; Links shows what ONE cell reads and what feeds off it
+// (one hop each way) over the same kind-blind dependency graph. QoL: every depends-on /
+// used-by row (and any search hit) RE-FOCUSES the inspector on that node (`onFocusNode`), so
+// the user walks the whole chain hop by hop; a breadcrumb + `‹ back` retrace it; a search box
+// jumps to ANY value by code or name. A line node also keeps its grid "view" jump (onViewRow).
 // ---------------------------------------------------------------------------
 
-function LinksTab({ model, onViewRow }: { model: LinksModel; onViewRow?: (rowId: string) => void }) {
+interface LinksTabProps {
+  model: LinksModel;
+  onViewRow?: (rowId: string) => void;
+  /** Re-focus the inspector on a node (walk the graph). */
+  onFocusNode: (nodeId: string) => void;
+  /** Focus trail (oldest → current); the last entry is the current focus. */
+  crumbs: { nodeId: string; label: string }[];
+  /** Pop one focus hop. */
+  onBack: () => void;
+  /** Truncate the trail back to crumb `i`. */
+  onCrumb: (i: number) => void;
+  /** Every addressable value, for the "find a value" jump. */
+  searchIndex: NodeSearchEntry[];
+  query: string;
+  setQuery: (q: string) => void;
+}
+
+function LinksTab({
+  model,
+  onViewRow,
+  onFocusNode,
+  crumbs,
+  onBack,
+  onCrumb,
+  searchIndex,
+  query,
+  setQuery,
+}: LinksTabProps) {
   const { focus, isBound, isDerived, dependsOn, usedBy } = model;
+  const results = filterNodeSearch(searchIndex, query);
+
   return (
     <div className="p-4 font-sans text-xs text-foreground space-y-5">
+      {/* Find a value — jump to ANY node in the estimate by code or name. */}
+      <div className="space-y-1.5">
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Find a value… (code or name)"
+            data-testid="links-search"
+            className="w-full rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 pl-8 pr-2.5 py-1.5 text-foreground outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        {query.trim() !== "" && (
+          <div className="space-y-1">
+            {results.length === 0 ? (
+              <p className="text-[11px] text-slate-500 dark:text-slate-500 italic">No value matches “{query}”.</p>
+            ) : (
+              results.map((r) => (
+                <button
+                  key={r.nodeId}
+                  type="button"
+                  data-testid="links-search-result"
+                  onClick={() => { onFocusNode(r.nodeId); setQuery(""); }}
+                  className="w-full flex items-center justify-between gap-3 rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-1.5 text-left hover:bg-card cursor-pointer transition-colors"
+                >
+                  <span className="min-w-0 truncate text-foreground">{r.label}</span>
+                  {r.value != null && (
+                    <span className="font-mono text-slate-500 dark:text-slate-400 shrink-0">{fmtUSD(r.value)}</span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Breadcrumb — where you've walked (shown once you've moved past the first node). */}
+      {crumbs.length > 1 && (
+        <div className="flex items-center gap-1 flex-wrap text-[11px]">
+          <button
+            type="button"
+            onClick={onBack}
+            data-testid="links-back"
+            title="Back one step"
+            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer"
+          >
+            <ArrowLeft size={12} /> back
+          </button>
+          {crumbs.map((c, i) => {
+            const isLast = i === crumbs.length - 1;
+            return (
+              <span key={`${c.nodeId}-${i}`} className="flex items-center gap-1 min-w-0">
+                {i > 0 && <ChevronRight size={11} className="text-slate-400 shrink-0" />}
+                {isLast ? (
+                  <span className="truncate text-foreground font-semibold max-w-[180px]">{c.label}</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onCrumb(i)}
+                    className="truncate text-slate-500 dark:text-slate-400 hover:text-foreground hover:underline cursor-pointer max-w-[140px]"
+                    title={c.label}
+                  >
+                    {c.label}
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       <div>
         <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
           <Link2 size={13} className="text-blue-600 dark:text-blue-400" /> Focused value
@@ -994,19 +1151,21 @@ function LinksTab({ model, onViewRow }: { model: LinksModel; onViewRow?: (rowId:
 
       <LinkSection
         title="Depends on"
-        note="The values this cell reads to compute itself."
+        note="The values this cell reads to compute itself. Click one to trace it."
         icon={<ArrowDownLeft size={13} className="text-blue-600 dark:text-blue-400" />}
         refs={dependsOn}
         emptyNote={isBound ? "No dependencies." : "Nothing — this cell is not linked."}
         onViewRow={onViewRow}
+        onFocusNode={onFocusNode}
       />
       <LinkSection
         title="Used by"
-        note="The links that read this cell."
+        note="The values that read this cell. Click one to trace it."
         icon={<ArrowUpRight size={13} className="text-blue-600 dark:text-blue-400" />}
         refs={usedBy}
         emptyNote="Nothing feeds off this cell yet."
         onViewRow={onViewRow}
+        onFocusNode={onFocusNode}
       />
     </div>
   );
@@ -1019,6 +1178,7 @@ function LinkSection({
   refs,
   emptyNote,
   onViewRow,
+  onFocusNode,
 }: {
   title: string;
   note: string;
@@ -1026,6 +1186,7 @@ function LinkSection({
   refs: LinkNodeRef[];
   emptyNote: string;
   onViewRow?: (rowId: string) => void;
+  onFocusNode: (nodeId: string) => void;
 }) {
   return (
     <div className="space-y-2">
@@ -1040,7 +1201,7 @@ function LinkSection({
       ) : (
         <div className="space-y-1">
           {refs.map((r) => (
-            <LinkRow key={r.nodeId} node={r} onViewRow={onViewRow} />
+            <LinkRow key={r.nodeId} node={r} onViewRow={onViewRow} onFocusNode={onFocusNode} />
           ))}
         </div>
       )}
@@ -1048,25 +1209,46 @@ function LinkSection({
   );
 }
 
-function LinkRow({ node, onViewRow }: { node: LinkNodeRef; onViewRow?: (rowId: string) => void }) {
+/**
+ * One depends-on / used-by row. The row body RE-FOCUSES the inspector on this node (walk the
+ * graph); a line node also gets a separate "view" pill that jumps the grid to that row. Two
+ * sibling buttons (never nested) so the click targets stay distinct + valid.
+ */
+function LinkRow({
+  node,
+  onViewRow,
+  onFocusNode,
+}: {
+  node: LinkNodeRef;
+  onViewRow?: (rowId: string) => void;
+  onFocusNode: (nodeId: string) => void;
+}) {
   const jumpable = !!node.rowId && !!onViewRow;
   return (
-    <button
-      type="button"
-      onClick={() => { if (node.rowId && onViewRow) onViewRow(node.rowId); }}
-      disabled={!jumpable}
-      className="w-full flex items-center justify-between gap-3 rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 px-2.5 py-1.5 text-left hover:bg-card disabled:cursor-default cursor-pointer transition-colors"
-    >
-      <span className="min-w-0 truncate text-foreground">{node.label}</span>
-      <span className="flex items-center gap-2 shrink-0">
+    <div className="w-full flex items-center gap-1 rounded-md border border-grid-border bg-background/50 dark:bg-slate-900/30 hover:bg-card transition-colors">
+      <button
+        type="button"
+        data-testid="links-ref"
+        onClick={() => onFocusNode(node.nodeId)}
+        title="Focus this value — trace what it reads and what feeds off it"
+        className="min-w-0 flex-1 flex items-center justify-between gap-3 px-2.5 py-1.5 text-left cursor-pointer"
+      >
+        <span className="min-w-0 truncate text-foreground">{node.label}</span>
         {node.value != null && (
-          <span className="font-mono text-slate-500 dark:text-slate-400">{fmtUSD(node.value)}</span>
+          <span className="font-mono text-slate-500 dark:text-slate-400 shrink-0">{fmtUSD(node.value)}</span>
         )}
-        {jumpable && (
-          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">view</span>
-        )}
-      </span>
-    </button>
+      </button>
+      {jumpable && (
+        <button
+          type="button"
+          onClick={() => { if (node.rowId && onViewRow) onViewRow(node.rowId); }}
+          title="Jump to this row in the grid"
+          className="shrink-0 pr-2.5 pl-1 py-1.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+        >
+          view
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -152,6 +152,29 @@ test.describe("Linked Values Bucket B Phase 5 - Site-Ops Links badge (cross-step
       await expect(inspector.getByText("Used by", { exact: true })).toBeVisible();
       await expect(inspector.getByText("(qty)", { exact: false }).first()).toBeVisible();
       await expect(inspector.getByText("(rate)", { exact: false }).first()).toBeVisible();
+
+      // ---- Walk the graph: click a Used-by row -> re-focus on it -------------
+      const refs = inspector.getByTestId("links-ref");
+      const before = await inspector.locator(".font-semibold.truncate, span.truncate.text-foreground.font-semibold").first().textContent();
+      await refs.last().click(); // the leaf's section/subtotal (used-by)
+      // Breadcrumb back appears once we've walked past the first node.
+      const back = inspector.getByTestId("links-back");
+      await expect(back).toBeVisible({ timeout: 10000 });
+
+      // ---- Back returns to the leaf -----------------------------------------
+      await back.click();
+      await expect(back).not.toBeVisible();
+      if (before) {
+        await expect(inspector.getByText(before.trim(), { exact: false }).first()).toBeVisible();
+      }
+
+      // ---- Search jumps to ANY value by name --------------------------------
+      await inspector.getByTestId("links-search").fill("Supervision");
+      const result = inspector.getByTestId("links-search-result").first();
+      await expect(result).toBeVisible({ timeout: 10000 });
+      await result.click();
+      await expect(inspector.getByText("Supervision", { exact: false }).first()).toBeVisible();
+      await expect(inspector.getByTestId("links-back")).toBeVisible();
     } finally {
       // ---- Cleanup: delete the scratch project -------------------------------
       await page.goto("/projects");

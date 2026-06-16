@@ -17,7 +17,7 @@ import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/l
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
-import { buildFlagsModel, buildLinksModel, focusFieldToNodeId } from "@/lib/trustInspector";
+import { buildFlagsModel } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
@@ -342,24 +342,8 @@ export function EstimateTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingInspect?.seq]);
 
-  // Links view-model (Phase 5) for the focused node — the depends-on / used-by the Links
-  // tab renders, INCLUDING the read-only engine wiring (summary:* + cross-page nodes) via
-  // the opt-in fold. Built only while the inspector is open (gated on trustOpen) so the
-  // closed/idle grid path stays cheap; undefined when closed.
-  const linksModel = useMemo(
-    () =>
-      trustOpen
-        ? buildLinksModel({
-            focusNodeId: focusFieldToNodeId(trustField),
-            bindings,
-            gc: gcCalcResult,
-            siteOps: siteOpsCalcResult,
-            rows,
-            summary: takeoffSummary,
-          })
-        : undefined,
-    [trustOpen, trustField, bindings, gcCalcResult, siteOpsCalcResult, rows, takeoffSummary]
-  );
+  // The Links view-model is now built INSIDE the Trust Inspector (from the raw inputs below),
+  // so it can re-focus on any node as the user walks the graph without a round-trip here.
 
   // [view rows] — clear any active filter so all contributing takeoff rows are
   // visible, then scroll the grid to the top. Reuses globalFilter + scrollToRowRef.
@@ -1237,7 +1221,10 @@ export function EstimateTable({
         takeoffRowCount={takeoffRowCount}
         reconciliation={reconciliation}
         flagsModel={flagsModel}
-        linksModel={linksModel}
+        bindings={bindings}
+        gc={gcCalcResult}
+        siteOps={siteOpsCalcResult}
+        rows={rows}
         onViewRow={handleViewRow}
         onAssignCode={handleAssignCode}
         onViewTakeoffRows={handleViewTakeoffRows}

@@ -533,3 +533,71 @@ export function buildLinksModel({
     usedBy,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Node search index (Links-tab QoL) — every addressable value, by label.
+//
+// Lets the Links tab offer a "find a value" jump to ANY node in the whole estimate (engine
+// gc/siteops/division/summary + every line field), not just the one-hop neighbours of the
+// focus. PURE: it assembles the same kind-blind graph buildLinksModel uses, evaluates it
+// once, and labels each node via the shared labeller. No estimate math here.
+// ---------------------------------------------------------------------------
+
+/** One searchable value: its node id, friendly label, current value, and (for a line node)
+ *  its grid rowId so a result can still offer a jump-to-grid. */
+export interface NodeSearchEntry {
+  nodeId: string;
+  label: string;
+  rowId?: string;
+  value?: number;
+}
+
+/**
+ * Builds the full searchable index of every addressable value in the estimate's dependency
+ * graph (engine echo nodes + per-line source nodes), labelled and evaluated, sorted by label.
+ * The Links-tab search box filters this case-insensitively over the label (which now carries
+ * both the code and the name) — so a code fragment OR a name matches the same entry. Empty
+ * when there are neither bindings nor a summary (the inert/golden case).
+ */
+export function buildNodeSearchIndex({
+  bindings,
+  gc,
+  siteOps,
+  rows,
+  summary,
+}: Omit<BuildLinksArgs, "focusNodeId">): NodeSearchEntry[] {
+  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows, {
+    includeEngineGraph: true,
+    summary,
+  });
+  const values = nodes.length ? evaluateGraph(nodes) : new Map<string, number>();
+  return nodes
+    .map((n): NodeSearchEntry => {
+      const d = describeSourceNode(n.id, rows);
+      return { nodeId: n.id, label: d.label, rowId: d.rowId, value: values.get(n.id) };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Filters a {@link buildNodeSearchIndex} result by a free-text query, case-insensitively over
+ * the label AND the node id (so both "supervision" and "01-0310" hit). Empty/blank query →
+ * no results (the box is idle until typed into). Capped to `limit` (default 30) so a broad
+ * query stays a quick pick-list, not a wall.
+ */
+export function filterNodeSearch(
+  index: readonly NodeSearchEntry[],
+  query: string,
+  limit = 30
+): NodeSearchEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const out: NodeSearchEntry[] = [];
+  for (const e of index) {
+    if (e.label.toLowerCase().includes(q) || e.nodeId.toLowerCase().includes(q)) {
+      out.push(e);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
