@@ -1,9 +1,9 @@
 "use client";
 "use no compiler";
 
-import React, { use, useEffect, useRef, Suspense } from "react";
+import React, { use, useEffect, useRef, useState, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   AlertTriangle,
   MapPin,
@@ -53,7 +53,29 @@ interface PageProps {
 
 function WorkspaceInner({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const activeTab = searchParams.get("step") || "step4";
+
+  // Bucket B Phase 5 — cross-step Links coordinator. A GC (STEP 2) / Site-Ops (STEP 3)
+  // EngineLinkBadge dispatches `tb:inspect-binding` with a raw engine `nodeId`, but the
+  // Trust Inspector lives in the EstimateTable, which is unmounted on those steps. When the
+  // event fires off STEP 4 we navigate there and hand EstimateTable the focused node so it
+  // opens the Links tab on mount; when STEP 4 is already mounted its own listener handles it
+  // (so we ignore those here — no double-open). `seq` makes a repeat click reopen it.
+  const [pendingInspect, setPendingInspect] = useState<{ nodeId: string; seq: number } | null>(null);
+  const inspectSeqRef = useRef(0);
+  useEffect(() => {
+    const onInspect = (e: Event) => {
+      const nodeId = (e as CustomEvent<{ nodeId?: string }>).detail?.nodeId;
+      if (!nodeId) return; // a bare `rowId` event is STEP 4-internal (EstimateTable handles it)
+      if (activeTab === "step4") return; // already mounted — its own listener handles it
+      inspectSeqRef.current += 1;
+      setPendingInspect({ nodeId, seq: inspectSeqRef.current });
+      router.push(`/projects/${projectId}?step=step4`);
+    };
+    window.addEventListener("tb:inspect-binding", onInspect);
+    return () => window.removeEventListener("tb:inspect-binding", onInspect);
+  }, [activeTab, router, projectId]);
 
   // Project metadata & duration
   const {
@@ -596,6 +618,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             cancelImport={cancelImport}
             reParseWithSheet={reParseWithSheet}
             handleProjectParamChange={handleProjectParamChange as (field: string, value: string | number) => void}
+            pendingInspect={pendingInspect}
+            onInspectConsumed={() => setPendingInspect(null)}
           />
         </ErrorBoundary>
       )}

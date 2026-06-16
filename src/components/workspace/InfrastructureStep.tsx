@@ -6,6 +6,12 @@ import {
   SITE_OPS_MANUAL_DEFAULTS,
   SITE_OPS_SECTIONS,
 } from "@/lib/constants";
+import {
+  SITEOPS_GRAND_TOTAL_NODE_ID,
+  siteOpsLeafNodeId,
+  siteOpsSectionNodeId,
+} from "@/lib/bindings/types";
+import { EngineLinkBadge } from "./EngineLinkBadge";
 
 // ---------------------------------------------------------------------------
 // InfrastructureStep — Step 3 Panel
@@ -100,7 +106,10 @@ export function InfrastructureStep({
                         <td className="p-3 text-center border-r border-b border-grid-border text-foreground font-mono">${cfg.rate.toFixed(2)}</td>
                         <td className="p-3 text-center border-r border-b border-grid-border text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono">auto</td>
                         <td className={dashCellClass}>{qty.toLocaleString()} {cfg.unit}</td>
-                        <td className={totalCellClass}>{fmt(totalByCode.get(cfg.code) ?? 0)}</td>
+                        <td className={totalCellClass}>
+                          {fmt(totalByCode.get(cfg.code) ?? 0)}
+                          <EngineLinkBadge nodeId={siteOpsLeafNodeId("dynamic", cfg.code, "total")} label={cfg.label} />
+                        </td>
                       </tr>
                     );
                   })}
@@ -158,7 +167,10 @@ export function InfrastructureStep({
                           </div>
                         </td>
                         <td className={dashCellClass}>—</td>
-                        <td className={totalCellClass}>{fmt(totalByCode.get(cfg.code) ?? 0)}</td>
+                        <td className={totalCellClass}>
+                          {fmt(totalByCode.get(cfg.code) ?? 0)}
+                          <EngineLinkBadge nodeId={siteOpsLeafNodeId("manual", cfg.code, "total")} label={cfg.label} />
+                        </td>
                       </tr>
                     );
                   })}
@@ -167,7 +179,10 @@ export function InfrastructureStep({
                   <tr className="bg-background/60 dark:bg-slate-900/60 text-[11px] font-bold text-foreground">
                     <td className="p-2 text-center border-r border-b border-grid-border" />
                     <td colSpan={5} className="p-2 text-right uppercase tracking-wider text-[10px] text-slate-600 dark:text-slate-400 border-r border-b border-grid-border font-bold">Subtotal — {section.label.replace(/^02\.[A-H] — /, "")}</td>
-                    <td className="p-2 text-right text-foreground font-mono border-b border-grid-border">{fmt(sectionTotal)}</td>
+                    <td className="p-2 text-right text-foreground font-mono border-b border-grid-border">
+                      {fmt(sectionTotal)}
+                      <EngineLinkBadge nodeId={siteOpsSectionNodeId(section.id)} label={section.label} />
+                    </td>
                   </tr>
                 </React.Fragment>
               );
@@ -179,6 +194,7 @@ export function InfrastructureStep({
               <td colSpan={5} className="p-4 text-left uppercase tracking-wider text-[10px] text-slate-600 dark:text-slate-400 border-r border-b border-grid-border font-bold">Cumulative Division 02 Site Operations Cost</td>
               <td className="p-4 text-right text-emerald-600 dark:text-emerald-400 text-sm font-black border-b border-grid-border font-mono">
                 {fmt(siteOperationsTotal)}
+                <EngineLinkBadge nodeId={SITEOPS_GRAND_TOTAL_NODE_ID} label="Site Operations grand total" />
               </td>
             </tr>
           </tbody>

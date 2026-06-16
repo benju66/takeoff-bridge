@@ -36,6 +36,7 @@ import {
   GC_GRAND_TOTAL_NODE_ID,
   GC_SUPERVISION_NODE_ID,
   SITEOPS_GRAND_TOTAL_NODE_ID,
+  divisionTotalNodeId,
   gcLeafNodeId,
   gcSubtotalNodeId,
   siteOpsLeafNodeId,
@@ -43,6 +44,8 @@ import {
   siteOpsSubtotalNodeId,
   summaryNodeId,
 } from "./types";
+import { lineFieldNodeId } from "./compile";
+import { getDivisionCode } from "../division";
 import type {
   PersonnelCalcResult,
   SiteOpsCalcResult,
@@ -64,18 +67,24 @@ import type { ProcessedTakeoffRow } from "@/types";
 /**
  * Which tier of engine relationships `describeEngineGraph` emits. Phase 1 shipped the
  * `"summary"` tier (STEP 4 summary + cross-page money trail); Phase 3 added `"gc"` (the
- * full STEP 2 General Conditions tree); Phase 4 adds `"siteOps"` (the full STEP 3 Site
- * Operations tree). Future phases WIDEN this union (`"division"`, …) and add a matching
- * branch to the switch — the descriptor signature never changes.
+ * full STEP 2 General Conditions tree); Phase 4 added `"siteOps"` (the full STEP 3 Site
+ * Operations tree); Phase 5 adds `"division"` (STEP 4 line totals rolled up by CSI
+ * division). A new phase WIDENS this union and adds a matching branch to the switch — the
+ * descriptor signature never changes.
  */
-export type EngineGraphTier = "summary" | "gc" | "siteOps";
+export type EngineGraphTier = "summary" | "gc" | "siteOps" | "division";
 
 /**
  * Every known engine tier, in dependency-friendly order. The inspection seam
  * (`assembleBindingGraphNodes`) defaults to this so the Links tab auto-covers each tier
  * as it ships — a new phase lights up simply by adding its branch below.
  */
-export const ALL_ENGINE_TIERS: readonly EngineGraphTier[] = ["summary", "gc", "siteOps"];
+export const ALL_ENGINE_TIERS: readonly EngineGraphTier[] = [
+  "summary",
+  "gc",
+  "siteOps",
+  "division",
+];
 
 // ---------------------------------------------------------------------------
 // Echo-node construction
@@ -454,6 +463,62 @@ function describeSiteOpsNodes(siteOps: SiteOpsCalcResult): GraphNode[] {
 }
 
 // ---------------------------------------------------------------------------
+// Tier 4 (Phase 5) — the STEP 4 division rollup tier
+// ---------------------------------------------------------------------------
+
+/** One read-only echo `GraphNode` for a division rollup: `evaluate` returns the captured
+ * engine value; `inputs` declare the edges only (LD-B2 — echo, never re-derive). */
+function echoDivisionNode(id: string, value: number, inputs: string[], basis: Basis): GraphNode {
+  return { id, basis, inputs, evaluate: () => value };
+}
+
+/**
+ * Tier 4 — STEP 4 line totals rolled up by 2-digit CSI division:
+ *
+ *   division:<NN>:total ─► the `line:<id>:total` nodes of every STEP 4 row in division NN
+ *
+ * One `division:<NN>:total` per PRESENT division (a row whose `getDivisionCode` is a real
+ * 2-digit code; rows with no valid division — `getDivisionCode === ""` — are skipped, so
+ * unmapped scope mints no node). Each node ECHOES the Σ of its member rows' totals and edges
+ * to the EXISTING `line:<id>:total` source ids (REUSING them, NOT minting duplicate leaves —
+ * those source nodes are emitted by registry's `lineFieldSourceNodes` and are present at the
+ * `assembleBindingGraphNodes` seam, where this tier is folded in). Division extraction goes
+ * through `getDivisionCode` only (AGENTS.md — never inline substring/split/regex).
+ *
+ * Unlike the gc / siteOps tiers, this tier is NOT self-contained: its edges point at
+ * `line:*` source nodes it does not itself emit. The kind-blind graph treats an input id
+ * absent from the node set as an external/leaf value (graph.ts), so the echo still resolves
+ * standalone; composed at the seam the line totals are present and the depends-on / used-by
+ * traversal is complete (the "line → division" path trail). Reuses canonical `line:total`
+ * ids (LD-B5); `division:*` ids never collide with another tier or a bare source node.
+ *
+ * Like the `siteops:<section>` re-grouping, the value echoes the Σ of engine-produced line
+ * totals (LD-B2). NB: for a division holding one of the 10 linked-division rows this Σ uses
+ * that row's stored `total`, which can differ from `computeDivisionBreakdown` (which counts
+ * the row's *linked* value) — a documented divergence, not a re-derivation.
+ */
+function describeDivisionNodes(rows: readonly ProcessedTakeoffRow[]): GraphNode[] {
+  // Group member line-total ids + Σ totals by division, preserving row encounter order
+  // within each division and emitting divisions in ascending code order (stable output).
+  const memberIds = new Map<string, string[]>();
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const code = getDivisionCode(row.itemId);
+    if (!code) continue; // unmapped / no valid division — no node
+    const ids = memberIds.get(code) ?? [];
+    ids.push(lineFieldNodeId(row.id, "total"));
+    memberIds.set(code, ids);
+    totals.set(code, (totals.get(code) ?? 0) + row.total);
+  }
+
+  return [...memberIds.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((code) =>
+      echoDivisionNode(divisionTotalNodeId(code), totals.get(code) ?? 0, memberIds.get(code)!, "currency")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -462,10 +527,9 @@ function describeSiteOpsNodes(siteOps: SiteOpsCalcResult): GraphNode[] {
  * for the requested `tier`. Pure: it only reads the passed engine results and emits nodes;
  * it performs no math, no I/O, and no graph evaluation (LD-B2, LD-B4).
  *
- * `gc`, `siteOps`, and `rows` are part of the stable signature so later tiers (division
- * rollups, …) can describe their leaves without a signature change; the `"summary"` tier
+ * `gc`, `siteOps`, and `rows` are all part of the stable signature: the `"summary"` tier
  * reads only `summary`, the `"gc"` tier reads only `gc`, the `"siteOps"` tier reads only
- * `siteOps`.
+ * `siteOps`, and the `"division"` tier reads only `rows` (the STEP 4 lines it rolls up).
  *
  * `tier` accepts a single tier OR a list of tiers — the inspection seam requests the full
  * set (`ALL_ENGINE_TIERS`) so the Links tab shows the complete wiring, while a test or a
@@ -491,6 +555,9 @@ export function describeEngineGraph(
         break;
       case "siteOps":
         nodes.push(...describeSiteOpsNodes(siteOps));
+        break;
+      case "division":
+        nodes.push(...describeDivisionNodes(rows));
         break;
     }
   }

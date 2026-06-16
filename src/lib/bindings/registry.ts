@@ -34,6 +34,7 @@ import {
   siteOpsSubtotalNodeId,
 } from "./types";
 import {
+  DIVISION_NAMES,
   EQUIPMENT_DEFAULTS,
   GC_MANUAL_DEFAULTS,
   LINKED_DIVISION_ROWS,
@@ -400,8 +401,9 @@ export interface AssembleBindingGraphOptions {
   summary?: TakeoffSummary;
   /**
    * Which engine tier(s) to describe — one tier or a list. Defaults to `ALL_ENGINE_TIERS`
-   * (every shipped tier: `summary` + `gc`), so the Links tab shows the complete wiring and
-   * each future tier lights up automatically. Tiers use disjoint node-ID namespaces.
+   * (every shipped tier: `summary` + `gc` + `siteOps` + `division`), so the Links tab shows
+   * the complete wiring and each future tier lights up automatically. Tiers use disjoint
+   * node-ID namespaces.
    */
   engineTier?: EngineGraphTier | readonly EngineGraphTier[];
 }
@@ -618,6 +620,12 @@ export function describeSourceNode(
   }
   if (nodeId.startsWith("summary:")) {
     return { label: `Summary · ${nodeId.slice("summary:".length)}` };
+  }
+  if (nodeId.startsWith("division:")) {
+    // division:<NN>:total — the STEP 4 division rollup (Bucket B Phase 5).
+    const code = nodeId.slice("division:".length).replace(/:total$/, "");
+    const name = DIVISION_NAMES[code];
+    return { label: name ? `Division ${code} · ${name}` : `Division ${code}` };
   }
   return { label: nodeId };
 }
