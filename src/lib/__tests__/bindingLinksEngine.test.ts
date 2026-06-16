@@ -22,12 +22,16 @@ import {
   GC_GENERAL_NODE_ID,
   GC_GRAND_TOTAL_NODE_ID,
   GC_SUPERVISION_NODE_ID,
+  SITEOPS_GRAND_TOTAL_NODE_ID,
   gcLeafNodeId,
   gcSubtotalNodeId,
+  siteOpsLeafNodeId,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
   summaryNodeId,
   type SummaryNodeField,
 } from "../bindings/types";
-import { SUPERVISION_STAFF_CODES } from "../constants";
+import { SITE_OPS_MANUAL_DEFAULTS, SUPERVISION_STAFF_CODES } from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
 const gc: PersonnelCalcResult = computePersonnelCosts(
@@ -237,5 +241,68 @@ describe("buildLinksModel - GC tree traversal (Phase 3, summary supplied)", () =
       .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
       .reduce((s, l) => s + l.total, 0);
     expect(model.focus.value).toBeCloseTo(gc.grandTotal - supervision, 8);
+  });
+});
+
+describe("buildLinksModel - Site-Ops tree traversal (Phase 4, summary supplied)", () => {
+  it("siteops:grandTotal depends on the 2 group subtotals and echoes siteOps.grandTotal", () => {
+    const model = buildLinksModel({
+      focusNodeId: SITEOPS_GRAND_TOTAL_NODE_ID,
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.isBound).toBe(false);
+    expect(model.isDerived).toBe(true); // a read-only engine value
+    expect(model.focus.value).toBeCloseTo(siteOps.grandTotal, 8);
+    expect(siteOps.grandTotal).toBeGreaterThan(0);
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual([
+      siteOpsSubtotalNodeId("dynamic"),
+      siteOpsSubtotalNodeId("manual"),
+    ]);
+  });
+
+  it("a dynamic leaf total depends on its qty + rate, and feeds both its group subtotal and its section", () => {
+    const code = "02-9015.001"; // Safety — a dynamic line (duration-driven), section siteOperations
+    const totalId = siteOpsLeafNodeId("dynamic", code, "total");
+    const model = buildLinksModel({
+      focusNodeId: totalId,
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual([
+      siteOpsLeafNodeId("dynamic", code, "qty"),
+      siteOpsLeafNodeId("dynamic", code, "rate"),
+    ]);
+    const usedBy = model.usedBy.map((u) => u.nodeId);
+    expect(usedBy).toContain(siteOpsSubtotalNodeId("dynamic"));
+    expect(usedBy).toContain(siteOpsSectionNodeId("siteOperations"));
+    // labelled to the leaf via the shared node labeller (not the raw id)
+    expect(model.focus.label).toContain("STEP 3");
+  });
+
+  it("a section subtotal (demolition) reads its member leaf totals and echoes their Σ", () => {
+    const model = buildLinksModel({
+      focusNodeId: siteOpsSectionNodeId("demolition"),
+      bindings: [],
+      gc,
+      siteOps,
+      rows,
+      summary,
+    });
+    // demolition section = the manual lines whose section is "demolition" (demolition + sawcutting).
+    const demoCodes = SITE_OPS_MANUAL_DEFAULTS.filter((c) => c.section === "demolition").map(
+      (c) => c.code
+    );
+    expect(model.dependsOn.map((d) => d.nodeId)).toEqual(
+      demoCodes.map((c) => siteOpsLeafNodeId("manual", c, "total"))
+    );
+    // 02-4100.001 demolition = qty 500 × rate 6 = 3000; 02-4100.002 sawcutting (lumpSum) = 950.
+    expect(model.focus.value).toBeCloseTo(3950, 8);
   });
 });

@@ -29,6 +29,9 @@ import {
   GC_GENERAL_NODE_ID,
   GC_GRAND_TOTAL_NODE_ID,
   GC_SUPERVISION_NODE_ID,
+  SITEOPS_GRAND_TOTAL_NODE_ID,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
 } from "./types";
 import {
   EQUIPMENT_DEFAULTS,
@@ -64,10 +67,13 @@ import type { ProcessedTakeoffRow } from "@/types";
  */
 export { GC_GRAND_TOTAL_NODE_ID, GC_SUPERVISION_NODE_ID, GC_GENERAL_NODE_ID };
 
-/** STEP 3 — one Site-Ops template subtotal section. */
-export function siteOpsSectionNodeId(section: SiteOpsSection): string {
-  return `siteops:${section}`;
-}
+/**
+ * STEP 3 — one Site-Ops template subtotal section (`siteops:<section>`). Its definition
+ * moved to types.ts (the kind-blind leaf module) in Bucket B Phase 4, mirroring the GC IDs,
+ * so engineGraph.ts can build section IDs without a `registry → engineGraph → registry`
+ * import cycle; re-exported here so the existing import sites are unchanged.
+ */
+export { siteOpsSectionNodeId };
 
 /**
  * The stable node ID for a linked STEP 4 division row's total. The linked rows are
@@ -522,6 +528,28 @@ const GC_LEAF_LABELS: Record<string, string> = (() => {
   return m;
 })();
 
+/** Friendly labels for the Site-Ops aggregate nodes (Bucket B Phase 4): the grand total
+ * and the two group subtotals (`siteops:grandTotal` / `siteops:<group>Subtotal`). */
+const SITE_OPS_AGGREGATE_LABELS: Record<string, string> = {
+  [SITEOPS_GRAND_TOTAL_NODE_ID]: "Site Operations grand total",
+  [siteOpsSubtotalNodeId("dynamic")]: "Parameter-driven subtotal",
+  [siteOpsSubtotalNodeId("manual")]: "Manual entry subtotal",
+};
+
+/**
+ * Site-Ops leaf-line criterion code → its template label, harvested from the two
+ * `SITE_OPS_*_DEFAULTS` source arrays (Bucket B Phase 4). Lets the Links view read a
+ * Site-Ops leaf node (`siteops:<group>:<code>:<field>`) as e.g. "STEP 3 · Demolition
+ * (rate)" instead of the raw id. Codes are unique within a group; cross-group reuse is
+ * harmless.
+ */
+const SITE_OPS_LEAF_LABELS: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const cfg of SITE_OPS_DYNAMIC_DEFAULTS) m[cfg.code] = cfg.label;
+  for (const cfg of SITE_OPS_MANUAL_DEFAULTS) m[cfg.code] = cfg.label;
+  return m;
+})();
+
 /** A node resolved to a display label, with the line's rowId when it is a line node (for click-to-jump). */
 export interface NodeLabel {
   /** Human-readable label, e.g. "STEP 2 · Total Supervision" or "09-9000.001 · Drywall". */
@@ -557,9 +585,22 @@ export function describeSourceNode(
     return { label: `STEP 2 · ${nodeId}` };
   }
   if (nodeId.startsWith("siteops:")) {
-    const section = nodeId.slice("siteops:".length);
-    const cfg = SITE_OPS_SECTIONS.find((s) => s.id === section);
-    return { label: `STEP 3 · ${cfg?.label ?? section}` };
+    const rest = nodeId.slice("siteops:".length);
+    // Section subtotal: siteops:<section> (the section id carries no colon).
+    const cfg = SITE_OPS_SECTIONS.find((s) => s.id === rest);
+    if (cfg) return { label: `STEP 3 · ${cfg.label}` };
+    // Aggregate (grandTotal / dynamicSubtotal / manualSubtotal).
+    if (SITE_OPS_AGGREGATE_LABELS[nodeId]) {
+      return { label: `STEP 3 · ${SITE_OPS_AGGREGATE_LABELS[nodeId]}` };
+    }
+    // Leaf line: siteops:<group>:<code>:<field> (code carries no colon).
+    const parts = rest.split(":");
+    if (parts.length === 3) {
+      const [, code, field] = parts;
+      const base = SITE_OPS_LEAF_LABELS[code] ?? code;
+      return { label: field === "total" ? `STEP 3 · ${base}` : `STEP 3 · ${base} (${field})` };
+    }
+    return { label: `STEP 3 · ${rest}` };
   }
   if (nodeId.startsWith("line:")) {
     // line:<rowId>:<field> — rowId may itself contain no colon (uuid / row-<itemId>).

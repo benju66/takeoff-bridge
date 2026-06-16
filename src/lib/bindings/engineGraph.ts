@@ -18,18 +18,29 @@
  * Like registry.ts, this is an APP-AWARE bindings module (it imports calc-result types);
  * the graph/compiler core (graph.ts, compile.ts) stay indifferent to all of it.
  *
- * Phase 1 emits Tier 1 only — the STEP 4 summary + cross-page money trail (`summary:*`).
- * Later tiers (GC tree, Site-Ops tree, division rollups) append to `describeEngineGraph`
- * behind the `tier` switch; the signature is stable from day one (LD-B3).
+ * Phase 1 shipped Tier 1 — the STEP 4 summary + cross-page money trail (`summary:*`);
+ * Phase 3 added the GC tree (`gc:*`); Phase 4 adds the Site-Ops tree (`siteops:*`). Later
+ * tiers (division rollups) append to `describeEngineGraph` behind the `tier` switch; the
+ * signature is stable from day one (LD-B3).
  */
 
-import type { Basis, GcSubtotalGroup, GraphNode, SummaryNodeField } from "./types";
+import type {
+  Basis,
+  GcSubtotalGroup,
+  GraphNode,
+  SiteOpsLineGroup,
+  SummaryNodeField,
+} from "./types";
 import {
   GC_GENERAL_NODE_ID,
   GC_GRAND_TOTAL_NODE_ID,
   GC_SUPERVISION_NODE_ID,
+  SITEOPS_GRAND_TOTAL_NODE_ID,
   gcLeafNodeId,
   gcSubtotalNodeId,
+  siteOpsLeafNodeId,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
   summaryNodeId,
 } from "./types";
 import type {
@@ -37,7 +48,13 @@ import type {
   SiteOpsCalcResult,
   TakeoffSummary,
 } from "../calculations";
-import { SUPERVISION_STAFF_CODES } from "../constants";
+import {
+  SITE_OPS_DYNAMIC_DEFAULTS,
+  SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_SECTIONS,
+  SUPERVISION_STAFF_CODES,
+  type SiteOpsSection,
+} from "../constants";
 import type { ProcessedTakeoffRow } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -46,19 +63,19 @@ import type { ProcessedTakeoffRow } from "@/types";
 
 /**
  * Which tier of engine relationships `describeEngineGraph` emits. Phase 1 shipped the
- * `"summary"` tier (STEP 4 summary + cross-page money trail); Phase 3 adds `"gc"` (the
- * full STEP 2 General Conditions tree). Future phases WIDEN this union (`"siteOps"`,
- * `"division"`, …) and add a matching branch to the switch — the descriptor signature
- * never changes.
+ * `"summary"` tier (STEP 4 summary + cross-page money trail); Phase 3 added `"gc"` (the
+ * full STEP 2 General Conditions tree); Phase 4 adds `"siteOps"` (the full STEP 3 Site
+ * Operations tree). Future phases WIDEN this union (`"division"`, …) and add a matching
+ * branch to the switch — the descriptor signature never changes.
  */
-export type EngineGraphTier = "summary" | "gc";
+export type EngineGraphTier = "summary" | "gc" | "siteOps";
 
 /**
  * Every known engine tier, in dependency-friendly order. The inspection seam
  * (`assembleBindingGraphNodes`) defaults to this so the Links tab auto-covers each tier
  * as it ships — a new phase lights up simply by adding its branch below.
  */
-export const ALL_ENGINE_TIERS: readonly EngineGraphTier[] = ["summary", "gc"];
+export const ALL_ENGINE_TIERS: readonly EngineGraphTier[] = ["summary", "gc", "siteOps"];
 
 // ---------------------------------------------------------------------------
 // Echo-node construction
@@ -287,6 +304,156 @@ function describeGcNodes(gc: PersonnelCalcResult): GraphNode[] {
 }
 
 // ---------------------------------------------------------------------------
+// Tier 3 (Phase 4) — the Site-Ops (STEP 3) internal decomposition tree
+// ---------------------------------------------------------------------------
+
+/** One read-only echo `GraphNode` for a Site-Ops value: `evaluate` returns the captured
+ * engine value; `inputs` declare the edges only (LD-B2 — echo, never re-derive). */
+function echoSiteOpsNode(id: string, value: number, inputs: string[], basis: Basis): GraphNode {
+  return { id, basis, inputs, evaluate: () => value };
+}
+
+/** The minimal leaf-line shape the Site-Ops tier reads: code + total + qty + rate. Every
+ * Site-Ops line (dynamic AND all 3 manual entry types) carries a qty and a rate. */
+interface SiteOpsLeafLine {
+  code: string;
+  total: number;
+  qty: number;
+  rate: number;
+}
+
+/**
+ * STEP 3 line code → its template subtotal section, built from the two config arrays. The
+ * Site-Ops analog of the GC supervision filter: it drives the cross-cutting
+ * `siteops:<section>` re-grouping. Keyed by the Site-Ops criterion code (never a STEP 4
+ * itemId), so the "02-4100.002" string collision between the STEP 3 sawcutting line and
+ * the STEP 4 Demolition linked row cannot cross-contaminate (constants.ts).
+ */
+const SITE_OPS_SECTION_BY_CODE: ReadonlyMap<string, SiteOpsSection> = (() => {
+  const m = new Map<string, SiteOpsSection>();
+  for (const cfg of SITE_OPS_DYNAMIC_DEFAULTS) m.set(cfg.code, cfg.section);
+  for (const cfg of SITE_OPS_MANUAL_DEFAULTS) m.set(cfg.code, cfg.section);
+  return m;
+})();
+
+/**
+ * Describes one Site-Ops line group's leaf lines: a `total` echo node per line (edged to
+ * its `qty` + `rate` derived source nodes), plus those qty/rate nodes. A UNIFORM
+ * `[qty, rate]` leaf edge is faithful for ALL entries — including the 3 manual entry types
+ * — because the engine sets `qty`/`rate` so that `total = qty × rate` always holds:
+ *   - `qty`     → typed qty × template rate;
+ *   - `qtyRate` → typed qty × typed rate;
+ *   - `lumpSum` → the engine sets `qty = value>0 ? 1 : 0`, `rate = value`, so the product is
+ *     still the typed dollar amount.
+ * (This is why Site-Ops, unlike GC's lump-sum equipment, has NO total-only leaves.)
+ * Returns the group's leaf `total` node IDs so the group + section subtotals can edge to them.
+ */
+function describeSiteOpsGroup(
+  group: SiteOpsLineGroup,
+  lines: readonly SiteOpsLeafLine[]
+): { nodes: GraphNode[]; leafTotalIds: string[] } {
+  const nodes: GraphNode[] = [];
+  const leafTotalIds: string[] = [];
+  for (const l of lines) {
+    const totalId = siteOpsLeafNodeId(group, l.code, "total");
+    const qtyId = siteOpsLeafNodeId(group, l.code, "qty");
+    const rateId = siteOpsLeafNodeId(group, l.code, "rate");
+    leafTotalIds.push(totalId);
+    nodes.push(echoSiteOpsNode(qtyId, l.qty, [], "quantity"));
+    nodes.push(echoSiteOpsNode(rateId, l.rate, [], "rate"));
+    // Leaf total = qty × rate — echoed (the edges describe it; the value is the engine's).
+    nodes.push(echoSiteOpsNode(totalId, l.total, [qtyId, rateId], "currency"));
+  }
+  return { nodes, leafTotalIds };
+}
+
+/**
+ * Tier 3 — the STEP 3 Site Operations tree, echoed from `SiteOpsCalcResult` to the leaf:
+ *
+ *   grandTotal ─► dynamicSubtotal ─► each dynamic line total ─► [qty, rate]
+ *              └► manualSubtotal  ─► each manual line total  ─► [qty, rate]
+ *
+ *   siteops:<section> ─► the leaf totals of the lines whose section is that section
+ *      (a CROSS-CUTTING re-grouping spanning dynamic + manual — the Site-Ops analog of
+ *       GC's supervisionSubtotal; it REUSES the same leaf `total` ids, no duplicate leaves)
+ *
+ * Every value is the engine's own: leaf totals echo each `*.total`; the dynamic/manual
+ * subtotals echo the engine's own Σ of that group's leaf totals (the same `dynamicTotal`/
+ * `manualTotal` reduction the engine performs internally); `grandTotal` echoes
+ * `siteOps.grandTotal`, edged to the two group subtotals (its literal
+ * `grandTotal = dynamicTotal + manualTotal` decomposition). The edges declare the wiring;
+ * they never re-derive the math (LD-B2).
+ *
+ * The canonical `siteops:<section>` IDs are reused (LD-B5) — at the
+ * `assembleBindingGraphNodes` seam these engine section nodes outrank the bare
+ * `siteops:<section>` source-node constants (engine > source), so this richer wiring wins.
+ */
+function describeSiteOpsNodes(siteOps: SiteOpsCalcResult): GraphNode[] {
+  const nodes: GraphNode[] = [];
+
+  const dynamic = describeSiteOpsGroup("dynamic", siteOps.dynamicLines);
+  const manual = describeSiteOpsGroup("manual", siteOps.manualLines);
+  nodes.push(...dynamic.nodes, ...manual.nodes);
+
+  // Group subtotals — each ECHOES the engine's own Σ of that group's leaf totals
+  // (the engine's internal dynamicTotal / manualTotal).
+  const dynamicSubtotal = siteOps.dynamicLines.reduce((s, l) => s + l.total, 0);
+  const manualSubtotal = siteOps.manualLines.reduce((s, l) => s + l.total, 0);
+  nodes.push(
+    echoSiteOpsNode(siteOpsSubtotalNodeId("dynamic"), dynamicSubtotal, dynamic.leafTotalIds, "currency")
+  );
+  nodes.push(
+    echoSiteOpsNode(siteOpsSubtotalNodeId("manual"), manualSubtotal, manual.leafTotalIds, "currency")
+  );
+
+  // Grand total — the engine value, edged to its TWO group subtotals. This hand-authored
+  // edge list is one drift point the structural-completeness test guards: Σ(2 subtotals)
+  // must equal siteOps.grandTotal, so a new engine line group can't slip in uncounted (§6).
+  nodes.push(
+    echoSiteOpsNode(
+      SITEOPS_GRAND_TOTAL_NODE_ID,
+      siteOps.grandTotal,
+      [siteOpsSubtotalNodeId("dynamic"), siteOpsSubtotalNodeId("manual")],
+      "currency"
+    )
+  );
+
+  // Section subtotals — a CROSS-CUTTING re-grouping by `cfg.section` (spanning dynamic +
+  // manual), the Site-Ops analog of GC's supervisionSubtotal. Each `siteops:<section>`
+  // reads the leaf totals of its member lines (REUSING the same leaf `total` ids — NOT new
+  // leaves) and echoes their Σ. One node per section so Σ(8 sections) = Σ(all leaves) =
+  // grandTotal exactly (every line maps to exactly one section; the constants test guards
+  // that no line's code is unknown). These reuse the canonical `siteops:<section>` ids
+  // (LD-B5) and so SHADOW the bare section constants at the seam (engine > source).
+  const sectionLeafIds = new Map<SiteOpsSection, string[]>();
+  const sectionTotals = new Map<SiteOpsSection, number>();
+  const collect = (group: SiteOpsLineGroup, lines: readonly SiteOpsLeafLine[]): void => {
+    for (const l of lines) {
+      const section = SITE_OPS_SECTION_BY_CODE.get(l.code);
+      if (!section) continue; // unknown line — the constants test guards against this
+      const list = sectionLeafIds.get(section) ?? [];
+      list.push(siteOpsLeafNodeId(group, l.code, "total"));
+      sectionLeafIds.set(section, list);
+      sectionTotals.set(section, (sectionTotals.get(section) ?? 0) + l.total);
+    }
+  };
+  collect("dynamic", siteOps.dynamicLines);
+  collect("manual", siteOps.manualLines);
+  for (const s of SITE_OPS_SECTIONS) {
+    nodes.push(
+      echoSiteOpsNode(
+        siteOpsSectionNodeId(s.id),
+        sectionTotals.get(s.id) ?? 0,
+        sectionLeafIds.get(s.id) ?? [],
+        "currency"
+      )
+    );
+  }
+
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -295,9 +462,10 @@ function describeGcNodes(gc: PersonnelCalcResult): GraphNode[] {
  * for the requested `tier`. Pure: it only reads the passed engine results and emits nodes;
  * it performs no math, no I/O, and no graph evaluation (LD-B2, LD-B4).
  *
- * `gc`, `siteOps`, and `rows` are part of the stable signature so later tiers (the Site-Ops
- * tree, division rollups) can describe their leaves without a signature change; the
- * `"summary"` tier reads only `summary`, the `"gc"` tier reads only `gc`.
+ * `gc`, `siteOps`, and `rows` are part of the stable signature so later tiers (division
+ * rollups, …) can describe their leaves without a signature change; the `"summary"` tier
+ * reads only `summary`, the `"gc"` tier reads only `gc`, the `"siteOps"` tier reads only
+ * `siteOps`.
  *
  * `tier` accepts a single tier OR a list of tiers — the inspection seam requests the full
  * set (`ALL_ENGINE_TIERS`) so the Links tab shows the complete wiring, while a test or a
@@ -320,6 +488,9 @@ export function describeEngineGraph(
         break;
       case "gc":
         nodes.push(...describeGcNodes(gc));
+        break;
+      case "siteOps":
+        nodes.push(...describeSiteOpsNodes(siteOps));
         break;
     }
   }

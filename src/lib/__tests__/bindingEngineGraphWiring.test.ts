@@ -29,7 +29,10 @@ import {
 import { lineFieldNodeId } from "../bindings/compile";
 import { evaluateGraph } from "../bindings/graph";
 import {
+  SITEOPS_GRAND_TOTAL_NODE_ID,
   gcSubtotalNodeId,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
   summaryNodeId,
   type Binding,
   type GraphNode,
@@ -247,5 +250,44 @@ describe("assembleBindingGraphNodes - engine gc:* node wins over the bare gc:* s
   it("the folded gc:grandTotal evaluates to gc.grandTotal through the kind-blind graph", () => {
     const values = evaluateGraph(folded);
     expect(values.get(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gc.grandTotal, 8);
+  });
+});
+
+describe("assembleBindingGraphNodes - engine siteops:<section> node wins over the bare siteops:<section> source constant", () => {
+  // Phase 4: the siteOps tier's engine ids overlap the bare siteops:<section> source nodes
+  // (LD-B5). With the fold ON (the default tier set now includes "siteOps") the richer engine
+  // section node must REPLACE the bare constant — engine > source — so the Site-Ops tree
+  // wiring is what shows. "siteOperations" always has the two dynamic lines, so it is non-empty.
+  const folded = assembleBindingGraphNodes([], gc, siteOps, rows, {
+    includeEngineGraph: true,
+    summary,
+  });
+  const SECTION = "siteOperations" as const;
+
+  it("siteops:<section> appears once and is the ENGINE node (edged to its member leaf totals), not the bare constant", () => {
+    const section = folded.filter((n) => n.id === siteOpsSectionNodeId(SECTION));
+    expect(section).toHaveLength(1);
+    // The bare source constant has NO inputs; the surviving engine node declares its member
+    // leaf totals (cross-cutting re-grouping), every one a siteops leaf-total node.
+    expect(section[0].inputs.length).toBeGreaterThan(0);
+    for (const dep of section[0].inputs) {
+      expect(dep).toMatch(/^siteops:(dynamic|manual):.+:total$/);
+    }
+  });
+
+  it("folds in the Site-Ops tree (grand total + group subtotals + leaf nodes) with NO duplicate ids", () => {
+    expect(folded.some((n) => n.id === SITEOPS_GRAND_TOTAL_NODE_ID)).toBe(true);
+    expect(folded.some((n) => n.id === siteOpsSubtotalNodeId("dynamic"))).toBe(true);
+    expect(folded.some((n) => n.id === siteOpsSubtotalNodeId("manual"))).toBe(true);
+    expect(folded.some((n) => n.id.startsWith("siteops:dynamic:"))).toBe(true);
+    expect(folded.some((n) => n.id.startsWith("siteops:manual:"))).toBe(true);
+    const ids = allIds(folded);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("the folded siteops:grandTotal evaluates to siteOps.grandTotal through the kind-blind graph", () => {
+    const values = evaluateGraph(folded);
+    expect(values.get(SITEOPS_GRAND_TOTAL_NODE_ID)).toBeCloseTo(siteOps.grandTotal, 8);
+    expect(values.get(siteOpsSectionNodeId(SECTION))).toBeGreaterThan(0);
   });
 });
