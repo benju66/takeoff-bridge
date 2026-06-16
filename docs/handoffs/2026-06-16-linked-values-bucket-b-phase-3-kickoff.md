@@ -31,7 +31,9 @@ Status at handoff: **suite 947 pass / 83 files**, `npx tsc --noEmit` clean, esli
 (only 2 PRE-EXISTING warnings, untouched), the three export goldens (McKenna / synthetic /
 CARE) tie **$0.00**, and the new Playwright e2e `e2e/linked-values-engine-graph.spec.ts`
 passes LIVE (it starts the dev server, logs in, clicks the Subtotal cell's link affordance,
-and confirms the Links tab shows the cross-page leaves). **Nothing is pushed; no PR.**
+and confirms the Links tab shows the cross-page leaves). **Phases 1-2 (these 5 commits) were
+merged to `main` via PR (architect-approved) - this branch is closed. Start Phase 3 on a FRESH
+branch off the updated `main`.**
 
 New tests added in Phase 2:
 - `src/lib/__tests__/bindingEngineGraphWiring.test.ts` (9) - fold off/on, echo === engine at
@@ -103,8 +105,11 @@ folded node (engine) wins over the bare `gc:grandTotal` source constant.
 - **STOP at the Phase 3 boundary - do not start Phase 4.**
 
 ## Branch / commit hygiene
-- Stay on `linked-values-bucket-b`. Do **not** work on `main`.
-- Do **not** push or open a PR unless the architect asks (they spot-check before merge).
+- Phases 1-2 were merged to `main` via PR; the old `linked-values-bucket-b` branch is closed.
+  Create a **fresh branch off the updated `main`** for Phase 3 (e.g. `linked-values-bucket-b-p3`).
+  Do **not** continue committing on the merged branch.
+- Do **not** push or open a PR unless the architect asks (they review/merge each phase pair;
+  the per-phase-pair merge cadence is the agreed way to avoid stacking).
 
 ## Environment note (carry forward from Phase 2)
 - This session's `Edit`/`Write` tools were intermittently blocked by a hook; the work was
