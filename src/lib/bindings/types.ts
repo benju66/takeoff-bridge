@@ -150,6 +150,52 @@ export interface Binding {
 }
 
 // ---------------------------------------------------------------------------
+// Canonical node-ID scheme (spec §2.2) — by-ID / by-query, never by cell position
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical node-ID prefixes the kind-blind graph addresses values by. Each is a
+ * stable identity (never a cell position) so a binding/edge survives row churn:
+ *  - `gc:<name>`            — a STEP 2 General Conditions computed value (registry.ts).
+ *  - `siteops:<section>`    — a STEP 3 Site-Ops section subtotal (registry.ts).
+ *  - `line:<rowId>:<field>` — a STEP 4 line's aggregatable field (compile.ts).
+ *  - `summary:<field>`      — a STEP 4 TakeoffSummary field (Bucket B; engineGraph.ts).
+ *
+ * Bucket B adds the `summary:*` family below; later tiers extend the scheme (e.g.
+ * `division:<NN>:total`) without teaching the graph core any new kind (LD-B5).
+ */
+
+/**
+ * The `TakeoffSummary` fields exposed as `summary:<field>` engine graph nodes (Bucket B,
+ * Tier 1). Each node's value ECHOES `computeTakeoffSummary` — the descriptor never
+ * re-derives the math (LD-B2). Declared here as a string union (not `keyof TakeoffSummary`)
+ * so this leaf module stays free of app/calc-result imports; engineGraph.ts is the only
+ * place that binds these IDs to the live summary.
+ */
+export type SummaryNodeField =
+  | "takeoffSubtotal"
+  | "linkedDivisionsTotal"
+  | "subtotal"
+  | "constructionContingency"
+  | "designContingency"
+  | "buildersRisk"
+  | "specialInsurance"
+  | "glInsurance"
+  | "bond"
+  | "fee"
+  | "totalEstimatedCost"
+  | "costPerSf"
+  | "costPerUnit";
+
+/** The `summary:` node-ID prefix. */
+export const SUMMARY_NODE_PREFIX = "summary:";
+
+/** Stable node ID for a TakeoffSummary field: `summary:<field>`. */
+export function summaryNodeId(field: SummaryNodeField): string {
+  return `${SUMMARY_NODE_PREFIX}${field}`;
+}
+
+// ---------------------------------------------------------------------------
 // Graph node — the ONLY shape the kind-blind graph engine understands (spec §2.1)
 // ---------------------------------------------------------------------------
 

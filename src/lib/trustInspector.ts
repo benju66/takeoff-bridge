@@ -25,7 +25,7 @@ import {
 } from "@/lib/bindings/registry";
 import { evaluateGraph } from "@/lib/bindings/graph";
 import { findBindingByTarget } from "@/lib/bindings/store";
-import type { Binding } from "@/lib/bindings/types";
+import { SUMMARY_NODE_PREFIX, type Binding } from "@/lib/bindings/types";
 
 /** The Trust Inspector tabs. Trace + Links are two views of one dependency graph. */
 export type TrustTab = "trace" | "links" | "reconcile" | "flags";
@@ -437,28 +437,53 @@ export interface LinksModel {
   focus: LinkNodeRef;
   /** True when the focused node is computed by a USER binding (a derived, read-only cell). */
   isBound: boolean;
+  /**
+   * True when the focus is a read-only ENGINE-described value — it has inputs but is NOT
+   * a user binding (a `summary:*` echo / cross-page node, Bucket B). Mutually exclusive
+   * with `isBound`; both false = a plain cell that holds its own number.
+   */
+  isDerived: boolean;
   /** Short "depends on …" description of the focus binding (badge label), when bound. */
   bindingDescription?: string;
-  /** The focus binding's direct inputs (what this cell reads). Empty when not bound. */
+  /** The focus node's direct inputs (what this cell reads). Empty for a plain cell. */
   dependsOn: LinkNodeRef[];
-  /** The authored links whose inputs include the focus (what feeds off this cell). */
+  /** Every node (user binding OR engine) whose inputs include the focus (what feeds off it). */
   usedBy: LinkNodeRef[];
 }
 
 export interface BuildLinksArgs {
-  /** Node id the inspector is focused on (e.g. `line:<rowId>:total`, `gc:grandTotal`). */
+  /** Node id the inspector is focused on (e.g. `line:<rowId>:total`, `summary:subtotal`). */
   focusNodeId: string;
   /** The project's authored bindings (optimistic list from the page). */
   bindings: Binding[];
   gc: PersonnelCalcResult;
   siteOps: SiteOpsCalcResult;
   rows: ProcessedTakeoffRow[];
+  /**
+   * The effective summary the engine-described nodes ECHO (Bucket B). Pass it (the page
+   * does, from the same memoized `computeTakeoffSummary` the grid uses — the echo-staleness
+   * guard) to see the engine wiring for `summary:*` / cross-page nodes. Omit → no engine
+   * nodes (the pre-Bucket-B user-binding-only view).
+   */
+  summary?: TakeoffSummary;
+}
+
+/**
+ * Map a Trust Inspector focus token to its dependency-graph node id. Summary cells focus
+ * on a bare `TakeoffSummary` field name (e.g. "subtotal", "fee") — the Trace tab's
+ * `focusField` — which the engine graph addresses as `summary:<field>` (engineGraph.ts).
+ * A token that already carries a node-id prefix (`line:` / `gc:` / `siteops:` / `summary:`)
+ * is passed through unchanged (e.g. the grid badge dispatches `line:<rowId>:total`).
+ */
+export function focusFieldToNodeId(focusField: string): string {
+  return focusField.includes(":") ? focusField : `${SUMMARY_NODE_PREFIX}${focusField}`;
 }
 
 /**
  * Build the Links view-model for one focused node. Assembles the same kind-blind graph
- * the grid recomputes (so depends-on/used-by match exactly what the engine evaluates),
- * then labels each edge via the shared node labeller. When there are no bindings the
+ * the grid recomputes — but OPTS IN to the read-only engine-described nodes (Bucket B) so
+ * a `summary:*` / cross-page node shows its real depends-on / used-by — then labels each
+ * edge via the shared node labeller. When there are neither bindings nor a summary the
  * graph is empty and the model is just the focus node (cheap — the common/golden case).
  */
 export function buildLinksModel({
@@ -467,10 +492,13 @@ export function buildLinksModel({
   gc,
   siteOps,
   rows,
+  summary,
 }: BuildLinksArgs): LinksModel {
-  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows);
+  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows, {
+    includeEngineGraph: true,
+    summary,
+  });
   const values = nodes.length ? evaluateGraph(nodes) : new Map<string, number>();
-  const targetIds = new Set(bindings.map((b) => b.targetNodeId));
 
   const toRef = (nodeId: string): LinkNodeRef => {
     const d = describeSourceNode(nodeId, rows);
@@ -480,18 +508,26 @@ export function buildLinksModel({
   const focusBinding = findBindingByTarget(bindings, focusNodeId);
   const focusNode = nodes.find((n) => n.id === focusNodeId);
 
-  // depends-on: the focus binding's direct inputs (only meaningful when it is bound).
-  const dependsOn =
-    focusBinding && focusNode ? focusNode.inputs.map(toRef) : [];
+  // depends-on: the focus node's direct inputs — its real wiring whether the node is a
+  // USER binding (a lookup/rollup) or an ENGINE-described value (a summary echo). A plain
+  // source/constant cell has no inputs, so this is empty for it.
+  const dependsOn = focusNode ? focusNode.inputs.map(toRef) : [];
 
-  // used-by: authored link targets whose inputs read the focus node (one hop).
+  // used-by: every node (user binding OR engine) whose inputs read the focus (one hop).
+  // Plain source/constant nodes have no inputs, so they never appear here.
   const usedBy = nodes
-    .filter((n) => targetIds.has(n.id) && n.inputs.includes(focusNodeId))
+    .filter((n) => n.id !== focusNodeId && n.inputs.includes(focusNodeId))
     .map((n) => toRef(n.id));
+
+  const isBound = !!focusBinding;
+  // Derived = has inputs but is not a user binding → an engine-described value (read-only
+  // here; the engine is the authority).
+  const isDerived = !isBound && !!focusNode && focusNode.inputs.length > 0;
 
   return {
     focus: toRef(focusNodeId),
-    isBound: !!focusBinding,
+    isBound,
+    isDerived,
     bindingDescription: focusBinding ? describeBindingDependency(focusBinding) : undefined,
     dependsOn,
     usedBy,

@@ -7,7 +7,7 @@ import Link from "next/link";
 import { flexRender, useReactTable } from "@tanstack/react-table";
 import type { HeaderGroup, Header, Row, Cell, Column } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2 } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -17,7 +17,7 @@ import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/l
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
-import { buildFlagsModel, buildLinksModel } from "@/lib/trustInspector";
+import { buildFlagsModel, buildLinksModel, focusFieldToNodeId } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
@@ -42,10 +42,12 @@ const fmtUSD = (n: number) =>
 function SummaryTraceCell({
   valueStr,
   onTrace,
+  onLinks,
   overridden,
 }: {
   valueStr: string;
   onTrace: () => void;
+  onLinks?: () => void;
   overridden?: OverridePair;
 }) {
   return (
@@ -70,6 +72,18 @@ function SummaryTraceCell({
       >
         <Search size={12} />
       </button>
+      {onLinks && (
+        <button
+          type="button"
+          data-testid="summary-links"
+          onClick={onLinks}
+          title="Inspect this value's links (what it reads, what feeds off it)"
+          aria-label="Open the Links tab for this value"
+          className="text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+        >
+          <Link2 size={12} />
+        </button>
+      )}
     </span>
   );
 }
@@ -303,11 +317,22 @@ export function EstimateTable({
   }, [openTrust]);
 
   // Links view-model (Phase 5) for the focused node — the depends-on / used-by the Links
-  // tab renders. Rebuilt when the focus or the binding graph changes; cheap (empty graph)
-  // when there are no bindings, which is the common/golden case.
+  // tab renders, INCLUDING the read-only engine wiring (summary:* + cross-page nodes) via
+  // the opt-in fold. Built only while the inspector is open (gated on trustOpen) so the
+  // closed/idle grid path stays cheap; undefined when closed.
   const linksModel = useMemo(
-    () => buildLinksModel({ focusNodeId: trustField, bindings, gc: gcCalcResult, siteOps: siteOpsCalcResult, rows }),
-    [trustField, bindings, gcCalcResult, siteOpsCalcResult, rows]
+    () =>
+      trustOpen
+        ? buildLinksModel({
+            focusNodeId: focusFieldToNodeId(trustField),
+            bindings,
+            gc: gcCalcResult,
+            siteOps: siteOpsCalcResult,
+            rows,
+            summary: takeoffSummary,
+          })
+        : undefined,
+    [trustOpen, trustField, bindings, gcCalcResult, siteOpsCalcResult, rows, takeoffSummary]
   );
 
   // [view rows] — clear any active filter so all contributing takeoff rows are
@@ -1062,7 +1087,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center font-mono"; }
                     else if (column.id === "description") { content = "Estimate Subtotal (incl. GC + Site Ops)"; alignClass = "text-left font-sans"; }
-                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("subtotal")} overridden={takeoffSummary.overrides?.subtotal} />; alignClass = "text-center text-foreground font-bold font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("subtotal")} onLinks={() => openTrust("subtotal", "links")} overridden={takeoffSummary.overrides?.subtotal} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${(subtotal / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${(subtotal / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }
@@ -1089,7 +1114,7 @@ export function EstimateTable({
                         else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
                         else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
                         else if (column.id === "unitPrice") { content = `$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
-                        else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} overridden={takeoffSummary.overrides?.[mod.key]} />; alignClass = "text-center text-foreground font-bold font-mono"; }
+                        else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} onLinks={() => openTrust(mod.key, "links")} overridden={takeoffSummary.overrides?.[mod.key]} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                         else if (column.id === "costPerUnit") { content = `$${(modValue / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         else if (column.id === "costPerSf") { content = `$${(modValue / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
@@ -1106,7 +1131,7 @@ export function EstimateTable({
                     let alignClass = "text-left font-sans";
                     if (column.id === "costType") { content = "TI"; alignClass = "text-center text-emerald-600 dark:text-emerald-500 font-extrabold font-mono"; }
                     else if (column.id === "description") { content = "Total Estimated Cost"; alignClass = "text-left uppercase tracking-wider font-sans"; }
-                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("totalEstimatedCost")} overridden={takeoffSummary.overrides?.totalEstimatedCost} />; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
+                    else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${totalEstimatedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust("totalEstimatedCost")} onLinks={() => openTrust("totalEstimatedCost", "links")} overridden={takeoffSummary.overrides?.totalEstimatedCost} />; alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono"; }
                     else if (column.id === "costPerUnit") { content = `$${costPerUnit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "costPerSf") { content = `$${costPerSf.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center text-sm font-mono"; }
                     else if (column.id === "uom" || ["matchedQty", "unitPrice"].includes(column.id)) { alignClass = "text-center font-mono"; }

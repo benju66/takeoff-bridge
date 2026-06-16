@@ -23,6 +23,7 @@
 
 import { compileBindingToNode, lineFieldNodeId } from "./compile";
 import { evaluateGraph } from "./graph";
+import { describeEngineGraph, type EngineGraphTier } from "./engineGraph";
 import type { Basis, Binding, BindingLine, GraphNode, RollupField } from "./types";
 import {
   LINKED_DIVISION_ROWS,
@@ -38,6 +39,7 @@ import type {
   LinkedDivisionTotal,
   PersonnelCalcResult,
   SiteOpsCalcResult,
+  TakeoffSummary,
 } from "../calculations";
 import type { ProcessedTakeoffRow } from "@/types";
 
@@ -363,29 +365,59 @@ export function recomputeLineBindingValues(
 }
 
 /**
+ * Options for {@link assembleBindingGraphNodes}. Bucket B (Phase 2) adds the opt-in
+ * engine-graph fold; it defaults OFF so the grid recompute / authoring-cycle / preview
+ * call paths are byte-identical and the export goldens tie $0.00 (LD-B4).
+ */
+export interface AssembleBindingGraphOptions {
+  /**
+   * Fold in the read-only engine-described nodes (engineGraph.ts). OFF by default. When
+   * ON the assembly never short-circuits to `[]` on an empty binding set — the engine
+   * wiring stays visible even on a project with no user bindings (the Links-tab case).
+   */
+  includeEngineGraph?: boolean;
+  /**
+   * The EFFECTIVE summary the engine nodes ECHO (LD-B2). REQUIRED for the engine fold to
+   * activate — without it `includeEngineGraph` is a no-op, so a caller can never emit
+   * engine nodes against an absent/stale summary (the echo-staleness guard, plan §6).
+   */
+  summary?: TakeoffSummary;
+  /** Which engine tier to describe (default `"summary"` — the Phase 1/2 tier). */
+  engineTier?: EngineGraphTier;
+}
+
+/**
  * Assembles the kind-blind graph node list (live source nodes + compiled USER binding
- * nodes) the recompute, the authoring cycle-guard, and the Links view all share — the
- * ONE place collision precedence is resolved so the graph core (graph.ts) is never
- * handed two nodes with the same id:
+ * nodes, plus the opt-in read-only engine-described nodes) the recompute, the authoring
+ * cycle-guard, and the Links view all share — the ONE place collision precedence is
+ * resolved so the graph core (graph.ts) is never handed two nodes with the same id:
+ *  - **User binding > engine node > bare source node.** A user binding REPLACES that
+ *    line's constant `line:<id>:total` source node (the cell becomes derived/read-only);
+ *    a surviving engine node in turn replaces any bare source-node constant of its id.
  *  - **Reserved linked rows win.** A user binding targeting one of the 10 hardcoded
  *    linked-division total nodes is SKIPPED (logged) — the hardcoded bridge stays
- *    authoritative.
- *  - **User binding wins over a plain line.** A surviving binding REPLACES that line's
- *    constant `line:<id>:total` source node (the colliding constant is dropped).
+ *    authoritative — and an engine node colliding with a reserved linked node is dropped.
  *
- * Returns `[]` when there are no effective user bindings, so the recompute is INERT and
- * the export goldens tie $0.00 (a project with no user bindings builds NO nodes).
- * Stays KIND-BLIND: kind knowledge lives only in `compileBindingToNode`.
+ * With the engine fold OFF (the default — the grid path) and no effective user bindings,
+ * returns `[]`, so the recompute is INERT and the export goldens tie $0.00 (a project with
+ * no user bindings builds NO nodes). With the fold ON (the Links tab) the engine wiring is
+ * emitted regardless. Stays KIND-BLIND: kind knowledge lives only in `compileBindingToNode`;
+ * the engine nodes are plain `GraphNode`s (engineGraph.ts) folded here at the single seam.
  */
 export function assembleBindingGraphNodes(
   bindings: readonly Binding[],
   gc: PersonnelCalcResult,
   siteOps: SiteOpsCalcResult,
-  rows: readonly ProcessedTakeoffRow[]
+  rows: readonly ProcessedTakeoffRow[],
+  options: AssembleBindingGraphOptions = {}
 ): GraphNode[] {
-  if (bindings.length === 0) return [];
+  // The engine fold activates only with BOTH the opt-in flag AND a summary to echo, so
+  // the grid path — which passes neither — stays byte-identical (LD-B4).
+  const includeEngine = options.includeEngineGraph === true && options.summary != null;
 
-  // Reserved target node ids: the total node of every linked-division row present.
+  // Reserved target node ids: the total node of every linked-division row present. A user
+  // binding on one is system-managed (the hardcoded bridge wins); an engine node colliding
+  // with one is shadowed by it.
   const reserved = new Set<string>();
   for (const r of rows) {
     if (isLinkedDivisionRow(r.itemId)) reserved.add(lineFieldNodeId(r.id, "total"));
@@ -402,16 +434,44 @@ export function assembleBindingGraphNodes(
     }
     effective.push(b);
   }
-  if (effective.length === 0) return [];
+
+  // INERT FAST PATH (grid / recompute / authoring cycle-guard): with the engine fold OFF
+  // and no effective user bindings, build NOTHING — the recompute is a no-op and the
+  // goldens tie $0.00. (With the fold ON we always proceed so the wiring stays visible.)
+  if (!includeEngine && effective.length === 0) return [];
 
   const lines = rows.map(projectLine);
-  const dropTargets = new Set(effective.map((b) => b.targetNodeId));
-  // Source nodes minus any constant a surviving binding now computes (binding wins).
-  const sourceNodes = userBindingSourceNodes(gc, siteOps, lines).filter(
-    (n) => !dropTargets.has(n.id)
-  );
+  const bindingTargets = new Set(effective.map((b) => b.targetNodeId));
   const bindingNodes = effective.map((b) => compileBindingToNode(b, { lines }));
-  return [...sourceNodes, ...bindingNodes];
+
+  if (!includeEngine) {
+    // Source nodes minus any constant a surviving binding now computes (binding wins).
+    const sourceNodes = userBindingSourceNodes(gc, siteOps, lines).filter(
+      (n) => !bindingTargets.has(n.id)
+    );
+    return [...sourceNodes, ...bindingNodes];
+  }
+
+  // ---- Bucket B fold (precedence: user binding > engine node > bare source node) ------
+  // Engine nodes are shadowed by a user binding target or a reserved linked-division node
+  // (both outrank the engine description); the surviving engine nodes in turn outrank any
+  // bare source-node constant of the same id. Dropping the losers HERE is what keeps the
+  // kind-blind graph core from ever seeing a duplicate id (buildGraph throws GraphError).
+  const engineNodes = describeEngineGraph(
+    gc,
+    siteOps,
+    rows,
+    options.summary!,
+    options.engineTier ?? "summary"
+  ).filter((n) => !bindingTargets.has(n.id) && !reserved.has(n.id));
+  const engineIds = new Set(engineNodes.map((n) => n.id));
+
+  // Bare source nodes minus any id a surviving user binding OR engine node now computes.
+  const sourceNodes = userBindingSourceNodes(gc, siteOps, lines).filter(
+    (n) => !bindingTargets.has(n.id) && !engineIds.has(n.id)
+  );
+
+  return [...sourceNodes, ...bindingNodes, ...engineNodes];
 }
 
 // ---------------------------------------------------------------------------
