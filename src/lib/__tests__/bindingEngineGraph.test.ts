@@ -28,7 +28,29 @@ import {
 import { computeLinkedDivisionTotalsViaEngine } from "../bindings/registry";
 import { describeEngineGraph } from "../bindings/engineGraph";
 import { evaluateGraph, findCycle } from "../bindings/graph";
-import { summaryNodeId, type GraphNode, type SummaryNodeField } from "../bindings/types";
+import {
+  GC_GENERAL_NODE_ID,
+  GC_GRAND_TOTAL_NODE_ID,
+  GC_SUPERVISION_NODE_ID,
+  SITEOPS_GRAND_TOTAL_NODE_ID,
+  gcLeafNodeId,
+  gcSubtotalNodeId,
+  siteOpsLeafNodeId,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
+  summaryNodeId,
+  type GcSubtotalGroup,
+  type GraphNode,
+  type SiteOpsLineGroup,
+  type SummaryNodeField,
+} from "../bindings/types";
+import {
+  SITE_OPS_DYNAMIC_DEFAULTS,
+  SITE_OPS_MANUAL_DEFAULTS,
+  SITE_OPS_SECTIONS,
+  SUPERVISION_STAFF_CODES,
+  type SiteOpsSection,
+} from "../constants";
 import type { EstimateOverrideMap, ProcessedTakeoffRow } from "@/types";
 
 // ---------------------------------------------------------------------------
@@ -272,6 +294,393 @@ describe("engineGraph — evaluates through the kind-blind graph to the engine v
       const values = evaluateGraph(fx.nodes);
       for (const field of ALL_SUMMARY_FIELDS) {
         expect(values.get(summaryNodeId(field))).toBeCloseTo(fx.summary[field], 8);
+      }
+    });
+  }
+});
+
+// ===========================================================================
+// GC tier (Phase 3) — the STEP 2 General Conditions decomposition tree
+// ===========================================================================
+
+// A second GC fixture (different durations, utilizations, rate overrides, and extra
+// manual/equipment entries). It proves the descriptor ECHOES the engine's result across
+// varied inputs — never a re-derivation of defaults (the LD-B2 faithfulness guard, the GC
+// analog of the summary override fixture above).
+const gcAlt: PersonnelCalcResult = computePersonnelCosts(
+  18,
+  52000,
+  { ex: 75, srPm: 40, pm: 100, srSu: 60, su: 100, asstSu: 50 },
+  { dumpsters: 2500, toilets: 1800, electric: 4200 },
+  { designArch: 42000, projectSigns: 3, legalFees: 2 },
+  { ex: 210, su: 132 }
+);
+
+/** Build the GC-tier nodes + an id→node map for one PersonnelCalcResult (the tier ignores
+ * `summary`/`rows`; any in-scope summary works). */
+function gcBuild(gcRes: PersonnelCalcResult): {
+  nodes: GraphNode[];
+  byId: Map<string, GraphNode>;
+} {
+  const nodes = describeEngineGraph(gcRes, siteOps, [], populated.summary, "gc");
+  return { nodes, byId: new Map(nodes.map((n) => [n.id, n])) };
+}
+
+/** Σ the supervision staff leaf totals exactly as the engine/oracle does. */
+function supervisionOf(gcRes: PersonnelCalcResult): number {
+  return gcRes.staffLines
+    .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+    .reduce((s, l) => s + l.total, 0);
+}
+
+/** The three qty×rate groups (equipment is lump-sum, asserted separately). */
+const QTY_RATE_GROUPS = ["staff", "ops", "manual"] as const;
+type LeafLine = { code: string; qty: number; rate: number; total: number };
+function groupLines(gcRes: PersonnelCalcResult, group: GcSubtotalGroup): LeafLine[] {
+  switch (group) {
+    case "staff":
+      return gcRes.staffLines;
+    case "ops":
+      return gcRes.operationalLines;
+    case "manual":
+      return gcRes.manualLines;
+    case "equipment":
+      return gcRes.equipmentLines.map((l) => ({ ...l, qty: 0, rate: 0 }));
+  }
+}
+
+describe("engineGraph gc tier — echo equals computePersonnelCosts (the engine is the authority)", () => {
+  for (const [label, gcRes] of [
+    ["populated", gc],
+    ["rate-override", gcAlt],
+  ] as const) {
+    const { byId } = gcBuild(gcRes);
+    const val = (id: string): number => {
+      const n = byId.get(id);
+      if (!n) throw new Error(`missing gc node ${id}`);
+      return n.evaluate(new Map());
+    };
+
+    it(`echoes every staff/ops/manual leaf line (total, qty, rate) — ${label}`, () => {
+      for (const group of QTY_RATE_GROUPS) {
+        for (const l of groupLines(gcRes, group)) {
+          expect(val(gcLeafNodeId(group, l.code, "total"))).toBeCloseTo(l.total, 8);
+          expect(val(gcLeafNodeId(group, l.code, "qty"))).toBeCloseTo(l.qty, 8);
+          expect(val(gcLeafNodeId(group, l.code, "rate"))).toBeCloseTo(l.rate, 8);
+        }
+      }
+    });
+
+    it(`echoes each equipment leaf total (lump sum, no qty/rate node) — ${label}`, () => {
+      for (const l of gcRes.equipmentLines) {
+        expect(val(gcLeafNodeId("equipment", l.code, "total"))).toBeCloseTo(l.total, 8);
+        expect(byId.has(gcLeafNodeId("equipment", l.code, "qty"))).toBe(false);
+        expect(byId.has(gcLeafNodeId("equipment", l.code, "rate"))).toBe(false);
+      }
+    });
+
+    it(`echoes the four subtotals, grand total, supervision, and general — ${label}`, () => {
+      const sup = supervisionOf(gcRes);
+      expect(val(gcSubtotalNodeId("staff"))).toBeCloseTo(
+        gcRes.staffLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(gcSubtotalNodeId("ops"))).toBeCloseTo(
+        gcRes.operationalLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(gcSubtotalNodeId("equipment"))).toBeCloseTo(gcRes.equipmentTotal, 8);
+      expect(val(gcSubtotalNodeId("manual"))).toBeCloseTo(
+        gcRes.manualLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal, 8);
+      expect(val(GC_SUPERVISION_NODE_ID)).toBeCloseTo(sup, 8);
+      expect(val(GC_GENERAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal - sup, 8);
+    });
+  }
+
+  it("the populated fixture exercises non-zero values across all four groups", () => {
+    expect(gc.staffLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(gc.operationalLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(gc.equipmentTotal).toBeGreaterThan(0);
+    expect(gc.manualLines.reduce((s, l) => s + l.total, 0)).toBeGreaterThan(0);
+    expect(supervisionOf(gc)).toBeGreaterThan(0);
+  });
+});
+
+describe("engineGraph gc tier — authored edges (the depends-on / used-by wiring)", () => {
+  const { byId } = gcBuild(gc);
+  const inputs = (id: string): string[] => byId.get(id)!.inputs;
+
+  it("grand total reads the four group subtotals, in order", () => {
+    expect(inputs(GC_GRAND_TOTAL_NODE_ID)).toEqual([
+      gcSubtotalNodeId("staff"),
+      gcSubtotalNodeId("ops"),
+      gcSubtotalNodeId("equipment"),
+      gcSubtotalNodeId("manual"),
+    ]);
+  });
+
+  it("each group subtotal reads its own group's leaf totals", () => {
+    for (const group of ["staff", "ops", "equipment", "manual"] as const) {
+      expect(inputs(gcSubtotalNodeId(group))).toEqual(
+        groupLines(gc, group).map((l) => gcLeafNodeId(group, l.code, "total"))
+      );
+    }
+  });
+
+  it("each qty×rate leaf total reads its qty + rate; lump-sum equipment leaves read nothing", () => {
+    for (const l of gc.staffLines) {
+      expect(inputs(gcLeafNodeId("staff", l.code, "total"))).toEqual([
+        gcLeafNodeId("staff", l.code, "qty"),
+        gcLeafNodeId("staff", l.code, "rate"),
+      ]);
+    }
+    for (const l of gc.equipmentLines) {
+      expect(inputs(gcLeafNodeId("equipment", l.code, "total"))).toEqual([]);
+    }
+  });
+
+  it("qty and rate are leaf source nodes (no inputs)", () => {
+    for (const l of gc.staffLines) {
+      expect(inputs(gcLeafNodeId("staff", l.code, "qty"))).toEqual([]);
+      expect(inputs(gcLeafNodeId("staff", l.code, "rate"))).toEqual([]);
+    }
+  });
+
+  it("supervision reads its supervision staff leaf totals; general reads grand total + supervision", () => {
+    const supIds = gc.staffLines
+      .filter((l) => SUPERVISION_STAFF_CODES.includes(l.code))
+      .map((l) => gcLeafNodeId("staff", l.code, "total"));
+    expect(inputs(GC_SUPERVISION_NODE_ID)).toEqual(supIds);
+    expect(inputs(GC_GENERAL_NODE_ID)).toEqual([GC_GRAND_TOTAL_NODE_ID, GC_SUPERVISION_NODE_ID]);
+  });
+
+  it("no dangling edges (every input id is also emitted by the tier)", () => {
+    const ids = new Set(byId.keys());
+    for (const n of byId.values()) {
+      for (const dep of n.inputs) expect(ids.has(dep)).toBe(true);
+    }
+  });
+});
+
+describe("engineGraph gc tier — acyclicity + evaluates through the kind-blind graph", () => {
+  for (const [label, gcRes] of [
+    ["populated", gc],
+    ["rate-override", gcAlt],
+  ] as const) {
+    const { nodes } = gcBuild(gcRes);
+
+    it(`the authored edge set is acyclic — ${label}`, () => {
+      expect(findCycle(nodes)).toBeNull();
+    });
+
+    it(`evaluateGraph resolves grand total / supervision / general + leaves to the engine value — ${label}`, () => {
+      const values = evaluateGraph(nodes);
+      const sup = supervisionOf(gcRes);
+      expect(values.get(GC_GRAND_TOTAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal, 8);
+      expect(values.get(GC_SUPERVISION_NODE_ID)).toBeCloseTo(sup, 8);
+      expect(values.get(GC_GENERAL_NODE_ID)).toBeCloseTo(gcRes.grandTotal - sup, 8);
+      for (const l of gcRes.staffLines) {
+        expect(values.get(gcLeafNodeId("staff", l.code, "total"))).toBeCloseTo(l.total, 8);
+      }
+    });
+  }
+});
+
+// ===========================================================================
+// Site-Ops tier (Phase 4) — the STEP 3 Site Operations decomposition tree
+// ===========================================================================
+
+// A second Site-Ops fixture, deliberately exercising ALL THREE manual entry types so the
+// uniform [qty, rate] leaf edge is proven faithful for each (the LD-B2 guard, the Site-Ops
+// analog of the summary override fixture above):
+//   - qtyRate → soilBorings (typed qty 5 × typed rate 1500)
+//   - lumpSum → ffeRelocation (12000) + abatement (8000)
+//   - qty     → knox / demolition / payrollCleaning / finalCleaning (typed qty × template rate)
+const siteOpsVaried: SiteOpsCalcResult = computeSiteOperations(
+  15,
+  25000,
+  { knox: 3, demolition: 800, soilBorings: 5, ffeRelocation: 12000, abatement: 8000, payrollCleaning: 40, finalCleaning: 2 },
+  { soilBorings: 1500 }
+);
+
+/** Build the Site-Ops-tier nodes + an id→node map for one SiteOpsCalcResult (the tier
+ * ignores `gc`/`summary`/`rows`; any in-scope summary works). */
+function siteOpsBuild(soRes: SiteOpsCalcResult): {
+  nodes: GraphNode[];
+  byId: Map<string, GraphNode>;
+} {
+  const nodes = describeEngineGraph(gc, soRes, [], populated.summary, "siteOps");
+  return { nodes, byId: new Map(nodes.map((n) => [n.id, n])) };
+}
+
+const SITE_OPS_GROUPS = ["dynamic", "manual"] as const;
+function siteOpsGroupLines(
+  soRes: SiteOpsCalcResult,
+  group: SiteOpsLineGroup
+): readonly { code: string; qty: number; rate: number; total: number }[] {
+  return group === "dynamic" ? soRes.dynamicLines : soRes.manualLines;
+}
+
+/** STEP 3 line code → its template section, built independently from the configs. */
+const SECTION_BY_CODE: ReadonlyMap<string, SiteOpsSection> = (() => {
+  const m = new Map<string, SiteOpsSection>();
+  for (const c of SITE_OPS_DYNAMIC_DEFAULTS) m.set(c.code, c.section);
+  for (const c of SITE_OPS_MANUAL_DEFAULTS) m.set(c.code, c.section);
+  return m;
+})();
+
+/** The leaf `total` node ids each section node MUST read (cross-cutting re-grouping). */
+function expectedSectionLeafIds(soRes: SiteOpsCalcResult): Map<SiteOpsSection, string[]> {
+  const m = new Map<SiteOpsSection, string[]>();
+  const add = (group: SiteOpsLineGroup, lines: readonly { code: string }[]): void => {
+    for (const l of lines) {
+      const sec = SECTION_BY_CODE.get(l.code)!;
+      const list = m.get(sec) ?? [];
+      list.push(siteOpsLeafNodeId(group, l.code, "total"));
+      m.set(sec, list);
+    }
+  };
+  add("dynamic", soRes.dynamicLines);
+  add("manual", soRes.manualLines);
+  return m;
+}
+
+describe("engineGraph siteOps tier — echo equals computeSiteOperations (the engine is the authority)", () => {
+  for (const [label, soRes] of [
+    ["populated", siteOps],
+    ["all-3-entry-types", siteOpsVaried],
+  ] as const) {
+    const { byId } = siteOpsBuild(soRes);
+    const val = (id: string): number => {
+      const n = byId.get(id);
+      if (!n) throw new Error(`missing siteOps node ${id}`);
+      return n.evaluate(new Map());
+    };
+
+    it(`echoes every dynamic + manual leaf line (total, qty, rate) — ${label}`, () => {
+      for (const group of SITE_OPS_GROUPS) {
+        for (const l of siteOpsGroupLines(soRes, group)) {
+          expect(val(siteOpsLeafNodeId(group, l.code, "total"))).toBeCloseTo(l.total, 8);
+          expect(val(siteOpsLeafNodeId(group, l.code, "qty"))).toBeCloseTo(l.qty, 8);
+          expect(val(siteOpsLeafNodeId(group, l.code, "rate"))).toBeCloseTo(l.rate, 8);
+        }
+      }
+    });
+
+    it(`echoes the two group subtotals + the grand total — ${label}`, () => {
+      expect(val(siteOpsSubtotalNodeId("dynamic"))).toBeCloseTo(
+        soRes.dynamicLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(siteOpsSubtotalNodeId("manual"))).toBeCloseTo(
+        soRes.manualLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(val(SITEOPS_GRAND_TOTAL_NODE_ID)).toBeCloseTo(soRes.grandTotal, 8);
+    });
+
+    it(`echoes each section subtotal as the Σ of its member leaf totals — ${label}`, () => {
+      const expected = expectedSectionLeafIds(soRes);
+      for (const s of SITE_OPS_SECTIONS) {
+        const memberTotal = (expected.get(s.id) ?? []).reduce((sum, id) => sum + val(id), 0);
+        expect(val(siteOpsSectionNodeId(s.id))).toBeCloseTo(memberTotal, 8);
+      }
+    });
+  }
+
+  it("the varied fixture actually exercises all three manual entry types (non-zero)", () => {
+    const byCode = new Map(siteOpsVaried.manualLines.map((l) => [l.code, l]));
+    // qtyRate: soil borings = 5 × 1500
+    expect(byCode.get("02-3200.001")!.total).toBeCloseTo(7500, 8);
+    // lumpSum: ffe relocation + abatement (typed dollar amounts pass straight through)
+    expect(byCode.get("02-5100.001")!.total).toBeCloseTo(12000, 8);
+    expect(byCode.get("02-8213.001")!.total).toBeCloseTo(8000, 8);
+    // qty: demolition = 800 × 6
+    expect(byCode.get("02-4100.001")!.total).toBeCloseTo(4800, 8);
+  });
+});
+
+describe("engineGraph siteOps tier — authored edges (the depends-on / used-by wiring)", () => {
+  const { byId } = siteOpsBuild(siteOps);
+  const inputs = (id: string): string[] => byId.get(id)!.inputs;
+
+  it("grand total reads the two group subtotals, in order", () => {
+    expect(inputs(SITEOPS_GRAND_TOTAL_NODE_ID)).toEqual([
+      siteOpsSubtotalNodeId("dynamic"),
+      siteOpsSubtotalNodeId("manual"),
+    ]);
+  });
+
+  it("each group subtotal reads its own group's leaf totals, in order", () => {
+    for (const group of SITE_OPS_GROUPS) {
+      expect(inputs(siteOpsSubtotalNodeId(group))).toEqual(
+        siteOpsGroupLines(siteOps, group).map((l) => siteOpsLeafNodeId(group, l.code, "total"))
+      );
+    }
+  });
+
+  it("every leaf total reads its qty + rate (uniform across dynamic + all 3 manual entries)", () => {
+    for (const group of SITE_OPS_GROUPS) {
+      for (const l of siteOpsGroupLines(siteOps, group)) {
+        expect(inputs(siteOpsLeafNodeId(group, l.code, "total"))).toEqual([
+          siteOpsLeafNodeId(group, l.code, "qty"),
+          siteOpsLeafNodeId(group, l.code, "rate"),
+        ]);
+      }
+    }
+  });
+
+  it("qty and rate are leaf source nodes (no inputs)", () => {
+    for (const group of SITE_OPS_GROUPS) {
+      for (const l of siteOpsGroupLines(siteOps, group)) {
+        expect(inputs(siteOpsLeafNodeId(group, l.code, "qty"))).toEqual([]);
+        expect(inputs(siteOpsLeafNodeId(group, l.code, "rate"))).toEqual([]);
+      }
+    }
+  });
+
+  it("each section subtotal reads its member leaf totals (the cross-cutting re-grouping)", () => {
+    const expected = expectedSectionLeafIds(siteOps);
+    for (const s of SITE_OPS_SECTIONS) {
+      expect(inputs(siteOpsSectionNodeId(s.id))).toEqual(expected.get(s.id) ?? []);
+    }
+  });
+
+  it("no dangling edges (every input id is also emitted by the tier)", () => {
+    const ids = new Set(byId.keys());
+    for (const n of byId.values()) {
+      for (const dep of n.inputs) expect(ids.has(dep)).toBe(true);
+    }
+  });
+});
+
+describe("engineGraph siteOps tier — acyclicity + evaluates through the kind-blind graph", () => {
+  for (const [label, soRes] of [
+    ["populated", siteOps],
+    ["all-3-entry-types", siteOpsVaried],
+  ] as const) {
+    const { nodes } = siteOpsBuild(soRes);
+
+    it(`the authored edge set is acyclic — ${label}`, () => {
+      expect(findCycle(nodes)).toBeNull();
+    });
+
+    it(`evaluateGraph resolves grand total / subtotals / sections + leaves to the engine value — ${label}`, () => {
+      const values = evaluateGraph(nodes);
+      expect(values.get(SITEOPS_GRAND_TOTAL_NODE_ID)).toBeCloseTo(soRes.grandTotal, 8);
+      expect(values.get(siteOpsSubtotalNodeId("dynamic"))).toBeCloseTo(
+        soRes.dynamicLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      expect(values.get(siteOpsSubtotalNodeId("manual"))).toBeCloseTo(
+        soRes.manualLines.reduce((s, l) => s + l.total, 0),
+        8
+      );
+      for (const l of soRes.dynamicLines) {
+        expect(values.get(siteOpsLeafNodeId("dynamic", l.code, "total"))).toBeCloseTo(l.total, 8);
       }
     });
   }

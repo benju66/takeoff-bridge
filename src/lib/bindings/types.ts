@@ -157,7 +157,7 @@ export interface Binding {
  * The canonical node-ID prefixes the kind-blind graph addresses values by. Each is a
  * stable identity (never a cell position) so a binding/edge survives row churn:
  *  - `gc:<name>`            — a STEP 2 General Conditions computed value (registry.ts).
- *  - `siteops:<section>`    — a STEP 3 Site-Ops section subtotal (registry.ts).
+ *  - `siteops:<section>`    — a STEP 3 Site-Ops section subtotal (`siteOpsSectionNodeId` below).
  *  - `line:<rowId>:<field>` — a STEP 4 line's aggregatable field (compile.ts).
  *  - `summary:<field>`      — a STEP 4 TakeoffSummary field (Bucket B; engineGraph.ts).
  *
@@ -193,6 +193,107 @@ export const SUMMARY_NODE_PREFIX = "summary:";
 /** Stable node ID for a TakeoffSummary field: `summary:<field>`. */
 export function summaryNodeId(field: SummaryNodeField): string {
   return `${SUMMARY_NODE_PREFIX}${field}`;
+}
+
+// ---------------------------------------------------------------------------
+// GC (STEP 2) node-ID scheme — the canonical `gc:*` IDs + the Bucket B Phase 3 tree
+// ---------------------------------------------------------------------------
+
+/**
+ * The `gc:` node-ID prefix (a STEP 2 General Conditions computed value). Declared in
+ * this leaf module so BOTH registry.ts (the source-node + linked-division path) and
+ * engineGraph.ts (the Bucket B decomposition tier) reference one definition without a
+ * `registry → engineGraph → registry` import cycle. registry.ts re-exports the three
+ * canonical constants below for its existing import sites.
+ */
+export const GC_NODE_PREFIX = "gc:";
+
+/** STEP 2 — personnel grand total (all GC lines). */
+export const GC_GRAND_TOTAL_NODE_ID = "gc:grandTotal";
+/** STEP 2 — Σ supervision staff lines (template "Total Supervision", I16). */
+export const GC_SUPERVISION_NODE_ID = "gc:supervisionSubtotal";
+/** STEP 2 — Design/PM/GCs (grand total − supervision; a DERIVED value, not a raw subtotal). */
+export const GC_GENERAL_NODE_ID = "gc:general";
+
+/**
+ * The four GC cost groups whose leaf lines roll up into `gc:<group>Subtotal`
+ * (Bucket B Phase 3). One per `PersonnelCalcResult` array: staff labour, operational
+ * expenses, lump-sum equipment, and manual GC entries.
+ */
+export type GcSubtotalGroup = "staff" | "ops" | "equipment" | "manual";
+
+/** Stable node ID for a GC group subtotal: `gc:<group>Subtotal`. */
+export function gcSubtotalNodeId(group: GcSubtotalGroup): string {
+  return `${GC_NODE_PREFIX}${group}Subtotal`;
+}
+
+/** The echo-able fields of one GC leaf line. Lump-sum equipment lines expose `total` only. */
+export type GcLeafField = "total" | "qty" | "rate";
+
+/**
+ * Stable node ID for one GC leaf line's field: `gc:<group>:<code>:<field>`
+ * (e.g. `gc:staff:01-0310.001:total`). The `code` is the line's template criterion
+ * code — unique within its group — never a cell position (by-ID, not by-position).
+ */
+export function gcLeafNodeId(group: GcSubtotalGroup, code: string, field: GcLeafField): string {
+  return `${GC_NODE_PREFIX}${group}:${code}:${field}`;
+}
+
+// ---------------------------------------------------------------------------
+// Site-Ops (STEP 3) node-ID scheme — the canonical `siteops:*` IDs + the Phase 4 tree
+// ---------------------------------------------------------------------------
+
+/**
+ * The `siteops:` node-ID prefix (a STEP 3 Site Operations computed value). Declared in
+ * this leaf module — like the `gc:*` IDs above — so BOTH registry.ts (the source-node +
+ * linked-division path) and engineGraph.ts (the Bucket B Phase 4 decomposition tier) can
+ * build these IDs without a `registry → engineGraph → registry` import cycle. registry.ts
+ * re-exports `siteOpsSectionNodeId` for its existing import sites.
+ */
+export const SITEOPS_NODE_PREFIX = "siteops:";
+
+/** STEP 3 — Site Operations grand total (all dynamic + manual lines). */
+export const SITEOPS_GRAND_TOTAL_NODE_ID = "siteops:grandTotal";
+
+/**
+ * Stable node ID for a STEP 3 Site-Ops template subtotal section: `siteops:<section>`
+ * (e.g. `siteops:demolition`). The parameter is a plain `string` (not the
+ * `SiteOpsSection` union from constants.ts) so this leaf module stays free of app
+ * imports; the section ids are validated where they originate (the constants test).
+ */
+export function siteOpsSectionNodeId(section: string): string {
+  return `${SITEOPS_NODE_PREFIX}${section}`;
+}
+
+/**
+ * The two Site-Ops line groups whose leaf lines roll up into `siteops:<group>Subtotal`
+ * (Bucket B Phase 4). One per `SiteOpsCalcResult` array: parameter-driven `dynamic` lines
+ * and estimator-typed `manual` lines. Their sum is the engine's literal
+ * `grandTotal = dynamicTotal + manualTotal` decomposition.
+ */
+export type SiteOpsLineGroup = "dynamic" | "manual";
+
+/** Stable node ID for a Site-Ops group subtotal: `siteops:<group>Subtotal`. */
+export function siteOpsSubtotalNodeId(group: SiteOpsLineGroup): string {
+  return `${SITEOPS_NODE_PREFIX}${group}Subtotal`;
+}
+
+/** The echo-able fields of one Site-Ops leaf line. Every line carries qty + rate + total
+ * (the engine sets qty/rate even for lump-sum entries — see engineGraph.ts). */
+export type SiteOpsLeafField = "total" | "qty" | "rate";
+
+/**
+ * Stable node ID for one Site-Ops leaf line's field: `siteops:<group>:<code>:<field>`
+ * (e.g. `siteops:manual:02-4100.001:total`). The `code` is the line's STEP 3 criterion
+ * code — unique within its group — never a cell position (by-ID, not by-position). The
+ * `<group>` segment keeps a code that appears in both arrays collision-free.
+ */
+export function siteOpsLeafNodeId(
+  group: SiteOpsLineGroup,
+  code: string,
+  field: SiteOpsLeafField
+): string {
+  return `${SITEOPS_NODE_PREFIX}${group}:${code}:${field}`;
 }
 
 // ---------------------------------------------------------------------------

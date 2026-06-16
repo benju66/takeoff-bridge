@@ -23,10 +23,22 @@
 
 import { compileBindingToNode, lineFieldNodeId } from "./compile";
 import { evaluateGraph } from "./graph";
-import { describeEngineGraph, type EngineGraphTier } from "./engineGraph";
+import { ALL_ENGINE_TIERS, describeEngineGraph, type EngineGraphTier } from "./engineGraph";
 import type { Basis, Binding, BindingLine, GraphNode, RollupField } from "./types";
 import {
+  GC_GENERAL_NODE_ID,
+  GC_GRAND_TOTAL_NODE_ID,
+  GC_SUPERVISION_NODE_ID,
+  SITEOPS_GRAND_TOTAL_NODE_ID,
+  siteOpsSectionNodeId,
+  siteOpsSubtotalNodeId,
+} from "./types";
+import {
+  EQUIPMENT_DEFAULTS,
+  GC_MANUAL_DEFAULTS,
   LINKED_DIVISION_ROWS,
+  OPERATIONAL_EXPENSE_DEFAULTS,
+  STAFF_ROLE_DEFAULTS,
   SUPERVISION_STAFF_CODES,
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
@@ -47,17 +59,21 @@ import type { ProcessedTakeoffRow } from "@/types";
 // Stable node IDs (spec §2.2) — by-ID / by-query, never by cell position
 // ---------------------------------------------------------------------------
 
-/** STEP 2 — Σ supervision staff lines (template "Total Supervision", I16). */
-export const GC_SUPERVISION_NODE_ID = "gc:supervisionSubtotal";
-/** STEP 2 — personnel grand total (all GC lines). */
-export const GC_GRAND_TOTAL_NODE_ID = "gc:grandTotal";
-/** STEP 2 — Design/PM/GCs (grand total − supervision; a DERIVED value, not a raw subtotal). */
-export const GC_GENERAL_NODE_ID = "gc:general";
+/**
+ * The three canonical STEP 2 GC node IDs. Their definitions moved to types.ts (the
+ * kind-blind leaf module) in Bucket B Phase 3 so engineGraph.ts can reuse them without a
+ * `registry → engineGraph → registry` import cycle; re-exported here so the existing
+ * import sites (`from "../bindings/registry"`) are unchanged.
+ */
+export { GC_GRAND_TOTAL_NODE_ID, GC_SUPERVISION_NODE_ID, GC_GENERAL_NODE_ID };
 
-/** STEP 3 — one Site-Ops template subtotal section. */
-export function siteOpsSectionNodeId(section: SiteOpsSection): string {
-  return `siteops:${section}`;
-}
+/**
+ * STEP 3 — one Site-Ops template subtotal section (`siteops:<section>`). Its definition
+ * moved to types.ts (the kind-blind leaf module) in Bucket B Phase 4, mirroring the GC IDs,
+ * so engineGraph.ts can build section IDs without a `registry → engineGraph → registry`
+ * import cycle; re-exported here so the existing import sites are unchanged.
+ */
+export { siteOpsSectionNodeId };
 
 /**
  * The stable node ID for a linked STEP 4 division row's total. The linked rows are
@@ -382,8 +398,12 @@ export interface AssembleBindingGraphOptions {
    * engine nodes against an absent/stale summary (the echo-staleness guard, plan §6).
    */
   summary?: TakeoffSummary;
-  /** Which engine tier to describe (default `"summary"` — the Phase 1/2 tier). */
-  engineTier?: EngineGraphTier;
+  /**
+   * Which engine tier(s) to describe — one tier or a list. Defaults to `ALL_ENGINE_TIERS`
+   * (every shipped tier: `summary` + `gc`), so the Links tab shows the complete wiring and
+   * each future tier lights up automatically. Tiers use disjoint node-ID namespaces.
+   */
+  engineTier?: EngineGraphTier | readonly EngineGraphTier[];
 }
 
 /**
@@ -462,7 +482,7 @@ export function assembleBindingGraphNodes(
     siteOps,
     rows,
     options.summary!,
-    options.engineTier ?? "summary"
+    options.engineTier ?? ALL_ENGINE_TIERS
   ).filter((n) => !bindingTargets.has(n.id) && !reserved.has(n.id));
   const engineIds = new Set(engineNodes.map((n) => n.id));
 
@@ -478,12 +498,57 @@ export function assembleBindingGraphNodes(
 // Node labelling (Phase 5) — friendly names for the authoring picker + Links view
 // ---------------------------------------------------------------------------
 
-/** Friendly labels for the three STEP 2 GC source nodes. */
+/** Friendly labels for the three canonical STEP 2 GC source nodes. */
 export const GC_NODE_LABELS: Record<string, string> = {
   [GC_GRAND_TOTAL_NODE_ID]: "Personnel grand total",
   [GC_SUPERVISION_NODE_ID]: "Total Supervision",
   [GC_GENERAL_NODE_ID]: "Design / PM / GCs",
 };
+
+/** Friendly labels for the four GC group subtotal nodes (`gc:<group>Subtotal`, Phase 3). */
+const GC_SUBTOTAL_LABELS: Record<string, string> = {
+  staffSubtotal: "Staff subtotal",
+  opsSubtotal: "Operational subtotal",
+  equipmentSubtotal: "Equipment subtotal",
+  manualSubtotal: "Manual GC subtotal",
+};
+
+/**
+ * GC leaf-line criterion code → its template label, harvested from the four
+ * `PersonnelCalcResult` source arrays (Bucket B Phase 3). Lets the Links view read a GC
+ * leaf node (`gc:<group>:<code>:<field>`) as e.g. "STEP 2 · Project Executive (rate)"
+ * instead of the raw id. Codes are unique within a group; cross-group reuse is harmless.
+ */
+const GC_LEAF_LABELS: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const r of STAFF_ROLE_DEFAULTS) m[r.code] = r.label;
+  for (const o of OPERATIONAL_EXPENSE_DEFAULTS) m[o.code] = o.description;
+  for (const e of EQUIPMENT_DEFAULTS) m[e.code] = e.label;
+  for (const g of GC_MANUAL_DEFAULTS) m[g.code] = g.label;
+  return m;
+})();
+
+/** Friendly labels for the Site-Ops aggregate nodes (Bucket B Phase 4): the grand total
+ * and the two group subtotals (`siteops:grandTotal` / `siteops:<group>Subtotal`). */
+const SITE_OPS_AGGREGATE_LABELS: Record<string, string> = {
+  [SITEOPS_GRAND_TOTAL_NODE_ID]: "Site Operations grand total",
+  [siteOpsSubtotalNodeId("dynamic")]: "Parameter-driven subtotal",
+  [siteOpsSubtotalNodeId("manual")]: "Manual entry subtotal",
+};
+
+/**
+ * Site-Ops leaf-line criterion code → its template label, harvested from the two
+ * `SITE_OPS_*_DEFAULTS` source arrays (Bucket B Phase 4). Lets the Links view read a
+ * Site-Ops leaf node (`siteops:<group>:<code>:<field>`) as e.g. "STEP 3 · Demolition
+ * (rate)" instead of the raw id. Codes are unique within a group; cross-group reuse is
+ * harmless.
+ */
+const SITE_OPS_LEAF_LABELS: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const cfg of SITE_OPS_DYNAMIC_DEFAULTS) m[cfg.code] = cfg.label;
+  for (const cfg of SITE_OPS_MANUAL_DEFAULTS) m[cfg.code] = cfg.label;
+  return m;
+})();
 
 /** A node resolved to a display label, with the line's rowId when it is a line node (for click-to-jump). */
 export interface NodeLabel {
@@ -505,12 +570,37 @@ export function describeSourceNode(
   rows: readonly ProcessedTakeoffRow[]
 ): NodeLabel {
   if (nodeId.startsWith("gc:")) {
-    return { label: `STEP 2 · ${GC_NODE_LABELS[nodeId] ?? nodeId}` };
+    // Canonical aggregate (grandTotal / supervisionSubtotal / general).
+    if (GC_NODE_LABELS[nodeId]) return { label: `STEP 2 · ${GC_NODE_LABELS[nodeId]}` };
+    const rest = nodeId.slice("gc:".length);
+    // Group subtotal: gc:<group>Subtotal.
+    if (GC_SUBTOTAL_LABELS[rest]) return { label: `STEP 2 · ${GC_SUBTOTAL_LABELS[rest]}` };
+    // Leaf line: gc:<group>:<code>:<field> (code carries no colon).
+    const parts = rest.split(":");
+    if (parts.length === 3) {
+      const [, code, field] = parts;
+      const base = GC_LEAF_LABELS[code] ?? code;
+      return { label: field === "total" ? `STEP 2 · ${base}` : `STEP 2 · ${base} (${field})` };
+    }
+    return { label: `STEP 2 · ${nodeId}` };
   }
   if (nodeId.startsWith("siteops:")) {
-    const section = nodeId.slice("siteops:".length);
-    const cfg = SITE_OPS_SECTIONS.find((s) => s.id === section);
-    return { label: `STEP 3 · ${cfg?.label ?? section}` };
+    const rest = nodeId.slice("siteops:".length);
+    // Section subtotal: siteops:<section> (the section id carries no colon).
+    const cfg = SITE_OPS_SECTIONS.find((s) => s.id === rest);
+    if (cfg) return { label: `STEP 3 · ${cfg.label}` };
+    // Aggregate (grandTotal / dynamicSubtotal / manualSubtotal).
+    if (SITE_OPS_AGGREGATE_LABELS[nodeId]) {
+      return { label: `STEP 3 · ${SITE_OPS_AGGREGATE_LABELS[nodeId]}` };
+    }
+    // Leaf line: siteops:<group>:<code>:<field> (code carries no colon).
+    const parts = rest.split(":");
+    if (parts.length === 3) {
+      const [, code, field] = parts;
+      const base = SITE_OPS_LEAF_LABELS[code] ?? code;
+      return { label: field === "total" ? `STEP 3 · ${base}` : `STEP 3 · ${base} (${field})` };
+    }
+    return { label: `STEP 3 · ${rest}` };
   }
   if (nodeId.startsWith("line:")) {
     // line:<rowId>:<field> — rowId may itself contain no colon (uuid / row-<itemId>).
