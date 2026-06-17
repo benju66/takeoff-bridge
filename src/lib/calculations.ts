@@ -6,6 +6,15 @@
 import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation, EstimateOverrideMap } from "@/types";
 import { getDivisionCode } from "./division";
 import {
+  gcStaffLineId,
+  gcOperationalLineId,
+  gcEquipmentLineId,
+  gcManualLineId,
+  siteOpsDynamicLineId,
+  siteOpsManualLineId,
+  sectionLineTotalOverrideKey,
+} from "./sectionLines/ids";
+import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
   EQUIPMENT_DEFAULTS,
@@ -179,6 +188,48 @@ export function getTerminalProgressBar(percentage: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Per-line audited type-over (gc-siteops Phase A+1, decision D3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-line type-over trace exposed on a GC / Site-Ops calc result — the line
+ * analog of `TakeoffSummary.overrides`. Keyed by the override `field`
+ * (`line:<sectionLineId>:total`, the SAME address A5 projects the line to), each
+ * entry carries the RETAINED computed value and the estimator's typed override.
+ * Present on a result ONLY when at least one override applied (so a no-override
+ * result is byte-identical — the inert default).
+ */
+export type LineOverrideTrace = Record<string, { computedValue: number; overrideValue: number }>;
+
+/**
+ * Builds the per-line type-over layer (D3) the GC / Site-Ops engines apply. Returns
+ * an `apply(sectionLineId, computed)` that substitutes a recorded override for a
+ * line's COMPUTED total — keyed by `line:<id>:total` — and records the
+ * computed-vs-override pair into `trace` (so the Trust Inspector can show both). The
+ * computed value is ALWAYS retained.
+ *
+ * RECOGNIZED-KEYS GUARD (mirrors OVERRIDABLE_SUMMARY_FIELDS): the layer is only ever
+ * called with the `sectionLineId`s the engine is ACTIVELY PRODUCING, so a stale
+ * override (for a line the active set no longer contains, or a foreign/summary key)
+ * is never looked up and CANNOT mis-apply. An explicit override of 0 is honored
+ * (hasOwnProperty, not truthiness — INV-3). With an empty map the layer is a pure
+ * passthrough, so a no-override call stays byte-identical and `trace` stays empty.
+ */
+function makeLineOverrideLayer(
+  lineOverrides: EstimateOverrideMap,
+  trace: LineOverrideTrace
+): (sectionLineId: string, computed: number) => number {
+  return (sectionLineId, computed) => {
+    const key = sectionLineTotalOverrideKey(sectionLineId);
+    if (Object.prototype.hasOwnProperty.call(lineOverrides, key) && typeof lineOverrides[key] === "number") {
+      trace[key] = { computedValue: computed, overrideValue: lineOverrides[key] };
+      return lineOverrides[key];
+    }
+    return computed;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Division 01 — General Conditions Personnel Calculations
 // ---------------------------------------------------------------------------
 
@@ -192,6 +243,13 @@ export interface PersonnelCalcResult {
   manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   equipmentTotal: number;
   grandTotal: number;
+  /**
+   * Phase A+1: present (and non-empty) ONLY when at least one GC line was typed over.
+   * Each line's `total` above is the EFFECTIVE (override-applied) value — so the
+   * grand total, the linked-division bridge, the A5 projection, and the export all
+   * see the override for free; the computed value is retained here for the glass box.
+   */
+  overrides?: LineOverrideTrace;
 }
 
 /**
@@ -213,6 +271,13 @@ export interface PersonnelCalcResult {
  *                default-argument call is byte-identical to the legacy calc.
  *                Pass a `buildPersonnelLineSet` result to remove lines (D2) or
  *                append one-off manual lines (D1); per-line math is unchanged.
+ * @param lineOverrides - Audited per-line type-overs (gc-siteops Phase A+1, D3),
+ *                the full `estimate_overrides` active map keyed by `field`. Only the
+ *                `line:<id>:total` keys for lines THIS engine produces are consumed
+ *                (the recognized-keys guard); every other key is ignored. Defaults to
+ *                `{}` → fully INERT (byte-identical result, no `overrides` key), so
+ *                the export goldens tie $0.00. A recorded override substitutes a
+ *                line's `total` (computed retained in the result `overrides` trace).
  */
 export function computePersonnelCosts(
   durationMonths: number,
@@ -222,14 +287,19 @@ export function computePersonnelCosts(
   manualEntries: Record<string, number> = {},
   rateOverrides?: Record<string, number>,
   rateLookup: RateLookup = (_, fb) => fb,
-  lines: PersonnelLineSet = DEFAULT_PERSONNEL_LINES
+  lines: PersonnelLineSet = DEFAULT_PERSONNEL_LINES,
+  lineOverrides: EstimateOverrideMap = {}
 ): PersonnelCalcResult {
+  const overrides: LineOverrideTrace = {};
+  const applyOverride = makeLineOverrideLayer(lineOverrides, overrides);
+
   // Staff labour lines
   const staffLines = lines.staffRoles.map((role) => {
     const effectiveRate = rateOverrides?.[role.key] ?? rateLookup(role.code, role.defaultRate);
     const utilization = (utilizations[role.key] || 0) / 100;
     const qty = durationMonths * HOURS_PER_MONTH * utilization;
-    const total = qty * effectiveRate;
+    // A type-over substitutes the line TOTAL only; computed qty/rate are retained.
+    const total = applyOverride(gcStaffLineId(role.key), qty * effectiveRate);
     return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total, utilization };
   });
 
@@ -245,7 +315,7 @@ export function computePersonnelCosts(
       qty = durationMonths;
     }
     const rate = rateLookup(expense.code, expense.rate);
-    const total = qty * rate;
+    const total = applyOverride(gcOperationalLineId(expense.code), qty * rate);
     return { code: expense.code, procoreCode: expense.procoreCode, costType: expense.costType, desc: expense.description, unit: expense.unit, rate, qty, total };
   });
 
@@ -253,7 +323,7 @@ export function computePersonnelCosts(
   // the export can place each on its own Budget Line Items row (Phase 3)
   const equipmentLines = lines.equipment.map((eq) => ({
     code: eq.code, procoreCode: eq.procoreCode, costType: eq.costType, desc: eq.label,
-    total: equipmentOverrides[eq.key],
+    total: applyOverride(gcEquipmentLineId(eq.key), equipmentOverrides[eq.key]),
   }));
   const equipmentTotal = equipmentLines.reduce((sum, l) => sum + l.total, 0);
 
@@ -267,17 +337,20 @@ export function computePersonnelCosts(
     // qty lines source their unit rate from the card (fallback = constants);
     // lumpSum lines carry the estimator-typed dollar amount (no card entry).
     const rate = isQty ? rateLookup(cfg.code, cfg.rate ?? 0) : value;
-    const total = isQty ? value * rate : value;
+    const total = applyOverride(gcManualLineId(cfg.key), isQty ? value * rate : value);
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
 
-  // Grand total
+  // Grand total — sums the EFFECTIVE (override-applied) line totals.
   const staffTotal = staffLines.reduce((sum, l) => sum + l.total, 0);
   const opsTotal = operationalLines.reduce((sum, l) => sum + l.total, 0);
   const grandTotal = staffTotal + opsTotal + equipmentTotal + manualTotal;
 
-  return { staffLines, operationalLines, equipmentLines, manualLines, equipmentTotal, grandTotal };
+  return {
+    staffLines, operationalLines, equipmentLines, manualLines, equipmentTotal, grandTotal,
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +361,12 @@ export interface SiteOpsCalcResult {
   dynamicLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   grandTotal: number;
+  /**
+   * Phase A+1: present (and non-empty) ONLY when at least one Site-Ops line was typed
+   * over. Each line's `total` above is the EFFECTIVE (override-applied) value; the
+   * computed value is retained here. See {@link LineOverrideTrace}.
+   */
+  overrides?: LineOverrideTrace;
 }
 
 /**
@@ -302,6 +381,11 @@ export interface SiteOpsCalcResult {
  *                default-argument call is byte-identical to the legacy calc.
  *                Pass a `buildSiteOpsLineSet` result to remove lines (D2) or
  *                append one-off manual lines (D1); per-line math is unchanged.
+ * @param lineOverrides - Audited per-line type-overs (gc-siteops Phase A+1, D3),
+ *                the full `estimate_overrides` active map keyed by `field`. Only the
+ *                `line:<id>:total` keys for lines THIS engine produces are consumed
+ *                (the recognized-keys guard). Defaults to `{}` → fully INERT, so the
+ *                export goldens tie $0.00.
  */
 export function computeSiteOperations(
   durationMonths: number,
@@ -309,12 +393,17 @@ export function computeSiteOperations(
   quantities: Record<string, number>,
   rates: Record<string, number>,
   rateLookup: RateLookup = (_, fb) => fb,
-  lines: SiteOpsLineSet = DEFAULT_SITE_OPS_LINES
+  lines: SiteOpsLineSet = DEFAULT_SITE_OPS_LINES,
+  lineOverrides: EstimateOverrideMap = {}
 ): SiteOpsCalcResult {
+  const overrides: LineOverrideTrace = {};
+  const applyOverride = makeLineOverrideLayer(lineOverrides, overrides);
+
   const dynamicLines = lines.dynamicLines.map((cfg) => {
     const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
     const rate = rateLookup(cfg.code, cfg.rate);
-    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
+    const total = applyOverride(siteOpsDynamicLineId(cfg.code), qty * rate);
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
 
   const manualLines = lines.manualLines.map((cfg) => {
@@ -332,7 +421,8 @@ export function computeSiteOperations(
       // qty lines source their unit rate from the card (fallback = constants).
       rate = rateLookup(cfg.code, cfg.rate ?? 0);
     }
-    const total = cfg.entry === "lumpSum" ? value : qty * rate;
+    // A type-over substitutes the line TOTAL only; computed qty/rate are retained.
+    const total = applyOverride(siteOpsManualLineId(cfg.key), cfg.entry === "lumpSum" ? value : qty * rate);
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
 
@@ -340,7 +430,10 @@ export function computeSiteOperations(
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
   const grandTotal = dynamicTotal + manualTotal;
 
-  return { dynamicLines, manualLines, grandTotal };
+  return {
+    dynamicLines, manualLines, grandTotal,
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

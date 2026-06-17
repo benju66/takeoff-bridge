@@ -36,6 +36,7 @@ import {
   SITE_OPS_MANUAL_DEFAULTS,
 } from "@/lib/constants";
 import type { EstimateSectionLine } from "@/types/db";
+import type { EstimateOverrideMap } from "@/types";
 import { ENTRY_KIND, isManualEntryKind } from "./entryKinds";
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,14 @@ export interface SectionCalcContext {
   squareFootage: number;
   /** Injected company-default rate resolver (defaults to the engine's identity fallback). */
   rateLookup?: RateLookup;
+  /**
+   * Audited per-line type-overs (gc-siteops Phase A+1, D3) — the active
+   * `estimate_overrides` map keyed by `field`, forwarded straight to the engine
+   * (`computePersonnelCosts` / `computeSiteOperations`), which consumes only the
+   * `line:<id>:total` keys for the lines it produces. Omit for the inert default
+   * (no override) — the seam the B2/B3 grids drive their live totals through.
+   */
+  lineOverrides?: EstimateOverrideMap;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +130,8 @@ export function computePersonnelFromSectionLines(
     manualEntries,
     rateOverrides,
     ctx.rateLookup,
-    lines
+    lines,
+    ctx.lineOverrides
   );
 }
 
@@ -166,6 +176,7 @@ export function computeSiteOpsFromSectionLines(
     quantities,
     rates,
     ctx.rateLookup,
-    lines
+    lines,
+    ctx.lineOverrides
   );
 }

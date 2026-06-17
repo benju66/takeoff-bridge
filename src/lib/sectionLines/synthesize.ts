@@ -30,6 +30,14 @@ import {
 } from "@/lib/constants";
 import type { EstimateSectionLine, SectionDiscriminator } from "@/types/db";
 import { ENTRY_KIND, type EntryKind } from "./entryKinds";
+import {
+  gcStaffLineId,
+  gcOperationalLineId,
+  gcEquipmentLineId,
+  gcManualLineId,
+  siteOpsDynamicLineId,
+  siteOpsManualLineId,
+} from "./ids";
 
 // ---------------------------------------------------------------------------
 // Blob-key helpers (mirror the Step 2/3 hooks' persistence contract)
@@ -144,7 +152,7 @@ export function synthesizePersonnelSectionLines(
     const rateOverride = gcUtilization[rateOverrideKeyFor(role.key)];
     if (typeof rateOverride === "number" && rateOverride >= 0) inputs.rate = rateOverride;
     lines.push(
-      makeLine(projectId, "gc", `gc:staff:${role.key}`, role, ENTRY_KIND.StaffRole, inputs, order++)
+      makeLine(projectId, "gc", gcStaffLineId(role.key), role, ENTRY_KIND.StaffRole, inputs, order++)
     );
   }
 
@@ -154,7 +162,7 @@ export function synthesizePersonnelSectionLines(
       makeLine(
         projectId,
         "gc",
-        `gc:op:${op.code}`,
+        gcOperationalLineId(op.code),
         { code: op.code, procoreCode: op.procoreCode, costType: op.costType, label: op.description },
         ENTRY_KIND.OperationalExpense,
         {},
@@ -168,7 +176,7 @@ export function synthesizePersonnelSectionLines(
       makeLine(
         projectId,
         "gc",
-        `gc:equip:${eq.key}`,
+        gcEquipmentLineId(eq.key),
         { code: eq.code, procoreCode: eq.procoreCode, costType: eq.costType, label: eq.label },
         ENTRY_KIND.Equipment,
         { amount: gcEquipmentOverrides[eqKeyFor(eq.key)] ?? 0 },
@@ -183,7 +191,7 @@ export function synthesizePersonnelSectionLines(
       makeLine(
         projectId,
         "gc",
-        `gc:manual:${m.key}`,
+        gcManualLineId(m.key),
         { code: m.code, procoreCode: m.procoreCode, costType: m.costType, label: m.label },
         m.entry as EntryKind, // 'qty' | 'lumpSum' — a manual config's entry IS its entry kind
         { value: typeof v === "number" ? v : 0 },
@@ -220,7 +228,7 @@ export function synthesizeSiteOpsSectionLines(
       makeLine(
         projectId,
         "site_ops",
-        `siteops:dynamic:${d.code}`,
+        siteOpsDynamicLineId(d.code),
         { code: d.code, procoreCode: d.procoreCode, costType: d.costType, label: d.label },
         ENTRY_KIND.Dynamic,
         {},
@@ -236,7 +244,7 @@ export function synthesizeSiteOpsSectionLines(
       makeLine(
         projectId,
         "site_ops",
-        `siteops:manual:${m.key}`,
+        siteOpsManualLineId(m.key),
         { code: m.code, procoreCode: m.procoreCode, costType: m.costType, label: m.label },
         m.entry as EntryKind, // 'qty' | 'qtyRate' | 'lumpSum'
         inputs,
