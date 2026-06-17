@@ -319,40 +319,61 @@ export interface GridSelectionState {
 }
 
 // ---------------------------------------------------------------------------
-// TanStack Table Meta — Type augmentation for typed table.options.meta access
+// Grid host contract (B1b) — the generalized vocabulary every grid-host hook
+// exposes to the shared GridShell + decoration/Trust layer via table.options.meta.
+//
+// Step 4's useTakeoffWorkbook is the SOLE consumer today; Steps 2/3 will implement
+// this same shape with their own leaner state+command hooks (Track B). It generalizes
+// the former Step-4-specific TableMeta vocabulary: `keyof ProcessedTakeoffRow` → `keyof
+// TRow`, and the cell-edit literal union → the `TCellKind` parameter (paste excludes the
+// dropdown-only UOM kind). GridShell itself reads only `selection`, `setSelection`, and
+// `handleCustomKeyDown` from this; the rest is consumed by the host's own cell
+// renderers / context menu / keyboard hooks.
 // ---------------------------------------------------------------------------
 
 import type { RowData, Table } from '@tanstack/table-core';
 import type React from 'react';
 
+/** The cell-edit "kinds" Step 4's input components dispatch on. Steps 2/3 will define
+ *  their own when they implement {@link GridHostContract} (B2/B3). */
+export type GridCellKind = "code" | "desc" | "qty" | "price" | "uom";
+
+export interface GridHostContract<TRow extends RowData, TCellKind extends string = string> {
+  editingCellId: string | null;
+  editingValues: Record<string, string>;
+  setEditingCellId: React.Dispatch<React.SetStateAction<string | null>>;
+  setEditingValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  flushEditingBufferRef: React.MutableRefObject<() => void>;
+  focusedCellRef: React.MutableRefObject<{
+    rowId: string; field: string; initialValue: string | number | boolean;
+  } | null>;
+  focusedCustomCellRef: React.MutableRefObject<{
+    rowId: string; columnId: string; initialValue: string;
+  } | null>;
+  lockedCells: Record<string, boolean>;
+  handleCellEdit: (index: number, field: keyof TRow, value: string | number) => void;
+  commitCellEdit: (
+    rowId: string, field: keyof TRow,
+    prev: string | number | boolean, next: string | number | boolean
+  ) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: TCellKind, table: Table<TRow>) => void;
+  handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TRow>) => void;
+  handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: Exclude<TCellKind, "uom">) => void;
+  setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
+  deleteRow: (rowId: string) => void;
+  insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
+  handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
+  commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
+  selection: GridSelectionState;
+  setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
+}
+
+// TanStack Table Meta — typed `table.options.meta` access. The global augmentation IS the
+// Step-4 instantiation of the contract (Step 4 is the sole consumer), so `keyof TData` and
+// the GridCellKind union resolve exactly as the pre-B1b hand-written augmentation did.
 declare module '@tanstack/table-core' {
-  interface TableMeta<TData extends RowData> {
-    editingCellId: string | null;
-    editingValues: Record<string, string>;
-    setEditingCellId: React.Dispatch<React.SetStateAction<string | null>>;
-    setEditingValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-    flushEditingBufferRef: React.MutableRefObject<() => void>;
-    focusedCellRef: React.MutableRefObject<{
-      rowId: string; field: string; initialValue: string | number | boolean;
-    } | null>;
-    focusedCustomCellRef: React.MutableRefObject<{
-      rowId: string; columnId: string; initialValue: string;
-    } | null>;
-    lockedCells: Record<string, boolean>;
-    handleCellEdit: (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => void;
-    commitCellEdit: (
-      rowId: string, field: keyof ProcessedTakeoffRow,
-      prev: string | number | boolean, next: string | number | boolean
-    ) => void;
-    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<TData>) => void;
-    handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TData>) => void;
-    handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
-    setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
-    deleteRow: (rowId: string) => void;
-    insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
-    handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
-    commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
-    selection: GridSelectionState;
-    setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
-  }
+  // Module augmentation must use `interface` (a type alias cannot augment a module), so the
+  // empty-extends form is intentional here — it pins TableMeta to the Step-4 contract.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {}
 }

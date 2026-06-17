@@ -19,10 +19,12 @@ page.tsx (ProjectWorkspace)
 │   ├── useExportHandlers() ← Excel/Procore export
 │   └── useCommandHistory() ← undo/redo stack
 │
-├── EstimateTable ← renders the virtualized grid
-│   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
-│   ├── @tanstack/react-virtual ← row virtualization
-│   ├── flexRender() ← renders cell functions from column defs
+├── EstimateTable ← Step 4 host: title bar, summary <tfoot>, status bar, Trust Inspector
+│   ├── GridShell<TRow> ← reusable grid surface (B1a extract, B1b generic): TanStack
+│   │   │                  plumbing + virtualized render, parameterized by GridShellConfig<TRow>
+│   │   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
+│   │   ├── @tanstack/react-virtual ← row virtualization
+│   │   └── flexRender() ← renders cell functions from column defs
 │   ├── ImportPreviewModal ← 3-stage import preview (rendered when pendingImport non-null)
 │   ├── SearchBar ← global filter input
 │   └── Status Bar ← row count, selection info
@@ -43,13 +45,14 @@ page.tsx (ProjectWorkspace)
 | `src/hooks/usePasteHandler.ts` | Multi-row/multi-col paste from clipboard |
 | `src/hooks/useCommandHistory.ts` | Undo/redo stack with `WorkbookCommand` payloads |
 | `src/hooks/useColumnDefinitions.ts` | Custom column CRUD, column ordering |
-| `src/components/workspace/EstimateTable.tsx` | Grid renderer with virtualization, click-outside, status bar |
+| `src/components/workspace/EstimateTable.tsx` | Step 4 host: title bar, summary `<tfoot>`, status bar, Trust Inspector, click-outside; renders `<GridShell config={…} footer={…}/>` |
+| `src/components/workspace/GridShell.tsx` | Reusable `GridShell<TRow>` grid surface (B1b): TanStack instance plumbing + virtualization + rendering, parameterized by a `GridShellConfig<TRow>` host projection (row id, group/divider derivation, flagged-row test, editable/center column sets, `renderCellOverlay` override-⚑ hook point). Step 4 is the sole consumer. |
 | `src/components/workspace/ImportPreviewModal.tsx` | 3-stage import preview with UOM override dropdowns |
 | `src/components/workspace/StringCellInput.tsx` | Buffered text editor for string cells |
 | `src/components/workspace/NumberCellInput.tsx` | Buffered numeric editor with `parseFloat` commit |
 | `src/components/workspace/SelectCellInput.tsx` | Dropdown select editor for UOM cells |
 | `src/components/workspace/ContextMenuPortal.tsx` | Right-click menu: lock/insert/delete |
-| `src/types/index.ts` | `GridSelectionState`, `ProcessedTakeoffRow`, `ColumnDefinition`, TanStack meta augmentation |
+| `src/types/index.ts` | `GridSelectionState`, `ProcessedTakeoffRow`, `ColumnDefinition`, `GridHostContract<TRow, TCellKind>` (the generalized host vocabulary), and the TanStack meta augmentation (`TableMeta extends GridHostContract<TData, GridCellKind>`) |
 
 ---
 

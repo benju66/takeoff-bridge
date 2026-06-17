@@ -1,14 +1,14 @@
 "use client";
-"use no compiler";
 
-/* The B1a grid-shell extraction moved this file's `useVirtualizer` call into
-   EstimateGridShell. That call was the React Compiler's bail-out point, and bailing there had
-   masked the two advisories below on long-standing, correct code: the stable-setter `useCallback`
-   deps (openTrust / handleViewRow / handleViewTakeoffRows) and the one-shot `pendingInspect`
-   setState-in-effect. They are suppressed here so B1a stays strictly zero-runtime-change —
-   nothing about this code changed, only where the compiler stops looking. B1b should revisit
-   these when this component is generalized. */
-/* eslint-disable react-hooks/preserve-manual-memoization, react-hooks/set-state-in-effect */
+/* B1b note (revisits B1a's file-level eslint-disable): the React Compiler is NOT enabled in
+   next.config.ts, so the directive that used to sit here ("use no compiler" was a no-op string)
+   was inert — only eslint-plugin-react-hooks' compiler-aware ADVISORIES run, statically. Moving
+   useVirtualizer into GridShell (B1a) removed this file's compiler bail-out point, surfacing two
+   advisories on long-standing, correct code: the stable-setter useCallback deps (openTrust /
+   handleViewRow) and the one-shot pendingInspect setState-in-effect. Both are intentional and
+   carry no runtime cost (no compiler in the build); each is now suppressed at its exact site with
+   eslint-disable-next-line — narrowed from B1a's whole-file disable so the rest of the file stays
+   linted. Addressing them "for real" would mean restructuring correct, stable code for no gain. */
 
 import React, { useRef, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
@@ -18,9 +18,11 @@ import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, Chevron
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
-import { ESTIMATE_MODIFIERS, isLinkedDivisionRow } from "@/lib/constants";
+import { ESTIMATE_MODIFIERS, isLinkedDivisionRow, DIVISION_LABELS } from "@/lib/constants";
+import { getDivisionCode } from "@/lib/division";
 import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
-import { EstimateGridShell } from "./EstimateGridShell";
+import { GridShell } from "./GridShell";
+import type { GridShellConfig } from "./GridShell";
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
 import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
@@ -41,6 +43,11 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 
 const fmtUSD = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Step-4 grid column sets fed to GridShell's host config (B1b). These were inline arrays
+// inside the shell before generalization; they live here now because they are Step-4-specific.
+const STEP4_EDITABLE_COLUMN_IDS = ["itemId", "description", "matchedQty", "unitPrice", "uom"] as const;
+const STEP4_CENTER_ALIGNED_COLUMN_IDS = ["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"] as const;
 
 /** A locked summary total cell: the formatted value plus a 🔍 trace affordance
  *  that opens the Trust Inspector focused on this value (Phase 5). When the field is
@@ -315,6 +322,7 @@ export function EstimateTable({
   // tab, as a slide-over) when a new summary cell's 🔍 / the chip is clicked while
   // it is already open.
   const [trustSeq, setTrustSeq] = React.useState(0);
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- stable setters only; the empty deps are correct (see top-of-file note)
   const openTrust = useCallback((field: string, tab: TrustTab = "trace") => {
     setTrustField(field);
     setTrustTab(tab);
@@ -342,6 +350,7 @@ export function EstimateTable({
   // node. Open the Links tab on it, then notify the parent to clear the one-shot request.
   useEffect(() => {
     if (pendingInspect?.nodeId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot cross-step focus; intentional (see top-of-file note)
       openTrust(pendingInspect.nodeId, "links");
       onInspectConsumed?.();
     }
@@ -362,6 +371,7 @@ export function EstimateTable({
   // grid to the flagged row so the estimator can resolve it in place. Same path as
   // [view rows] (setGlobalFilter("") + scrollToRowRef), but targets one row by id.
   const handleViewRow = useCallback(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- stable setters only; the manual deps are correct (see top-of-file note)
     (rowId: string) => {
       setTrustOpen(false);
       setGlobalFilter("");
@@ -426,7 +436,7 @@ export function EstimateTable({
 
   // Current (filtered) table row model — feeds the takeoff-row count below. The
   // virtualization / divider machinery that also consumed this now lives in
-  // EstimateGridShell (B1a extraction).
+  // GridShell (B1a extraction, B1b generalized).
   const tableRows = table.getRowModel().rows;
 
   // Contributing (non-linked) takeoff rows — the count behind the trace's
@@ -490,6 +500,20 @@ export function EstimateTable({
     }
     return map;
   }, [layoutConfig]);
+
+  // Step-4 projection onto GridShell's generic surface (B1b). The division-code grouping,
+  // qty×price divider subtotal, isMapped flag, and column sets that used to be hard-coded in
+  // the shell are supplied here. No `renderCellOverlay` yet — the A+1 override ⚑ gesture is
+  // Track B (B2/B3); Step 4 renders its ⚑ in its own column defs / summary cells.
+  const gridConfig = useMemo<GridShellConfig<ProcessedTakeoffRow>>(() => ({
+    getRowId: (row) => row.id,
+    getGroupKey: (row) => getDivisionCode(row.itemId || ""),
+    getGroupLabel: (k) => layoutConfigMap[k] || DIVISION_LABELS[k] || `DIVISION ${k}`,
+    getRowGroupTotal: (row) => (Number(row.matchedQty) || 0) * (Number(row.unitPrice) || 0),
+    isRowFlagged: (row) => !row.isMapped,
+    editableColumnIds: STEP4_EDITABLE_COLUMN_IDS,
+    centerAlignedColumnIds: STEP4_CENTER_ALIGNED_COLUMN_IDS,
+  }), [layoutConfigMap]);
 
   return (
     <>
@@ -791,14 +815,14 @@ export function EstimateTable({
           </div>
         </div>
 
-        <EstimateGridShell
+        <GridShell
           table={table}
           rows={rows}
           columnDefs={columnDefs}
           selection={selection}
           setContextMenu={setContextMenu}
           scrollToRowRef={scrollToRowRef}
-          layoutConfigMap={layoutConfigMap}
+          config={gridConfig}
           handleRenameColumn={handleRenameColumn}
           handleDeleteColumn={handleDeleteColumn}
           globalFilter={globalFilter}
