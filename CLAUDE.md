@@ -48,9 +48,28 @@ all kickoff docs reference this section rather than restating it — one source,
    build-time errors that tests and `tsc` miss).
 6. **Review** — run `/code-review` (I choose the effort level for the phase's risk) and resolve
    findings before delivery.
-7. **Commit** — message written to a file, committed via `git commit -F` (per Shell & Encoding
-   Rules). Commit only; do not push unless the architect explicitly asks.
+7. **Commit & back up** — commit the phase to the plan's branch (message written to a file,
+   committed via `git commit -F` per Shell & Encoding Rules), then push the branch to back it
+   up. One commit per phase. Never merge or push to `main` here — see Git Workflow below.
 8. **Handoff** — write the handoff doc sequencing the next phase for a fresh session.
+
+## Git Workflow (branch per implementation plan)
+The architect works on branches, never directly on `main`, and does not type git commands —
+the agent drives all git mechanics; the architect approves in plain language. Translate intent
+generously ("ship it", "back it up", "land it" all mean what they sound like).
+
+- **New implementation plan / workstream** → create ONE branch off the latest `main`, named
+  for the workstream (e.g. `gc-siteops-addressability`). Every phase of that plan is committed
+  to this one branch. Don't make a branch per phase.
+- **Each phase** → handled by the Definition of Done above: commit the phase to the branch and
+  push the branch to back it up. Feature-branch pushes are safe and auto-allowed.
+- **End of the workstream** (all phases done) → merge the branch into `main` and push `main`.
+  This is the ONLY step that touches `main`, and it requires explicit architect approval.
+  The push to `main` will prompt once (the push-guard hook) — that prompt IS the gate.
+  Default to a direct merge; the architect never has to deal with a PR.
+- **PR is opt-in** → only when the architect asks (e.g. wants the cloud `/code-review ultra`
+  or CI to run before landing). Then the agent opens and drives the PR; "merge it" lands it.
+- Never merge, push to `main`, or force-push without explicit approval.
 
 ## Claude Code Workflow
 - **Non-trivial tasks** (touching > 1 file): enter plan mode, write plan to file,

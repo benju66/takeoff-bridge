@@ -3,12 +3,16 @@
     "Stop": [
       { "hooks": [{ "type": "command", "command": "npx tsc --noEmit" }] },
       { "hooks": [{ "type": "command", "command": "node -e \"const { execSync } = require('child_process'); try { const t = parseInt(execSync('git log -1 --format=%ct').toString().trim()); if (Date.now()/1000 - t < 120) console.log('--- Commit detected. Run /compact to trim context before continuing. ---'); } catch(e){}\"" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash", "if": "Bash(git push *)", "hooks": [{ "type": "command", "command": "node .claude/hooks/push-guard.cjs", "statusMessage": "Checking push target..." }] },
+      { "matcher": "PowerShell", "if": "PowerShell(git push *)", "hooks": [{ "type": "command", "command": "node .claude/hooks/push-guard.cjs", "statusMessage": "Checking push target..." }] },
+      { "matcher": "mcp__plugin_supabase_supabase__execute_sql", "hooks": [{ "type": "command", "command": "node .claude/hooks/ddl-guard.cjs", "statusMessage": "Checking SQL is read-only..." }] }
     ]
   },
   "permissions": {
     "allow": [
       "mcp__plugin_supabase_supabase__list_tables",
-      "mcp__plugin_supabase_supabase__execute_sql",
       "mcp__plugin_supabase_supabase__list_migrations",
       "mcp__plugin_supabase_supabase__get_project",
       "mcp__plugin_supabase_supabase__get_project_url",
