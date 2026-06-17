@@ -20,6 +20,12 @@ import {
   SUPERVISION_STAFF_CODES,
   SiteOpsSection,
   isLinkedDivisionRow,
+  StaffRoleConfig,
+  OperationalExpenseConfig,
+  EquipmentExpenseConfig,
+  GcManualConfig,
+  SiteOpsDynamicConfig,
+  SiteOpsManualConfig,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +40,110 @@ import {
  * every existing caller/test is byte-identical and day-one totals never move.
  */
 export type RateLookup = (code: string, fallback: number) => number;
+
+// ---------------------------------------------------------------------------
+// Active line-set injection (gc-siteops Phase A1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The active line set injected into the GC / Site-Ops calc engines. Defaults to
+ * the full catalog constants, so a default-argument call is byte-identical to
+ * the legacy constants-driven calc (mirrors the `RateLookup` injection pattern —
+ * the boundary is INERT until a caller passes a non-default set). Per-line math
+ * is untouched; only WHICH lines compute is variable.
+ *
+ * Two controlled kinds of "variable" (ID-4), both expressed via `build*LineSet`:
+ *  - (a) removal (D2): the active set is a FILTERED SUBSET of the catalog — the
+ *    engine simply computes over fewer lines.
+ *  - (b) one-off addition (D1): a user-authored GENERIC MANUAL line appended to
+ *    the manual array. It runs through the SAME manual-line evaluator (no new
+ *    per-line math), drawing its typed value from the existing
+ *    `manualEntries` / `quantities` map by `key`.
+ *
+ * Bespoke STRUCTURED lines (utilization-by-role staff, the operational quantity
+ * drivers incl. `sqftPer3000`, the lump-sum equipment lines, the Site-Ops
+ * duration/sqft drivers) are removable but NOT user-mintable: `build*LineSet`
+ * exposes an additive parameter for MANUAL lines only — there is deliberately no
+ * structured-line adder. (The supervision subtotal and the linked-division
+ * bridge are derived downstream in `computeLinkedDivisionTotals`, not configs.)
+ */
+export interface PersonnelLineSet {
+  staffRoles: readonly StaffRoleConfig[];
+  operationalExpenses: readonly OperationalExpenseConfig[];
+  equipment: readonly EquipmentExpenseConfig[];
+  manualLines: readonly GcManualConfig[];
+}
+
+export interface SiteOpsLineSet {
+  dynamicLines: readonly SiteOpsDynamicConfig[];
+  manualLines: readonly SiteOpsManualConfig[];
+}
+
+/**
+ * A user-authored one-off line (D1). Structurally a generic manual line — it
+ * carries an entry kind (`qty` / `lumpSum` for GC; `qty` / `qtyRate` / `lumpSum`
+ * for Site Ops), a rate, and a resolved code — so it flows through the existing
+ * manual-line evaluator unchanged. Aliased for legibility at the call sites.
+ */
+export type OneOffGcLine = GcManualConfig;
+export type OneOffSiteOpsLine = SiteOpsManualConfig;
+
+/** The default active GC line set: the full catalog constants (legacy behavior). */
+export const DEFAULT_PERSONNEL_LINES: PersonnelLineSet = {
+  staffRoles: STAFF_ROLE_DEFAULTS,
+  operationalExpenses: OPERATIONAL_EXPENSE_DEFAULTS,
+  equipment: EQUIPMENT_DEFAULTS,
+  manualLines: GC_MANUAL_DEFAULTS,
+};
+
+/** The default active Site-Ops line set: the full catalog constants (legacy). */
+export const DEFAULT_SITE_OPS_LINES: SiteOpsLineSet = {
+  dynamicLines: SITE_OPS_DYNAMIC_DEFAULTS,
+  manualLines: SITE_OPS_MANUAL_DEFAULTS,
+};
+
+/** Drop catalog lines whose `code` is in `removed` (every config kind carries a unique `code`). */
+function filterByCode<T extends { code: string }>(arr: readonly T[], removed: ReadonlySet<string>): readonly T[] {
+  return removed.size === 0 ? arr : arr.filter((l) => !removed.has(l.code));
+}
+
+/**
+ * Build an active GC line set by (a) removing catalog lines by `code` and/or
+ * (b) appending user-authored one-off MANUAL lines. The additive path is manual
+ * only — there is no parameter to mint a staff / operational / equipment line
+ * (ID-4 protection). With no options it reproduces the catalog defaults.
+ */
+export function buildPersonnelLineSet(opts: {
+  removeCodes?: Iterable<string>;
+  addManual?: readonly OneOffGcLine[];
+  base?: PersonnelLineSet;
+} = {}): PersonnelLineSet {
+  const base = opts.base ?? DEFAULT_PERSONNEL_LINES;
+  const removed = new Set(opts.removeCodes ?? []);
+  return {
+    staffRoles: filterByCode(base.staffRoles, removed),
+    operationalExpenses: filterByCode(base.operationalExpenses, removed),
+    equipment: filterByCode(base.equipment, removed),
+    manualLines: [...filterByCode(base.manualLines, removed), ...(opts.addManual ?? [])],
+  };
+}
+
+/**
+ * Site-Ops twin of `buildPersonnelLineSet`. Manual-only additive path; the
+ * structured duration/sqft driver lines are removable but not mintable.
+ */
+export function buildSiteOpsLineSet(opts: {
+  removeCodes?: Iterable<string>;
+  addManual?: readonly OneOffSiteOpsLine[];
+  base?: SiteOpsLineSet;
+} = {}): SiteOpsLineSet {
+  const base = opts.base ?? DEFAULT_SITE_OPS_LINES;
+  const removed = new Set(opts.removeCodes ?? []);
+  return {
+    dynamicLines: filterByCode(base.dynamicLines, removed),
+    manualLines: [...filterByCode(base.manualLines, removed), ...(opts.addManual ?? [])],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Date Utility
@@ -98,6 +208,11 @@ export interface PersonnelCalcResult {
  *                     Defaults to returning the fallback, so day-one behavior is
  *                     byte-identical. Full staff chain: rateOverrides[role.key]
  *                     ?? rateLookup(role.code, role.defaultRate).
+ * @param lines - Injected active line set (gc-siteops Phase A1). Defaults to the
+ *                full catalog constants (`DEFAULT_PERSONNEL_LINES`), so the
+ *                default-argument call is byte-identical to the legacy calc.
+ *                Pass a `buildPersonnelLineSet` result to remove lines (D2) or
+ *                append one-off manual lines (D1); per-line math is unchanged.
  */
 export function computePersonnelCosts(
   durationMonths: number,
@@ -106,10 +221,11 @@ export function computePersonnelCosts(
   equipmentOverrides: { dumpsters: number; toilets: number; electric: number },
   manualEntries: Record<string, number> = {},
   rateOverrides?: Record<string, number>,
-  rateLookup: RateLookup = (_, fb) => fb
+  rateLookup: RateLookup = (_, fb) => fb,
+  lines: PersonnelLineSet = DEFAULT_PERSONNEL_LINES
 ): PersonnelCalcResult {
   // Staff labour lines
-  const staffLines = STAFF_ROLE_DEFAULTS.map((role) => {
+  const staffLines = lines.staffRoles.map((role) => {
     const effectiveRate = rateOverrides?.[role.key] ?? rateLookup(role.code, role.defaultRate);
     const utilization = (utilizations[role.key] || 0) / 100;
     const qty = durationMonths * HOURS_PER_MONTH * utilization;
@@ -119,7 +235,7 @@ export function computePersonnelCosts(
 
   // Operational expense lines (auto quantity drivers mirroring template STEP 2 col F)
   const suUtilization = utilizations["su"] || 0;
-  const operationalLines = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => {
+  const operationalLines = lines.operationalExpenses.map((expense) => {
     let qty: number;
     if (expense.quantityDriver === "superintendent") {
       qty = durationMonths * (suUtilization / 100);
@@ -135,7 +251,7 @@ export function computePersonnelCosts(
 
   // Equipment lines (user-entered fixed values) — carried as mapped lines so
   // the export can place each on its own Budget Line Items row (Phase 3)
-  const equipmentLines = EQUIPMENT_DEFAULTS.map((eq) => ({
+  const equipmentLines = lines.equipment.map((eq) => ({
     code: eq.code, procoreCode: eq.procoreCode, costType: eq.costType, desc: eq.label,
     total: equipmentOverrides[eq.key],
   }));
@@ -144,7 +260,7 @@ export function computePersonnelCosts(
   // Manual GC entry lines (Phase 4): "qty" = typed qty × template rate;
   // "lumpSum" = typed dollar amount (incl. the two %-of-estimate lines, which
   // the template has the estimator hand-type to break circularity — §5.2)
-  const manualLines = GC_MANUAL_DEFAULTS.map((cfg) => {
+  const manualLines = lines.manualLines.map((cfg) => {
     const value = manualEntries[cfg.key] ?? 0;
     const isQty = cfg.entry === "qty";
     const qty = isQty ? value : value > 0 ? 1 : 0;
@@ -180,21 +296,28 @@ export interface SiteOpsCalcResult {
  * single source of truth (gc-siteops Phase 3 replaced the stale inline codes).
  * Phase 4 entry kinds: "qty" = typed qty × template rate; "qtyRate" = typed
  * qty × typed rate; "lumpSum" = typed dollar amount.
+ *
+ * @param lines - Injected active line set (gc-siteops Phase A1). Defaults to the
+ *                full catalog constants (`DEFAULT_SITE_OPS_LINES`), so the
+ *                default-argument call is byte-identical to the legacy calc.
+ *                Pass a `buildSiteOpsLineSet` result to remove lines (D2) or
+ *                append one-off manual lines (D1); per-line math is unchanged.
  */
 export function computeSiteOperations(
   durationMonths: number,
   squareFootage: number,
   quantities: Record<string, number>,
   rates: Record<string, number>,
-  rateLookup: RateLookup = (_, fb) => fb
+  rateLookup: RateLookup = (_, fb) => fb,
+  lines: SiteOpsLineSet = DEFAULT_SITE_OPS_LINES
 ): SiteOpsCalcResult {
-  const dynamicLines = SITE_OPS_DYNAMIC_DEFAULTS.map((cfg) => {
+  const dynamicLines = lines.dynamicLines.map((cfg) => {
     const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
     const rate = rateLookup(cfg.code, cfg.rate);
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
   });
 
-  const manualLines = SITE_OPS_MANUAL_DEFAULTS.map((cfg) => {
+  const manualLines = lines.manualLines.map((cfg) => {
     const value = quantities[cfg.key] ?? 0;
     let qty: number;
     let rate: number;
