@@ -56,6 +56,7 @@ import type {
   TakeoffSummary,
 } from "../calculations";
 import type { ProcessedTakeoffRow } from "@/types";
+import type { EstimateSectionLine } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Stable node IDs (spec §2.2) — by-ID / by-query, never by cell position
@@ -347,6 +348,79 @@ export function lineFieldSourceNodes(lines: readonly BindingLine[]): GraphNode[]
 }
 
 // ---------------------------------------------------------------------------
+// GC/Site-Ops section-line source nodes (Phase A5) — addressability
+// ---------------------------------------------------------------------------
+
+/** Coerce a JSONB `inputs` value to a finite number (synthesis writes numbers; this guards reads). */
+const numInput = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+/**
+ * Projects an `EstimateSectionLine` (the A3/A4 addressable GC/Site-Ops row) to the
+ * minimal `BindingLine` the SetRule evaluator and rollup compiler read — the section
+ * analog of {@link projectLine} for a STEP 4 `ProcessedTakeoffRow`. `itemId` is the
+ * line's STEP 2/3 criterion `code` (so a rollup's `itemId`/`division`/`costType`
+ * predicate addresses it the same way it does a STEP 4 line). The aggregatable `total`
+ * is RESOLVED BY THE CALLER (the single seam — app-born = engine per-line total;
+ * imported = frozen `inputs.value`), because the section line itself carries no
+ * authoritative total (ID-1, "derived never frozen"). `unitPrice`/`matchedQty` are
+ * not meaningful for a GC/Site-Ops line (it has no qty × price decomposition) → 0.
+ */
+export function projectSectionLine(line: EstimateSectionLine, total: number): BindingLine {
+  return {
+    id: line.id,
+    itemId: line.code,
+    costType: line.costType,
+    source: line.source,
+    procoreCode: line.procoreCode,
+    total,
+    unitPrice: 0,
+    matchedQty: 0,
+  };
+}
+
+/**
+ * Projects APP-BORN section lines (A3) to `BindingLine`s, resolving each line's
+ * aggregatable total from the LIVE engine calc results by `(section, code)`. The calc
+ * engine stays the sole total authority — this never re-derives the per-line math
+ * (it reads the totals `computePersonnelCosts`/`computeSiteOperations` already
+ * produced). Codes are unique within a section (the same assumption `sectionTotalsByCode`
+ * and the engine leaf tiers make), so the by-code map is unambiguous; an unmatched code
+ * resolves to 0.
+ */
+export function projectAppBornSectionLines(
+  sectionLines: readonly EstimateSectionLine[],
+  gc: PersonnelCalcResult,
+  siteOps: SiteOpsCalcResult
+): BindingLine[] {
+  const gcTotalByCode = new Map<string, number>();
+  for (const l of gc.staffLines) gcTotalByCode.set(l.code, l.total);
+  for (const l of gc.operationalLines) gcTotalByCode.set(l.code, l.total);
+  for (const l of gc.equipmentLines) gcTotalByCode.set(l.code, l.total);
+  for (const l of gc.manualLines) gcTotalByCode.set(l.code, l.total);
+
+  const siteOpsTotalByCode = new Map<string, number>();
+  for (const l of siteOps.dynamicLines) siteOpsTotalByCode.set(l.code, l.total);
+  for (const l of siteOps.manualLines) siteOpsTotalByCode.set(l.code, l.total);
+
+  return sectionLines.map((line) => {
+    const byCode = line.section === "gc" ? gcTotalByCode : siteOpsTotalByCode;
+    return projectSectionLine(line, byCode.get(line.code) ?? 0);
+  });
+}
+
+/**
+ * Projects IMPORTED section lines (A4) to `BindingLine`s. Their total is the FROZEN
+ * `inputs.value` (the as-bid lump sum) — a CONSTANT, never an engine recompute (the
+ * same frozen-vs-derived law as A4: a live STEP 2/3 input can never move an imported
+ * line). The parametric calc results are NOT consulted here.
+ */
+export function projectImportedSectionLines(
+  sectionLines: readonly EstimateSectionLine[]
+): BindingLine[] {
+  return sectionLines.map((line) => projectSectionLine(line, numInput(line.inputs.value)));
+}
+
+// ---------------------------------------------------------------------------
 // Phase 4 — recompute USER bindings into the grid (display + lifecycle)
 // ---------------------------------------------------------------------------
 
@@ -375,9 +449,10 @@ export function recomputeLineBindingValues(
   bindings: readonly Binding[],
   gc: PersonnelCalcResult,
   siteOps: SiteOpsCalcResult,
-  rows: readonly ProcessedTakeoffRow[]
+  rows: readonly ProcessedTakeoffRow[],
+  sectionLines: readonly BindingLine[] = []
 ): Map<string, number> {
-  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows);
+  const nodes = assembleBindingGraphNodes(bindings, gc, siteOps, rows, { sectionLines });
   if (nodes.length === 0) return new Map();
   return evaluateGraph(nodes);
 }
@@ -407,6 +482,16 @@ export interface AssembleBindingGraphOptions {
    * node-ID namespaces.
    */
   engineTier?: EngineGraphTier | readonly EngineGraphTier[];
+  /**
+   * The GC/Site-Ops addressable section lines (Phase A5), pre-projected to `BindingLine`s
+   * with each line's total already resolved at the single seam (app-born = engine per-line
+   * total via {@link projectAppBornSectionLines}; imported = frozen `inputs.value` via
+   * {@link projectImportedSectionLines}). Folded in alongside the STEP 4 `rows` so each
+   * GC/Site-Ops line becomes a binding TARGET (`line:<id>:total`) and a rollup MEMBER.
+   * Defaults to `[]`, so every existing caller (grid recompute, Links tab, cycle-guard)
+   * is byte-identical and the INERT fast path is unchanged (LD-4 / inert-by-default).
+   */
+  sectionLines?: readonly BindingLine[];
 }
 
 /**
@@ -461,9 +546,16 @@ export function assembleBindingGraphNodes(
   // INERT FAST PATH (grid / recompute / authoring cycle-guard): with the engine fold OFF
   // and no effective user bindings, build NOTHING — the recompute is a no-op and the
   // goldens tie $0.00. (With the fold ON we always proceed so the wiring stays visible.)
+  // Section lines are folded BELOW this guard, so passing them never defeats inertness:
+  // a project with no user bindings still builds zero nodes (Phase A5).
   if (!includeEngine && effective.length === 0) return [];
 
-  const lines = rows.map(projectLine);
+  // STEP 4 rows + the GC/Site-Ops addressable section lines (Phase A5), one flat line set.
+  // Their ids are disjoint (`line:<uuid>` vs `gc:*`/`siteops:*`/`imported:*`), so the
+  // combined set both emits each section line's `line:<id>:<field>` source node (via
+  // userBindingSourceNodes → lineFieldSourceNodes) AND makes section lines rollup-membership
+  // candidates (via compileBindingToNode → selectLines). Stays KIND-BLIND.
+  const lines = [...rows.map(projectLine), ...(options.sectionLines ?? [])];
   const bindingTargets = new Set(effective.map((b) => b.targetNodeId));
   const bindingNodes = effective.map((b) => compileBindingToNode(b, { lines }));
 

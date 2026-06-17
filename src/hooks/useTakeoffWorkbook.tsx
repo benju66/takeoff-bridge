@@ -53,7 +53,7 @@ import {
 } from "@/lib/bindings/registry";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import { findBindingByTarget } from "@/lib/bindings/store";
-import type { Binding } from "@/lib/bindings/types";
+import type { Binding, BindingLine } from "@/lib/bindings/types";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -162,7 +162,11 @@ export function useTakeoffWorkbook(
   // + their optimistic setter, so SET_BINDING / CLEAR_BINDING share the workbook's undo
   // history. `[]` = inert (no bound cells; goldens tie).
   bindings: Binding[] = [],
-  setBindings: React.Dispatch<React.SetStateAction<Binding[]>> = () => {}
+  setBindings: React.Dispatch<React.SetStateAction<Binding[]>> = () => {},
+  // GC/Site-Ops Addressability Phase A5: the projected GC/Site-Ops section lines
+  // (app-born = engine totals; imported = frozen constants), folded into the binding
+  // recompute so a binding may target/aggregate a section line. `[]` = inert.
+  sectionBindingLines: readonly BindingLine[] = []
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -626,8 +630,8 @@ export function useTakeoffWorkbook(
   // cell, NOT the summed/export total (that integration is Phase 5).
   // ---------------------------------------------------------------------------
   const bindingValuesByNodeId = useMemo(
-    () => recomputeLineBindingValues(bindings, gcCalcResult, siteOpsCalcResult, rows),
-    [bindings, gcCalcResult, siteOpsCalcResult, rows]
+    () => recomputeLineBindingValues(bindings, gcCalcResult, siteOpsCalcResult, rows, sectionBindingLines),
+    [bindings, gcCalcResult, siteOpsCalcResult, rows, sectionBindingLines]
   );
 
   /** rowId → bound-cell display state, for rows carrying a `line:<id>:total` binding. */

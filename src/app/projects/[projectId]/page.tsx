@@ -18,6 +18,8 @@ import {
 import {
   computeLinkedDivisionTotalsViaEngine,
   computeImportedLinkedDivisionTotalsViaEngine,
+  projectAppBornSectionLines,
+  projectImportedSectionLines,
 } from "@/lib/bindings/registry";
 import { isLinkedDivisionRow } from "@/lib/constants";
 import { sectionTotalsFromLinked } from "@/lib/importEstimate";
@@ -131,9 +133,38 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     rateCardSnapshot,
   );
 
+  // GC/Site-Ops Addressability section lines (GC first, then Site Ops — sort_order
+  // is re-stamped from the array index by the gateway), persisted alongside the
+  // legacy blobs by the dual-write below.
+  //  - APP-BORN (Phase A3): synthesized from the live STEP 2/3 blobs (derived).
+  //  - IMPORTED (Phase A4): synthesized from the FROZEN imported_step23_lines detail
+  //    as lumpSum constants — never the parametric personnel/infrastructure lines
+  //    (those are app DEFAULTS for imports, finding G-2). A live STEP 2/3 input can
+  //    never move them; only the frozen detail does.
+  const sectionLines = React.useMemo(
+    () =>
+      project?.isImported
+        ? synthesizeImportedSectionLines(projectEstimate?.importedStep23Lines)
+        : [...personnel.sectionLines, ...infrastructure.sectionLines],
+    [project?.isImported, projectEstimate?.importedStep23Lines, personnel.sectionLines, infrastructure.sectionLines]
+  );
+
+  // GC/Site-Ops Addressability Phase A5: project the section lines to BindingLines so
+  // each GC/Site-Ops line is a binding TARGET / rollup MEMBER in the kind-blind graph.
+  // The total-resolution seam (app-born = live engine per-line total; imported = frozen
+  // inputs.value constant) lives in the two projectors. Handed to the binding engine
+  // below; INERT until a binding actually targets/aggregates a section line.
+  const sectionBindingLines = React.useMemo(
+    () =>
+      project?.isImported
+        ? projectImportedSectionLines(sectionLines)
+        : projectAppBornSectionLines(sectionLines, personnel.calcResult, infrastructure.calcResult),
+    [project?.isImported, sectionLines, personnel.calcResult, infrastructure.calcResult]
+  );
+
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
   // export handlers — gc-siteops Phase 3)
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings);
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings, sectionBindingLines);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,
@@ -300,21 +331,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [project?.isImported, linkedDivisionTotals]
   );
 
-  // GC/Site-Ops Addressability section lines (GC first, then Site Ops — sort_order
-  // is re-stamped from the array index by the gateway), persisted alongside the
-  // legacy blobs by the dual-write below.
-  //  - APP-BORN (Phase A3): synthesized from the live STEP 2/3 blobs (derived).
-  //  - IMPORTED (Phase A4): synthesized from the FROZEN imported_step23_lines detail
-  //    as lumpSum constants — never the parametric personnel/infrastructure lines
-  //    (those are app DEFAULTS for imports, finding G-2). A live STEP 2/3 input can
-  //    never move them; only the frozen detail does.
-  const sectionLines = React.useMemo(
-    () =>
-      project?.isImported
-        ? synthesizeImportedSectionLines(projectEstimate?.importedStep23Lines)
-        : [...personnel.sectionLines, ...infrastructure.sectionLines],
-    [project?.isImported, projectEstimate?.importedStep23Lines, personnel.sectionLines, infrastructure.sectionLines]
-  );
+  // The section lines (synthesized above, before the workbook so they can also feed the
+  // binding engine — Phase A5) persist alongside the legacy blobs via the dual-write.
   const { saveStatus, saveError } = useEstimatePersistence(
     projectId,
     isLoaded,
