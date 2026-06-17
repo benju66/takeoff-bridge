@@ -21,6 +21,7 @@ import {
 } from "@/lib/bindings/registry";
 import { isLinkedDivisionRow } from "@/lib/constants";
 import { sectionTotalsFromLinked } from "@/lib/importEstimate";
+import { synthesizeImportedSectionLines } from "@/lib/sectionLines/imported";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
 import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
@@ -299,13 +300,20 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [project?.isImported, linkedDivisionTotals]
   );
 
-  // GC/Site-Ops Addressability Phase A3 dual-write: the synthesized GC + Site Ops
-  // section lines (GC first, then Site Ops — sort_order is re-stamped from array
-  // index by the gateway). Persisted alongside the legacy blobs for app-born
-  // projects only; imported projects are Phase A4.
+  // GC/Site-Ops Addressability section lines (GC first, then Site Ops — sort_order
+  // is re-stamped from the array index by the gateway), persisted alongside the
+  // legacy blobs by the dual-write below.
+  //  - APP-BORN (Phase A3): synthesized from the live STEP 2/3 blobs (derived).
+  //  - IMPORTED (Phase A4): synthesized from the FROZEN imported_step23_lines detail
+  //    as lumpSum constants — never the parametric personnel/infrastructure lines
+  //    (those are app DEFAULTS for imports, finding G-2). A live STEP 2/3 input can
+  //    never move them; only the frozen detail does.
   const sectionLines = React.useMemo(
-    () => [...personnel.sectionLines, ...infrastructure.sectionLines],
-    [personnel.sectionLines, infrastructure.sectionLines]
+    () =>
+      project?.isImported
+        ? synthesizeImportedSectionLines(projectEstimate?.importedStep23Lines)
+        : [...personnel.sectionLines, ...infrastructure.sectionLines],
+    [project?.isImported, projectEstimate?.importedStep23Lines, personnel.sectionLines, infrastructure.sectionLines]
   );
   const { saveStatus, saveError } = useEstimatePersistence(
     projectId,
@@ -321,8 +329,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     infrastructure.siteOpsRates,
     freezeRateCardSnapshot,
     isNewEstimate,
-    sectionLines,
-    project?.isImported ?? false
+    sectionLines
   );
 
   // ---------------------------------------------------------------------------

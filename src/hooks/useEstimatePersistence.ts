@@ -45,16 +45,18 @@ export function useEstimatePersistence(
    *  the one-time "Estimate created" milestone snapshot on first save (Phase 4). */
   isNewEstimate: boolean = false,
   /**
-   * GC/Site-Ops Addressability Phase A3 dual-write: the synthesized GC + Site Ops
-   * section lines to persist alongside the legacy blobs. Written via the
-   * independent `save_section_lines` RPC AFTER the primary save succeeds, and
-   * ONLY for app-born projects (`isImported === false`) — imported projects get
-   * their section lines from the frozen imported detail in Phase A4. The write is
-   * fail-soft: nothing reads this table yet, so a section-line write failure must
-   * never flip the (successful) primary estimate save to an error.
+   * GC/Site-Ops Addressability dual-write: the GC + Site Ops section lines to
+   * persist alongside the legacy blobs, written via the independent
+   * `save_section_lines` RPC AFTER the primary save succeeds. The CALLER supplies
+   * the right lines per provenance — app-born synthesizes from the live blobs
+   * (Phase A3); imported synthesizes the frozen `imported_step23_lines` detail as
+   * lumpSum constants (Phase A4) — so this hook persists whatever it is given and
+   * needs no provenance flag. The write is fail-soft: nothing reads this table
+   * yet, so a section-line write failure must never flip the (successful) primary
+   * estimate save to an error. (Phase B6 makes the table authoritative and removes
+   * the fail-soft.)
    */
-  sectionLines: EstimateSectionLine[] = [],
-  isImported: boolean = false
+  sectionLines: EstimateSectionLine[] = []
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -133,12 +135,14 @@ export function useEstimatePersistence(
       setSaveStatus('saved');
       setSaveError(null);
 
-      // Phase A3 dual-write (app-born only): persist the synthesized section lines
-      // via their independent RPC. Fail-soft — the primary estimate save already
-      // committed (the legacy blobs are the authoritative source until a later
-      // phase), so a section-line write failure logs but never surfaces as an
-      // error. The next edit's debounced save retries with the latest lines.
-      if (!isImported && sectionLines.length > 0) {
+      // Dual-write: persist the section lines (app-born synthesized from the live
+      // blobs, Phase A3; imported synthesized from the frozen detail, Phase A4) via
+      // their independent RPC. Fail-soft — the primary estimate save already
+      // committed (the legacy blobs / frozen detail are the authoritative source
+      // until a later phase), so a section-line write failure logs but never
+      // surfaces as an error. The next edit's debounced save retries with the
+      // latest lines.
+      if (sectionLines.length > 0) {
         saveSectionLines(projectId, sectionLines).catch((err) => {
           console.error('Section-line dual-write failed (primary estimate save committed):', err);
         });
