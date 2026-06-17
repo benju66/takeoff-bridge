@@ -141,6 +141,43 @@ the 3 grid e2e specs green; a manual `/verify` pass. Then a `/handoff` sequencin
 inverse data per AGENTS.md, type-over wired to the A+1 override path). **Stop at the B1b
 boundary.**
 
+### Phase B1b kickoff prompt (paste into a fresh session)
+
+> Implement **Phase B1b** of GC/Site-Ops Addressability & Grid Convergence — the second half
+> of B1. Read the plan (`docs/plans/2026-06-16-gc-siteops-addressability-grid-convergence.md`,
+> decision ID-3) and this B1a closure handoff
+> (`docs/handoffs/2026-06-17-gc-siteops-addressability-phase-b1a-closure.md`) first. **Branch:**
+> continue on the existing `gc-siteops-addressability` branch where B1a already lives
+> (commits `57a2e7e` B1a + `feb449a` lock-fix, on top of the re-synced `main`); ensure it is
+> current with `origin` (pull if it was pushed). Do NOT branch off `main` or commit on `main`.
+>
+> Scope: **generalize the already-extracted `EstimateGridShell` into a typed, reusable
+> `GridShell<TRow>`** and replace the Step-4-specific `TableMeta` vocabulary in
+> `src/types/index.ts` (`handleCellEdit(…, field: keyof ProcessedTakeoffRow, …)`,
+> `handleKeyDown(…, type: "code"|"desc"|"qty"|"price"|"uom", …)`, `handlePaste`,
+> `insertManualRow`/`deleteRow`, `lockedCells`, `selection`) with a generalized
+> **`GridHostContract<TRow>`** that Steps 2/3 can later implement with their own leaner
+> state+command hooks. Parameterize the Step-4-specific bits via the contract: the
+> editable/center-aligned column-id sets, the `row.isMapped` row classes, and the divider
+> grouping (`getDivisionCode` + `DIVISION_LABELS`/`layoutConfigMap`); the `footer` slot is
+> already generic. **Design a hook point for the A+1 per-line override ⚑ indicator, but do NOT
+> wire a gesture** (that's B2/B3). **Step 4 (`useTakeoffWorkbook`) stays the SOLE consumer.**
+> Also revisit the B1a file-level `eslint-disable` in `EstimateTable.tsx` (either properly opt
+> the file out of the React Compiler or address the advisories). Keep every §8 anti-pattern in
+> `.agent/skills/data-table-architecture/SKILL.md` intact. This half is mostly **type-level and
+> `tsc`-gated** — keep behavior **byte-identical**.
+>
+> Take it through the CLAUDE.md **Definition of Done**: `npm run test` green (94 files / 1124,
+> all three export goldens $0.00), `npx tsc --noEmit` clean, `npm run build` green,
+> `/code-review`, commit via `git commit -F` (no push unless asked). Plus the B1 **interaction
+> gate**: run the Playwright e2e specs (`smoke`, the two `linked-values-*`, `phase3c-mapping-verify`)
+> and a manual `/verify` on the Step 4 grid (cell edit · undo/redo · cell lock · multi-cell paste ·
+> context-menu insert/delete · Trust Inspector tabs render · provenance glyph / override ⚑ / 🔗
+> badge). NOTE (from B1a): `smoke` fails on a pre-existing dblclick-on-read-only-first-row issue
+> **identically on baseline**, and `phase3c-mapping-verify`'s body passes (only its `finally`
+> cleanup times out) — neither is a regression; don't be alarmed. Then write a `/handoff`
+> sequencing **Phase B2** (Step 2 as a grid). **Stop at the B1b boundary.**
+
 ## Where this sits
 Track A: A1→A5 + A+1 ✅ (merged, PR #9). Track B: **B1a ✅ (this session) → B1b (generalize
 contract) → B2/B3 (Step 2/3 grids) → B4 (removable seed, D2) → B5 (validated one-off, D1) →
