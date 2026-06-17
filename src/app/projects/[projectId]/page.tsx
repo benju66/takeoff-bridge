@@ -298,6 +298,15 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     () => (project?.isImported ? sectionTotalsFromLinked(linkedDivisionTotals) : null),
     [project?.isImported, linkedDivisionTotals]
   );
+
+  // GC/Site-Ops Addressability Phase A3 dual-write: the synthesized GC + Site Ops
+  // section lines (GC first, then Site Ops — sort_order is re-stamped from array
+  // index by the gateway). Persisted alongside the legacy blobs for app-born
+  // projects only; imported projects are Phase A4.
+  const sectionLines = React.useMemo(
+    () => [...personnel.sectionLines, ...infrastructure.sectionLines],
+    [personnel.sectionLines, infrastructure.sectionLines]
+  );
   const { saveStatus, saveError } = useEstimatePersistence(
     projectId,
     isLoaded,
@@ -311,7 +320,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     infrastructure.siteOpsQuantities,
     infrastructure.siteOpsRates,
     freezeRateCardSnapshot,
-    isNewEstimate
+    isNewEstimate,
+    sectionLines,
+    project?.isImported ?? false
   );
 
   // ---------------------------------------------------------------------------

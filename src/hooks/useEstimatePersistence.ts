@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ProcessedTakeoffRow } from "@/types";
-import { saveEstimate, createEstimateSnapshot } from "@/lib/db";
+import { saveEstimate, createEstimateSnapshot, saveSectionLines } from "@/lib/db";
 import { TakeoffSummary } from "@/lib/calculations";
+import type { EstimateSectionLine } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // useEstimatePersistence — Auto-persist ProjectEstimate to Supabase
@@ -42,7 +43,18 @@ export function useEstimatePersistence(
   freezeRateCardSnapshot: () => Record<string, number>,
   /** True for a brand-new estimate (no persisted project_estimates row at load). Drives
    *  the one-time "Estimate created" milestone snapshot on first save (Phase 4). */
-  isNewEstimate: boolean = false
+  isNewEstimate: boolean = false,
+  /**
+   * GC/Site-Ops Addressability Phase A3 dual-write: the synthesized GC + Site Ops
+   * section lines to persist alongside the legacy blobs. Written via the
+   * independent `save_section_lines` RPC AFTER the primary save succeeds, and
+   * ONLY for app-born projects (`isImported === false`) — imported projects get
+   * their section lines from the frozen imported detail in Phase A4. The write is
+   * fail-soft: nothing reads this table yet, so a section-line write failure must
+   * never flip the (successful) primary estimate save to an error.
+   */
+  sectionLines: EstimateSectionLine[] = [],
+  isImported: boolean = false
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -120,6 +132,17 @@ export function useEstimatePersistence(
       if (!mountedRef.current) return;
       setSaveStatus('saved');
       setSaveError(null);
+
+      // Phase A3 dual-write (app-born only): persist the synthesized section lines
+      // via their independent RPC. Fail-soft — the primary estimate save already
+      // committed (the legacy blobs are the authoritative source until a later
+      // phase), so a section-line write failure logs but never surfaces as an
+      // error. The next edit's debounced save retries with the latest lines.
+      if (!isImported && sectionLines.length > 0) {
+        saveSectionLines(projectId, sectionLines).catch((err) => {
+          console.error('Section-line dual-write failed (primary estimate save committed):', err);
+        });
+      }
 
       // First-save milestone snapshot (Phase 4): a one-time "Estimate created"
       // checkpoint for a brand-new estimate. Fire-and-forget — snapshot loss must never

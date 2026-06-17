@@ -4,6 +4,9 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { computePersonnelCosts, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
+import { synthesizePersonnelSectionLines } from "@/lib/sectionLines/synthesize";
+import { computePersonnelFromSectionLines } from "@/lib/sectionLines/project";
+import type { EstimateSectionLine } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // usePersonnelCalculations — Step 2 GC Personnel state & calculations
@@ -26,6 +29,13 @@ export interface UsePersonnelCalculationsReturn {
   // Serializable snapshots for persistence
   gcUtilization: Record<string, number>;
   gcEquipmentOverrides: Record<string, number>;
+  /**
+   * GC/Site-Ops Addressability Phase A3 (dual-read/dual-write): the GC inputs
+   * synthesized as addressable section lines. Persisted alongside the legacy
+   * blobs (dual-write, app-born only) — the legacy blob path above stays
+   * authoritative for display + export until a later phase.
+   */
+  sectionLines: EstimateSectionLine[];
 }
 
 /** Valid persistence keys for Phase 4 manual GC entries (stale JSONB keys are dropped on load). */
@@ -210,6 +220,40 @@ export function usePersonnelCalculations(
     eqDumpsters, eqToilets, eqElectric, ...manualEntries,
   };
 
+  // ---------------------------------------------------------------------------
+  // Phase A3 (dual-read/dual-write): synthesize the GC section lines from the
+  // legacy blob snapshots. Cheap (one object per catalog line); persisted on the
+  // next save by the dual-write path. The blob-driven `calcResult` above stays
+  // the authoritative value — these lines do not feed display or export yet.
+  // ---------------------------------------------------------------------------
+  const gcUtilizationString = JSON.stringify(gcUtilization);
+  const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
+  const sectionLines = useMemo(
+    () => synthesizePersonnelSectionLines(gcUtilization, gcEquipmentOverrides),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [gcUtilizationString, gcEquipmentOverridesString]
+  );
+
+  // Dual-read tripwire (DEV ONLY): driving the A1 engine off the synthesized
+  // section lines must reproduce the blob-driven `calcResult` to the byte. A
+  // mismatch means synthesis/projection drifted — surfaced loudly in dev, never
+  // throwing in production (the legacy path remains authoritative).
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    const viaLines = computePersonnelFromSectionLines(sectionLines, {
+      durationMonths,
+      squareFootage,
+      rateLookup,
+    });
+    if (JSON.stringify(viaLines) !== JSON.stringify(calcResult)) {
+      console.error(
+        "[sectionLines dual-read] GC calc drift: section-line path != blob path",
+        { sectionLineGrandTotal: viaLines.grandTotal, blobGrandTotal: calcResult.grandTotal }
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString]);
+
   return {
     utilizations,
     setUtilization,
@@ -224,5 +268,6 @@ export function usePersonnelCalculations(
     totalGCs: calcResult.grandTotal,
     gcUtilization,
     gcEquipmentOverrides,
+    sectionLines,
   };
 }
