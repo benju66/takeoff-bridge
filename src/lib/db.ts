@@ -1,4 +1,4 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine } from "@/types/db";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -450,6 +450,101 @@ export async function saveEstimate(
   if (error) {
     console.error("Failed to save estimate atomically via RPC", error);
     throw new Error(`Failed to save estimate: ${error.message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Section Lines (GC Personnel / Site Operations addressable lines)
+// GC/Site-Ops Addressability Phase A2.
+//
+// estimate_section_lines holds one addressable row per Step 2 (GC) / Step 3
+// (site_ops) line — line IDENTITY + estimator INPUTS only, NEVER a total
+// (totals are recomputed by the calc engine: "derived, never frozen", plan
+// ID-1). Persisted via its OWN atomic RPC (save_section_lines), independent of
+// save_estimate, so a section-line save never rides the Step 4 line-item
+// DELETE+INSERT replace. Read ORDER BY sort_order ASC (AGENTS.md sort-order
+// integrity). Phase A2 only lays the gateway — nothing calls these yet (A3
+// wires synthesis + dual-read/dual-write).
+// ═══════════════════════════════════════════════════════════════════
+
+const SECTION_LINE_COLUMNS =
+  "id, project_id, section, code, procore_code, cost_type, label, entry_kind, inputs, sort_order, source, updated_at";
+
+function mapSectionLineFromRow(row: Record<string, unknown>): EstimateSectionLine {
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    section: row.section as EstimateSectionLine["section"],
+    code: (row.code as string) || "",
+    procoreCode: (row.procore_code as string) || "",
+    costType: (row.cost_type as string) || "",
+    label: (row.label as string) || "",
+    entryKind: (row.entry_kind as string) || "",
+    inputs: (row.inputs as Record<string, unknown>) ?? {},
+    sortOrder: Number(row.sort_order) || 0,
+    source: (row.source as string) || "template",
+    updatedAt: (row.updated_at as string) || new Date().toISOString(),
+  };
+}
+
+/**
+ * Builds the p_lines JSONB payload (line → snake_case, sort_order from array
+ * index to preserve visual position, mirroring buildLineItemPayload). No `total`
+ * is ever written — the table has no total column.
+ */
+function buildSectionLinePayload(lines: EstimateSectionLine[]) {
+  return lines.map((line, index) => ({
+    id: line.id,
+    section: line.section,
+    code: line.code,
+    procore_code: line.procoreCode,
+    cost_type: line.costType,
+    label: line.label,
+    entry_kind: line.entryKind,
+    inputs: line.inputs ?? {},
+    sort_order: index,
+    source: line.source || "template",
+  }));
+}
+
+/**
+ * Reads a project's GC/Site-Ops section lines, ordered by sort_order ASC so
+ * manual positions survive (AGENTS.md). Callers (A3+) split by `section`.
+ */
+export async function getSectionLines(
+  projectId: string
+): Promise<EstimateSectionLine[]> {
+  const { data, error } = await supabase
+    .from("estimate_section_lines")
+    .select(SECTION_LINE_COLUMNS)
+    .eq("project_id", projectId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch section lines for project ${projectId}`, error);
+    throw new Error(`Failed to fetch section lines: ${error.message}`);
+  }
+  return (data || []).map(mapSectionLineFromRow);
+}
+
+/**
+ * Atomically replaces a project's section lines via the save_section_lines RPC
+ * (DELETE-all + INSERT in one transaction). sort_order is derived from the array
+ * index to preserve visual position. THROWS on failure — these are authored
+ * estimator inputs (like bindings), not fire-and-forget training data.
+ */
+export async function saveSectionLines(
+  projectId: string,
+  lines: EstimateSectionLine[]
+): Promise<void> {
+  const { error } = await supabase.rpc("save_section_lines", {
+    p_project_id: projectId,
+    p_lines: buildSectionLinePayload(lines),
+  });
+
+  if (error) {
+    console.error("Failed to save section lines via RPC", error);
+    throw new Error(`Failed to save section lines: ${error.message}`);
   }
 }
 
