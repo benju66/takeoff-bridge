@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ProcessedTakeoffRow } from "@/types";
-import { saveEstimate, createEstimateSnapshot } from "@/lib/db";
+import { saveEstimate, createEstimateSnapshot, saveSectionLines } from "@/lib/db";
 import { TakeoffSummary } from "@/lib/calculations";
+import type { EstimateSectionLine } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // useEstimatePersistence — Auto-persist ProjectEstimate to Supabase
@@ -42,7 +43,20 @@ export function useEstimatePersistence(
   freezeRateCardSnapshot: () => Record<string, number>,
   /** True for a brand-new estimate (no persisted project_estimates row at load). Drives
    *  the one-time "Estimate created" milestone snapshot on first save (Phase 4). */
-  isNewEstimate: boolean = false
+  isNewEstimate: boolean = false,
+  /**
+   * GC/Site-Ops Addressability dual-write: the GC + Site Ops section lines to
+   * persist alongside the legacy blobs, written via the independent
+   * `save_section_lines` RPC AFTER the primary save succeeds. The CALLER supplies
+   * the right lines per provenance — app-born synthesizes from the live blobs
+   * (Phase A3); imported synthesizes the frozen `imported_step23_lines` detail as
+   * lumpSum constants (Phase A4) — so this hook persists whatever it is given and
+   * needs no provenance flag. The write is fail-soft: nothing reads this table
+   * yet, so a section-line write failure must never flip the (successful) primary
+   * estimate save to an error. (Phase B6 makes the table authoritative and removes
+   * the fail-soft.)
+   */
+  sectionLines: EstimateSectionLine[] = []
 ): { saveStatus: SaveStatus; saveError: string | null } {
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
@@ -120,6 +134,19 @@ export function useEstimatePersistence(
       if (!mountedRef.current) return;
       setSaveStatus('saved');
       setSaveError(null);
+
+      // Dual-write: persist the section lines (app-born synthesized from the live
+      // blobs, Phase A3; imported synthesized from the frozen detail, Phase A4) via
+      // their independent RPC. Fail-soft — the primary estimate save already
+      // committed (the legacy blobs / frozen detail are the authoritative source
+      // until a later phase), so a section-line write failure logs but never
+      // surfaces as an error. The next edit's debounced save retries with the
+      // latest lines.
+      if (sectionLines.length > 0) {
+        saveSectionLines(projectId, sectionLines).catch((err) => {
+          console.error('Section-line dual-write failed (primary estimate save committed):', err);
+        });
+      }
 
       // First-save milestone snapshot (Phase 4): a one-time "Estimate created"
       // checkpoint for a brand-new estimate. Fire-and-forget — snapshot loss must never

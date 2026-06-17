@@ -39,6 +39,8 @@ import {
   type MappingSuggestion,
 } from "../lib/importEstimate";
 import { primeCostCodeResolverFromCatalog, resetCostCodeResolver } from "../lib/costCodeResolver";
+import { synthesizeImportedSectionLines } from "../lib/sectionLines/imported";
+import { ENTRY_KIND } from "../lib/sectionLines/entryKinds";
 import type { ProcessedTakeoffRow } from "@/types";
 
 function resolvePastBidFixture(): string | null {
@@ -115,6 +117,36 @@ describe.skipIf(!FIXTURE)("Golden legacy import — CARE bid to the cent", () =>
     expect(Math.abs((supt?.total ?? 0) - 227_325)).toBeLessThanOrEqual(0.01);
     expect(payload.step3Lines.filter((l) => l.code === "02-4100").length).toBe(3); // three demolition scopes
     expect(payload.linkedSourceSubtotals.length).toBeGreaterThan(0);
+  });
+
+  it("synthesizes FROZEN section lines from the as-bid detail (Phase A4 — never recomputed)", () => {
+    // The imported row model (Phase A4): each captured STEP 2/3 line becomes a
+    // lumpSum section line whose value IS the frozen as-bid total. The export and
+    // the linked-row authority are untouched (the $0.00 tie above), so this only
+    // proves the new model reproduces the bid's own detail exactly.
+    const payload = step23LinesForImport(extracted);
+    const lines = synthesizeImportedSectionLines(payload);
+
+    expect(lines).toHaveLength(payload.step2Lines.length + payload.step3Lines.length);
+    const sources = [...payload.step2Lines, ...payload.step3Lines];
+    lines.forEach((l, i) => {
+      expect(l.entryKind).toBe(ENTRY_KIND.LumpSum);
+      expect(l.section).toBe(i < payload.step2Lines.length ? "gc" : "site_ops");
+      // The value is the frozen total — a hand-authored sheet's qty×rate need not
+      // equal it, so re-multiplying would drift; the lump must win every time.
+      expect(l.inputs.value).toBe(sources[i].total);
+    });
+
+    // Section sums reproduce the as-bid line sums to the cent (no input recompute).
+    const gcSum = lines.filter((l) => l.section === "gc").reduce((s, l) => s + (l.inputs.value as number), 0);
+    const soSum = lines.filter((l) => l.section === "site_ops").reduce((s, l) => s + (l.inputs.value as number), 0);
+    expect(Math.abs(gcSum - payload.step2Lines.reduce((s, l) => s + l.total, 0))).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(soSum - payload.step3Lines.reduce((s, l) => s + l.total, 0))).toBeLessThanOrEqual(0.01);
+
+    // Sr Superintendent is a known real line (227,325 from the probe) — it carries
+    // its frozen dollar and resolves to the app's deterministic code.
+    const supt = lines.find((l) => l.label === "Sr Superintendent" || l.code === "01-0410.001");
+    expect(supt?.inputs.value).toBeGreaterThan(0);
   });
 
   it("captures the bid's own col-G UOMs (Phase 3 Slice 0) and keeps them through mapping", () => {

@@ -6,6 +6,15 @@
 import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation, EstimateOverrideMap } from "@/types";
 import { getDivisionCode } from "./division";
 import {
+  gcStaffLineId,
+  gcOperationalLineId,
+  gcEquipmentLineId,
+  gcManualLineId,
+  siteOpsDynamicLineId,
+  siteOpsManualLineId,
+  sectionLineTotalOverrideKey,
+} from "./sectionLines/ids";
+import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
   EQUIPMENT_DEFAULTS,
@@ -20,6 +29,12 @@ import {
   SUPERVISION_STAFF_CODES,
   SiteOpsSection,
   isLinkedDivisionRow,
+  StaffRoleConfig,
+  OperationalExpenseConfig,
+  EquipmentExpenseConfig,
+  GcManualConfig,
+  SiteOpsDynamicConfig,
+  SiteOpsManualConfig,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +49,110 @@ import {
  * every existing caller/test is byte-identical and day-one totals never move.
  */
 export type RateLookup = (code: string, fallback: number) => number;
+
+// ---------------------------------------------------------------------------
+// Active line-set injection (gc-siteops Phase A1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The active line set injected into the GC / Site-Ops calc engines. Defaults to
+ * the full catalog constants, so a default-argument call is byte-identical to
+ * the legacy constants-driven calc (mirrors the `RateLookup` injection pattern —
+ * the boundary is INERT until a caller passes a non-default set). Per-line math
+ * is untouched; only WHICH lines compute is variable.
+ *
+ * Two controlled kinds of "variable" (ID-4), both expressed via `build*LineSet`:
+ *  - (a) removal (D2): the active set is a FILTERED SUBSET of the catalog — the
+ *    engine simply computes over fewer lines.
+ *  - (b) one-off addition (D1): a user-authored GENERIC MANUAL line appended to
+ *    the manual array. It runs through the SAME manual-line evaluator (no new
+ *    per-line math), drawing its typed value from the existing
+ *    `manualEntries` / `quantities` map by `key`.
+ *
+ * Bespoke STRUCTURED lines (utilization-by-role staff, the operational quantity
+ * drivers incl. `sqftPer3000`, the lump-sum equipment lines, the Site-Ops
+ * duration/sqft drivers) are removable but NOT user-mintable: `build*LineSet`
+ * exposes an additive parameter for MANUAL lines only — there is deliberately no
+ * structured-line adder. (The supervision subtotal and the linked-division
+ * bridge are derived downstream in `computeLinkedDivisionTotals`, not configs.)
+ */
+export interface PersonnelLineSet {
+  staffRoles: readonly StaffRoleConfig[];
+  operationalExpenses: readonly OperationalExpenseConfig[];
+  equipment: readonly EquipmentExpenseConfig[];
+  manualLines: readonly GcManualConfig[];
+}
+
+export interface SiteOpsLineSet {
+  dynamicLines: readonly SiteOpsDynamicConfig[];
+  manualLines: readonly SiteOpsManualConfig[];
+}
+
+/**
+ * A user-authored one-off line (D1). Structurally a generic manual line — it
+ * carries an entry kind (`qty` / `lumpSum` for GC; `qty` / `qtyRate` / `lumpSum`
+ * for Site Ops), a rate, and a resolved code — so it flows through the existing
+ * manual-line evaluator unchanged. Aliased for legibility at the call sites.
+ */
+export type OneOffGcLine = GcManualConfig;
+export type OneOffSiteOpsLine = SiteOpsManualConfig;
+
+/** The default active GC line set: the full catalog constants (legacy behavior). */
+export const DEFAULT_PERSONNEL_LINES: PersonnelLineSet = {
+  staffRoles: STAFF_ROLE_DEFAULTS,
+  operationalExpenses: OPERATIONAL_EXPENSE_DEFAULTS,
+  equipment: EQUIPMENT_DEFAULTS,
+  manualLines: GC_MANUAL_DEFAULTS,
+};
+
+/** The default active Site-Ops line set: the full catalog constants (legacy). */
+export const DEFAULT_SITE_OPS_LINES: SiteOpsLineSet = {
+  dynamicLines: SITE_OPS_DYNAMIC_DEFAULTS,
+  manualLines: SITE_OPS_MANUAL_DEFAULTS,
+};
+
+/** Drop catalog lines whose `code` is in `removed` (every config kind carries a unique `code`). */
+function filterByCode<T extends { code: string }>(arr: readonly T[], removed: ReadonlySet<string>): readonly T[] {
+  return removed.size === 0 ? arr : arr.filter((l) => !removed.has(l.code));
+}
+
+/**
+ * Build an active GC line set by (a) removing catalog lines by `code` and/or
+ * (b) appending user-authored one-off MANUAL lines. The additive path is manual
+ * only — there is no parameter to mint a staff / operational / equipment line
+ * (ID-4 protection). With no options it reproduces the catalog defaults.
+ */
+export function buildPersonnelLineSet(opts: {
+  removeCodes?: Iterable<string>;
+  addManual?: readonly OneOffGcLine[];
+  base?: PersonnelLineSet;
+} = {}): PersonnelLineSet {
+  const base = opts.base ?? DEFAULT_PERSONNEL_LINES;
+  const removed = new Set(opts.removeCodes ?? []);
+  return {
+    staffRoles: filterByCode(base.staffRoles, removed),
+    operationalExpenses: filterByCode(base.operationalExpenses, removed),
+    equipment: filterByCode(base.equipment, removed),
+    manualLines: [...filterByCode(base.manualLines, removed), ...(opts.addManual ?? [])],
+  };
+}
+
+/**
+ * Site-Ops twin of `buildPersonnelLineSet`. Manual-only additive path; the
+ * structured duration/sqft driver lines are removable but not mintable.
+ */
+export function buildSiteOpsLineSet(opts: {
+  removeCodes?: Iterable<string>;
+  addManual?: readonly OneOffSiteOpsLine[];
+  base?: SiteOpsLineSet;
+} = {}): SiteOpsLineSet {
+  const base = opts.base ?? DEFAULT_SITE_OPS_LINES;
+  const removed = new Set(opts.removeCodes ?? []);
+  return {
+    dynamicLines: filterByCode(base.dynamicLines, removed),
+    manualLines: [...filterByCode(base.manualLines, removed), ...(opts.addManual ?? [])],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Date Utility
@@ -69,6 +188,48 @@ export function getTerminalProgressBar(percentage: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Per-line audited type-over (gc-siteops Phase A+1, decision D3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-line type-over trace exposed on a GC / Site-Ops calc result — the line
+ * analog of `TakeoffSummary.overrides`. Keyed by the override `field`
+ * (`line:<sectionLineId>:total`, the SAME address A5 projects the line to), each
+ * entry carries the RETAINED computed value and the estimator's typed override.
+ * Present on a result ONLY when at least one override applied (so a no-override
+ * result is byte-identical — the inert default).
+ */
+export type LineOverrideTrace = Record<string, { computedValue: number; overrideValue: number }>;
+
+/**
+ * Builds the per-line type-over layer (D3) the GC / Site-Ops engines apply. Returns
+ * an `apply(sectionLineId, computed)` that substitutes a recorded override for a
+ * line's COMPUTED total — keyed by `line:<id>:total` — and records the
+ * computed-vs-override pair into `trace` (so the Trust Inspector can show both). The
+ * computed value is ALWAYS retained.
+ *
+ * RECOGNIZED-KEYS GUARD (mirrors OVERRIDABLE_SUMMARY_FIELDS): the layer is only ever
+ * called with the `sectionLineId`s the engine is ACTIVELY PRODUCING, so a stale
+ * override (for a line the active set no longer contains, or a foreign/summary key)
+ * is never looked up and CANNOT mis-apply. An explicit override of 0 is honored
+ * (hasOwnProperty, not truthiness — INV-3). With an empty map the layer is a pure
+ * passthrough, so a no-override call stays byte-identical and `trace` stays empty.
+ */
+function makeLineOverrideLayer(
+  lineOverrides: EstimateOverrideMap,
+  trace: LineOverrideTrace
+): (sectionLineId: string, computed: number) => number {
+  return (sectionLineId, computed) => {
+    const key = sectionLineTotalOverrideKey(sectionLineId);
+    if (Object.prototype.hasOwnProperty.call(lineOverrides, key) && typeof lineOverrides[key] === "number") {
+      trace[key] = { computedValue: computed, overrideValue: lineOverrides[key] };
+      return lineOverrides[key];
+    }
+    return computed;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Division 01 — General Conditions Personnel Calculations
 // ---------------------------------------------------------------------------
 
@@ -82,6 +243,13 @@ export interface PersonnelCalcResult {
   manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   equipmentTotal: number;
   grandTotal: number;
+  /**
+   * Phase A+1: present (and non-empty) ONLY when at least one GC line was typed over.
+   * Each line's `total` above is the EFFECTIVE (override-applied) value — so the
+   * grand total, the linked-division bridge, the A5 projection, and the export all
+   * see the override for free; the computed value is retained here for the glass box.
+   */
+  overrides?: LineOverrideTrace;
 }
 
 /**
@@ -98,6 +266,18 @@ export interface PersonnelCalcResult {
  *                     Defaults to returning the fallback, so day-one behavior is
  *                     byte-identical. Full staff chain: rateOverrides[role.key]
  *                     ?? rateLookup(role.code, role.defaultRate).
+ * @param lines - Injected active line set (gc-siteops Phase A1). Defaults to the
+ *                full catalog constants (`DEFAULT_PERSONNEL_LINES`), so the
+ *                default-argument call is byte-identical to the legacy calc.
+ *                Pass a `buildPersonnelLineSet` result to remove lines (D2) or
+ *                append one-off manual lines (D1); per-line math is unchanged.
+ * @param lineOverrides - Audited per-line type-overs (gc-siteops Phase A+1, D3),
+ *                the full `estimate_overrides` active map keyed by `field`. Only the
+ *                `line:<id>:total` keys for lines THIS engine produces are consumed
+ *                (the recognized-keys guard); every other key is ignored. Defaults to
+ *                `{}` → fully INERT (byte-identical result, no `overrides` key), so
+ *                the export goldens tie $0.00. A recorded override substitutes a
+ *                line's `total` (computed retained in the result `overrides` trace).
  */
 export function computePersonnelCosts(
   durationMonths: number,
@@ -106,20 +286,26 @@ export function computePersonnelCosts(
   equipmentOverrides: { dumpsters: number; toilets: number; electric: number },
   manualEntries: Record<string, number> = {},
   rateOverrides?: Record<string, number>,
-  rateLookup: RateLookup = (_, fb) => fb
+  rateLookup: RateLookup = (_, fb) => fb,
+  lines: PersonnelLineSet = DEFAULT_PERSONNEL_LINES,
+  lineOverrides: EstimateOverrideMap = {}
 ): PersonnelCalcResult {
+  const overrides: LineOverrideTrace = {};
+  const applyOverride = makeLineOverrideLayer(lineOverrides, overrides);
+
   // Staff labour lines
-  const staffLines = STAFF_ROLE_DEFAULTS.map((role) => {
+  const staffLines = lines.staffRoles.map((role) => {
     const effectiveRate = rateOverrides?.[role.key] ?? rateLookup(role.code, role.defaultRate);
     const utilization = (utilizations[role.key] || 0) / 100;
     const qty = durationMonths * HOURS_PER_MONTH * utilization;
-    const total = qty * effectiveRate;
+    // A type-over substitutes the line TOTAL only; computed qty/rate are retained.
+    const total = applyOverride(gcStaffLineId(role.key), qty * effectiveRate);
     return { code: role.code, procoreCode: role.procoreCode, costType: role.costType, role: role.label, rate: effectiveRate, qty, total, utilization };
   });
 
   // Operational expense lines (auto quantity drivers mirroring template STEP 2 col F)
   const suUtilization = utilizations["su"] || 0;
-  const operationalLines = OPERATIONAL_EXPENSE_DEFAULTS.map((expense) => {
+  const operationalLines = lines.operationalExpenses.map((expense) => {
     let qty: number;
     if (expense.quantityDriver === "superintendent") {
       qty = durationMonths * (suUtilization / 100);
@@ -129,39 +315,42 @@ export function computePersonnelCosts(
       qty = durationMonths;
     }
     const rate = rateLookup(expense.code, expense.rate);
-    const total = qty * rate;
+    const total = applyOverride(gcOperationalLineId(expense.code), qty * rate);
     return { code: expense.code, procoreCode: expense.procoreCode, costType: expense.costType, desc: expense.description, unit: expense.unit, rate, qty, total };
   });
 
   // Equipment lines (user-entered fixed values) — carried as mapped lines so
   // the export can place each on its own Budget Line Items row (Phase 3)
-  const equipmentLines = EQUIPMENT_DEFAULTS.map((eq) => ({
+  const equipmentLines = lines.equipment.map((eq) => ({
     code: eq.code, procoreCode: eq.procoreCode, costType: eq.costType, desc: eq.label,
-    total: equipmentOverrides[eq.key],
+    total: applyOverride(gcEquipmentLineId(eq.key), equipmentOverrides[eq.key]),
   }));
   const equipmentTotal = equipmentLines.reduce((sum, l) => sum + l.total, 0);
 
   // Manual GC entry lines (Phase 4): "qty" = typed qty × template rate;
   // "lumpSum" = typed dollar amount (incl. the two %-of-estimate lines, which
   // the template has the estimator hand-type to break circularity — §5.2)
-  const manualLines = GC_MANUAL_DEFAULTS.map((cfg) => {
+  const manualLines = lines.manualLines.map((cfg) => {
     const value = manualEntries[cfg.key] ?? 0;
     const isQty = cfg.entry === "qty";
     const qty = isQty ? value : value > 0 ? 1 : 0;
     // qty lines source their unit rate from the card (fallback = constants);
     // lumpSum lines carry the estimator-typed dollar amount (no card entry).
     const rate = isQty ? rateLookup(cfg.code, cfg.rate ?? 0) : value;
-    const total = isQty ? value * rate : value;
+    const total = applyOverride(gcManualLineId(cfg.key), isQty ? value * rate : value);
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
 
-  // Grand total
+  // Grand total — sums the EFFECTIVE (override-applied) line totals.
   const staffTotal = staffLines.reduce((sum, l) => sum + l.total, 0);
   const opsTotal = operationalLines.reduce((sum, l) => sum + l.total, 0);
   const grandTotal = staffTotal + opsTotal + equipmentTotal + manualTotal;
 
-  return { staffLines, operationalLines, equipmentLines, manualLines, equipmentTotal, grandTotal };
+  return {
+    staffLines, operationalLines, equipmentLines, manualLines, equipmentTotal, grandTotal,
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +361,12 @@ export interface SiteOpsCalcResult {
   dynamicLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   manualLines: { code: string; procoreCode: string; costType: GcCostType; desc: string; unit: string; rate: number; qty: number; total: number }[];
   grandTotal: number;
+  /**
+   * Phase A+1: present (and non-empty) ONLY when at least one Site-Ops line was typed
+   * over. Each line's `total` above is the EFFECTIVE (override-applied) value; the
+   * computed value is retained here. See {@link LineOverrideTrace}.
+   */
+  overrides?: LineOverrideTrace;
 }
 
 /**
@@ -180,21 +375,38 @@ export interface SiteOpsCalcResult {
  * single source of truth (gc-siteops Phase 3 replaced the stale inline codes).
  * Phase 4 entry kinds: "qty" = typed qty × template rate; "qtyRate" = typed
  * qty × typed rate; "lumpSum" = typed dollar amount.
+ *
+ * @param lines - Injected active line set (gc-siteops Phase A1). Defaults to the
+ *                full catalog constants (`DEFAULT_SITE_OPS_LINES`), so the
+ *                default-argument call is byte-identical to the legacy calc.
+ *                Pass a `buildSiteOpsLineSet` result to remove lines (D2) or
+ *                append one-off manual lines (D1); per-line math is unchanged.
+ * @param lineOverrides - Audited per-line type-overs (gc-siteops Phase A+1, D3),
+ *                the full `estimate_overrides` active map keyed by `field`. Only the
+ *                `line:<id>:total` keys for lines THIS engine produces are consumed
+ *                (the recognized-keys guard). Defaults to `{}` → fully INERT, so the
+ *                export goldens tie $0.00.
  */
 export function computeSiteOperations(
   durationMonths: number,
   squareFootage: number,
   quantities: Record<string, number>,
   rates: Record<string, number>,
-  rateLookup: RateLookup = (_, fb) => fb
+  rateLookup: RateLookup = (_, fb) => fb,
+  lines: SiteOpsLineSet = DEFAULT_SITE_OPS_LINES,
+  lineOverrides: EstimateOverrideMap = {}
 ): SiteOpsCalcResult {
-  const dynamicLines = SITE_OPS_DYNAMIC_DEFAULTS.map((cfg) => {
+  const overrides: LineOverrideTrace = {};
+  const applyOverride = makeLineOverrideLayer(lineOverrides, overrides);
+
+  const dynamicLines = lines.dynamicLines.map((cfg) => {
     const qty = cfg.quantityDriver === "duration" ? durationMonths : squareFootage;
     const rate = rateLookup(cfg.code, cfg.rate);
-    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total: qty * rate };
+    const total = applyOverride(siteOpsDynamicLineId(cfg.code), qty * rate);
+    return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
 
-  const manualLines = SITE_OPS_MANUAL_DEFAULTS.map((cfg) => {
+  const manualLines = lines.manualLines.map((cfg) => {
     const value = quantities[cfg.key] ?? 0;
     let qty: number;
     let rate: number;
@@ -209,7 +421,8 @@ export function computeSiteOperations(
       // qty lines source their unit rate from the card (fallback = constants).
       rate = rateLookup(cfg.code, cfg.rate ?? 0);
     }
-    const total = cfg.entry === "lumpSum" ? value : qty * rate;
+    // A type-over substitutes the line TOTAL only; computed qty/rate are retained.
+    const total = applyOverride(siteOpsManualLineId(cfg.key), cfg.entry === "lumpSum" ? value : qty * rate);
     return { code: cfg.code, procoreCode: cfg.procoreCode, costType: cfg.costType, desc: cfg.label, unit: cfg.unit, rate, qty, total };
   });
 
@@ -217,7 +430,10 @@ export function computeSiteOperations(
   const manualTotal = manualLines.reduce((sum, l) => sum + l.total, 0);
   const grandTotal = dynamicTotal + manualTotal;
 
-  return { dynamicLines, manualLines, grandTotal };
+  return {
+    dynamicLines, manualLines, grandTotal,
+    ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------

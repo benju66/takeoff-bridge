@@ -6,8 +6,8 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 21 (added estimate_bindings — Linked Values System Phase 3)
--- RPC Functions: 4 (save_estimate_line_items, save_estimate,
+-- Tables: 22 (added estimate_section_lines — GC/Site-Ops Addressability Phase A2)
+-- RPC Functions: 5 (save_estimate_line_items, save_estimate, save_section_lines,
 --   create_estimate_version, submit_estimate_version)
 -- Trigger Functions: 8 (custom_step23_line_defs lifecycle guard + updated_at touch
 --   — Catalog Manager Phase 2; catalog_additions updated_at touch — Phase 6;
@@ -15,8 +15,8 @@
 --   lifecycle guard + updated_at touch — Procore Cost Codes Phase 1;
 --   catalog_cost_type_overrides updated_at touch — Reconciliation Phase 2;
 --   estimate_bindings updated_at touch — Linked Values System Phase 3)
--- RLS Policies: 39 (added estimate_bindings FOR ALL tenant policy —
---   Linked Values System Phase 3)
+-- RLS Policies: 40 (added estimate_section_lines FOR ALL tenant policy —
+--   GC/Site-Ops Addressability Phase A2)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -27,7 +27,17 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-15 (Linked Values System Phase 3: new estimate_bindings
+-- Last updated: 2026-06-17 (GC/Site-Ops Addressability Phase A2: new
+-- estimate_section_lines table — one addressable row per GC Personnel (Step 2) /
+-- Site Operations (Step 3) line (plan ID-1). Stores line IDENTITY + estimator
+-- INPUTS only; NO authoritative total column (totals are recomputed by the calc
+-- engine — "derived, never frozen"). section is a CHECK-enforced closed
+-- discriminator ('gc' | 'site_ops'); entry_kind is FREE TEXT / open enum (mirrors
+-- estimate_bindings.kind) so A3 synthesis can grow the vocabulary with zero schema
+-- change. Written via its OWN atomic RPC save_section_lines (DELETE-all+INSERT,
+-- independent of save_estimate). Single FOR ALL tenant policy mirroring
+-- estimate_line_items. Nothing reads it yet (A2 lays the pipe; A3 wires it).
+-- Earlier — 2026-06-15 (Linked Values System Phase 3: new estimate_bindings
 -- table — persisted authored bindings (lookups + rollups) for the Linked Values
 -- System, the generalization of the hardcoded 10 linked-division rows. MUTABLE
 -- (UPDATE/DELETE allowed, unlike append-only estimate_overrides; LD-3), one binding
@@ -1781,3 +1791,122 @@ CREATE TRIGGER estimate_bindings_touch_updated_at_trg
   BEFORE UPDATE ON estimate_bindings
   FOR EACH ROW
   EXECUTE FUNCTION touch_estimate_bindings_updated_at();
+
+-- ─────────────────────────────────────────────────
+-- Table 22: estimate_section_lines (GC/Site-Ops Addressability — Phase A2)
+-- ─────────────────────────────────────────────────
+--
+-- One row per GC Personnel (Step 2) / Site Operations (Step 3) line, the
+-- addressable-line foundation (plan ID-1). Holds line IDENTITY + estimator
+-- INPUTS only — NEVER an authoritative total. Totals are recomputed by the
+-- calc engine (calculations.ts) on load; any persisted total would be
+-- cache-only. This structurally enforces ID-1's "derived, never frozen" law
+-- and keeps Step 4's frozen-dollar Procore spine (estimate_line_items)
+-- untouched. Written via its OWN atomic RPC (save_section_lines), independent
+-- of save_estimate, so a section-line save never rides the Step 4
+-- DELETE-all+INSERT line-item replace (and vice-versa). Nothing reads this
+-- table yet — Phase A2 lays the pipe + db gateway; Phase A3 wires the pages.
+--
+--   section    — closed structural discriminator: 'gc' (Step 2) | 'site_ops'
+--                (Step 3). CHECK-enforced (a fixed 2-value set, unlike the
+--                open binding `kind`).
+--   entry_kind — OPEN line-kind discriminator (free TEXT, NO CHECK; mirrors
+--                estimate_bindings.kind). The DB stays blind to the kind
+--                vocabulary; A3 synthesis narrows it. Avoids baking a premature
+--                enum (AGENTS.md "No Speculative Changes").
+--   inputs     — JSONB estimator inputs (utilization %, qty, rate, lump sum,
+--                manual entries, rate overrides). Shape is the app's concern.
+--   code / procore_code / cost_type / label — resolved line identity.
+--   source     — provenance ('template' | 'csv_import' | 'manual'), mirroring
+--                estimate_line_items.source (free TEXT, no CHECK).
+--   updated_at — last-save time. The table is full-replace-saved per project
+--                (like estimate_line_items, which carries no timestamps), so a
+--                per-row created_at cannot survive a replace without extra
+--                preservation logic; a single updated_at is the honest field.
+CREATE TABLE estimate_section_lines (
+  id           TEXT NOT NULL,
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  section      TEXT NOT NULL CHECK (section IN ('gc', 'site_ops')),
+  code         TEXT NOT NULL DEFAULT '',
+  procore_code TEXT NOT NULL DEFAULT '',
+  cost_type    TEXT NOT NULL DEFAULT '',
+  label        TEXT NOT NULL DEFAULT '',
+  entry_kind   TEXT NOT NULL,
+  inputs       JSONB NOT NULL DEFAULT '{}',
+  sort_order   INTEGER NOT NULL DEFAULT 0,
+  source       TEXT NOT NULL DEFAULT 'template',
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX idx_section_lines_sort ON estimate_section_lines (project_id, sort_order);
+
+ALTER TABLE estimate_section_lines ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped: a single FOR ALL policy (SELECT/INSERT/UPDATE/DELETE) gated by the
+-- projects tenant-join — mirrors line_items_tenant_policy EXACTLY. A real tenant
+-- predicate (not USING(true)), so it does not trip the rls_policy_always_true advisor.
+CREATE POLICY "section_lines_tenant_policy" ON estimate_section_lines
+  FOR ALL
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM projects
+    WHERE projects.id = estimate_section_lines.project_id
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM projects
+    WHERE projects.id = estimate_section_lines.project_id
+    AND projects.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+-- ═════════════════════════════════════════════════════════════════════
+-- RPC: Atomic Section-Line Save (independent of save_estimate)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Wraps DELETE + INSERT for one project's GC/Site-Ops section lines in a single
+-- transaction (mirrors save_estimate_line_items). Written SEPARATELY from
+-- save_estimate so section-line writes are independent + debounced and never ride
+-- the Step 4 line-item replace. sort_order arrives pre-set from the gateway's array
+-- index to preserve visual position (AGENTS.md sort-order integrity).
+--
+-- SECURITY INVOKER (the default — no SECURITY DEFINER clause) so the caller's RLS on
+-- estimate_section_lines still applies; search_path is pinned to public.
+--
+-- Called from client via: supabase.rpc('save_section_lines', { p_project_id, p_lines })
+-- ═════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION save_section_lines(
+  p_project_id TEXT,
+  p_lines JSONB
+)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  -- Step 1: Delete all existing section lines for this project
+  DELETE FROM estimate_section_lines WHERE project_id = p_project_id;
+
+  -- Step 2: Insert all current lines (sort_order arrives pre-set from the
+  -- gateway's array index, mirroring save_estimate_line_items)
+  INSERT INTO estimate_section_lines (
+    id, project_id, section, code, procore_code, cost_type, label,
+    entry_kind, inputs, sort_order, source, updated_at
+  )
+  SELECT
+    line->>'id',
+    p_project_id,
+    line->>'section',
+    COALESCE(line->>'code', ''),
+    COALESCE(line->>'procore_code', ''),
+    COALESCE(line->>'cost_type', ''),
+    COALESCE(line->>'label', ''),
+    COALESCE(line->>'entry_kind', ''),
+    COALESCE(line->'inputs', '{}'::JSONB),
+    COALESCE((line->>'sort_order')::INTEGER, 0),
+    COALESCE(line->>'source', 'template'),
+    now()
+  FROM jsonb_array_elements(p_lines) AS line;
+END;
+$$;

@@ -125,6 +125,54 @@ export interface ImportedStep23Lines {
   linkedSourceSubtotals: { itemId: string; total: number | null }[];
 }
 
+/**
+ * GC/Site-Ops Addressability Phase A2: which step a section line belongs to.
+ * Closed, CHECK-enforced discriminator on estimate_section_lines.section.
+ *   'gc'       — Step 2 (GC Personnel)
+ *   'site_ops' — Step 3 (Site Operations)
+ */
+export type SectionDiscriminator = 'gc' | 'site_ops';
+
+/**
+ * One addressable GC/Site-Ops line (a row of the estimate_section_lines table —
+ * plan ID-1). Holds line IDENTITY + estimator INPUTS only; there is deliberately
+ * NO authoritative total — totals are recomputed by the calc engine on load
+ * ("derived, never frozen"). Persisted via its OWN atomic RPC (save_section_lines),
+ * independent of the Step 4 save_estimate path.
+ *
+ * Phase A2 lays the table + db gateway; NOTHING reads this into the pages yet
+ * (synthesis from the legacy blobs lands in Phase A3). On read, rows arrive
+ * `ORDER BY sort_order ASC` (AGENTS.md sort-order integrity).
+ */
+export interface EstimateSectionLine {
+  /** Stable per-project line identity (TEXT; A5 projects this to `line:<id>:total`). */
+  id: string;
+  projectId: string;
+  section: SectionDiscriminator;
+  /** STEP 2/3 criterion code (template-aligned), '' when unset. */
+  code: string;
+  /** Granular Procore BLI code, '' when unset. */
+  procoreCode: string;
+  /** Budget Line Items cost type (L/M/S/E), '' when unset. */
+  costType: string;
+  label: string;
+  /**
+   * OPEN line-kind discriminator (free text; the DB stores it without a CHECK,
+   * mirroring estimate_bindings.kind). The vocabulary is the app's concern —
+   * A3 synthesis narrows it (e.g. 'staffRole' | 'operationalExpense' |
+   * 'equipment' | 'dynamic' | 'qty' | 'qtyRate' | 'lumpSum').
+   */
+  entryKind: string;
+  /** Estimator inputs (utilization %, qty, rate, lump sum, manual entries, rate overrides). */
+  inputs: Record<string, unknown>;
+  /** Visual position; rows are loaded ORDER BY sort_order ASC. */
+  sortOrder: number;
+  /** Provenance: 'template' | 'csv_import' | 'manual' (free text, mirrors estimate_line_items.source). */
+  source: string;
+  /** Last-save timestamp (the table is full-replace-saved per project). */
+  updatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Raw DB Row Shapes (before mapping to application-layer types)
 // ---------------------------------------------------------------------------
