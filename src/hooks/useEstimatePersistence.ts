@@ -62,6 +62,11 @@ export function useEstimatePersistence(
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
   const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
   const siteOpsRatesString = JSON.stringify(siteOpsRates);
+  // B4 (D2): the present section-line identities. Removing / re-adding a catalog line
+  // changes WHICH lines exist without touching any blob (a removal preserves the line's
+  // inputs), so this key is the save trigger for an add/remove with no other edit —
+  // without it the dual-write would never fire and the removal would not persist.
+  const sectionLinesKey = sectionLines.map((l) => l.id).join("|");
 
   // Save-status state machine
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -247,6 +252,7 @@ export function useEstimatePersistence(
     gcEquipmentOverridesString,
     siteOpsQuantitiesString,
     siteOpsRatesString,
+    sectionLinesKey,
   ]);
 
   // Cleanup timers and mark unmounted on teardown

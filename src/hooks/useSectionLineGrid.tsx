@@ -23,7 +23,7 @@ import type { OverridePayload } from "@/lib/overrideSetter";
 import type { LineOverrideTrace } from "@/lib/calculations";
 import { useCommandHistory } from "./useCommandHistory";
 import { sectionLineFieldOverrideKey } from "@/lib/sectionLines/ids";
-import type { CalcCell } from "@/lib/sectionLines/gcGridModel";
+import type { CalcCell, SectionCatalogEntry } from "@/lib/sectionLines/gcGridModel";
 
 /** The overridable section-line fields: the whole line `total` (A+1 type-over) and the
  *  duration/sqft-driven `qty` (B3 — locked-but-overridable derived quantity). */
@@ -151,6 +151,14 @@ export interface SectionGridSpec {
    *  overridable. The host uses it to offer "Override quantity" on a right-clicked
    *  Quantity cell. Manual/lump lines return false (their quantity is a direct input). */
   isDerivedQtyLine: (row: EstimateSectionLine) => boolean;
+  /** The full section catalog (B4 / D2) — the universe a removed line can be re-added
+   *  from. The core computes `removedLines` = catalog − present for the "+ Add line" picker. */
+  catalog: readonly SectionCatalogEntry[];
+  /** Removes a catalog line by `code` from the active set (drives the calc hook's
+   *  `removeLine`). Bespoke structured lines are removable but not re-inventable (ID-4). */
+  applyRemove: (code: string) => void;
+  /** Re-adds a removed catalog line by `code` (drives the calc hook's `restoreLine`). */
+  applyRestore: (code: string) => void;
 }
 
 export interface UseSectionLineGridReturn {
@@ -173,6 +181,13 @@ export interface UseSectionLineGridReturn {
   grandTotal: number;
   /** True for a line whose Quantity is derived (duration/sqft-driven). */
   isDerivedQtyLine: (row: EstimateSectionLine) => boolean;
+  /** The catalog lines currently REMOVED (catalog − present), for the "+ Add line" picker
+   *  (B4 / D2). Display-ordered + carrying section group labels for grouping. */
+  removedLines: readonly SectionCatalogEntry[];
+  /** Remove a present catalog line (B4 / D2) — undoable (REMOVE_SECTION_LINE command). */
+  removeLine: (line: EstimateSectionLine) => void;
+  /** Re-add a removed catalog line by `code` (B4 / D2) — undoable (ADD_SECTION_LINE command). */
+  restoreLine: (code: string) => void;
   /** True when this line's derived Quantity currently carries an audited override. */
   isQtyOverridden: (rowId: string) => boolean;
   /** Begin a Quantity override (the "Override quantity" gesture) — unlocks the cell for edit. */
@@ -197,6 +212,10 @@ export function useSectionLineGrid(
   overridesTraceRef.current = overridesTrace;
   const applyEditRef = useRef(spec.applyEdit);
   applyEditRef.current = spec.applyEdit;
+  const applyRemoveRef = useRef(spec.applyRemove);
+  applyRemoveRef.current = spec.applyRemove;
+  const applyRestoreRef = useRef(spec.applyRestore);
+  applyRestoreRef.current = spec.applyRestore;
   const editableColumnIdsRef = useRef(spec.editableColumnIds);
   editableColumnIdsRef.current = spec.editableColumnIds;
   const squareFootageRef = useRef(spec.squareFootage);
@@ -243,6 +262,25 @@ export function useSectionLineGrid(
       const nextLocked = !prevLocked;
       history.pushCommand({ type: "TOGGLE_SECTION_CELL_LOCK", cellKey, prevLocked, nextLocked });
       setLockedCells((prev) => ({ ...prev, [cellKey]: nextLocked }));
+    },
+    [history]
+  );
+
+  // Remove / re-add a catalog line (B4 / D2). Push the command BEFORE driving the section
+  // dispatcher (guardrail); the REMOVE command snapshots the removed line for inverse
+  // fidelity (AGENTS.md). The calc hook preserves the removed line's blob inputs, so a
+  // re-add restores it with its prior values — `code` alone is full inverse data.
+  const removeLine = useCallback(
+    (line: EstimateSectionLine) => {
+      history.pushCommand({ type: "REMOVE_SECTION_LINE", code: line.code, line });
+      applyRemoveRef.current(line.code);
+    },
+    [history]
+  );
+  const restoreLine = useCallback(
+    (code: string) => {
+      history.pushCommand({ type: "ADD_SECTION_LINE", code });
+      applyRestoreRef.current(code);
     },
     [history]
   );
@@ -564,6 +602,8 @@ export function useSectionLineGrid(
     if (!cmd) return;
     if (cmd.type === "EDIT_SECTION_CELL") applyEditRef.current(cmd.target, cmd.key, cmd.prevValue);
     else if (cmd.type === "TOGGLE_SECTION_CELL_LOCK") setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.prevLocked }));
+    else if (cmd.type === "REMOVE_SECTION_LINE") applyRestoreRef.current(cmd.code); // undo a removal = re-add
+    else if (cmd.type === "ADD_SECTION_LINE") applyRemoveRef.current(cmd.code); // undo a re-add = remove
   }, [history]);
 
   const handleRedo = useCallback(() => {
@@ -571,6 +611,8 @@ export function useSectionLineGrid(
     if (!cmd) return;
     if (cmd.type === "EDIT_SECTION_CELL") applyEditRef.current(cmd.target, cmd.key, cmd.nextValue);
     else if (cmd.type === "TOGGLE_SECTION_CELL_LOCK") setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.nextLocked }));
+    else if (cmd.type === "REMOVE_SECTION_LINE") applyRemoveRef.current(cmd.code);
+    else if (cmd.type === "ADD_SECTION_LINE") applyRestoreRef.current(cmd.code);
   }, [history]);
 
   // ---------------------------------------------------------------------------
@@ -618,6 +660,14 @@ export function useSectionLineGrid(
     [calcLookup, overridesTrace, revertFieldOverride, getGroupKey, getGroupLabel, editableColumnIds, centerAlignedColumnIds]
   );
 
+  // The catalog lines currently REMOVED (catalog − present) — the "+ Add line" picker's
+  // contents (B4 / D2). `spec.catalog` is display-ordered, so removedLines is too.
+  const catalog = spec.catalog;
+  const removedLines = useMemo(() => {
+    const present = new Set(rows.map((r) => r.code));
+    return catalog.filter((c) => !present.has(c.code));
+  }, [catalog, rows]);
+
   return {
     table,
     rows,
@@ -637,6 +687,9 @@ export function useSectionLineGrid(
     redoStackSize: history.redoStackSize,
     grandTotal,
     isDerivedQtyLine,
+    removedLines,
+    removeLine,
+    restoreLine,
     isQtyOverridden,
     beginQtyOverride,
     revertQtyOverride,

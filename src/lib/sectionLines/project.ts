@@ -62,6 +62,44 @@ const SITEOPS_CATALOG_CODES: ReadonlySet<string> = new Set([
 /** Coerce a JSONB `inputs` value to a finite number (synthesis writes numbers; this guards reads). */
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+// ---------------------------------------------------------------------------
+// Removed-codes derivation (Phase B4 — removable / re-addable catalog seed, D2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives the set of REMOVED catalog codes (per section) from a project's persisted
+ * `estimate_section_lines` — the codes in the full catalog that are ABSENT from the
+ * persisted set. The page passes these as `initialRemovedCodes` to the calc hooks so a
+ * removal (B4) survives reload (the line being absent from the table IS the removal).
+ *
+ * Robustness:
+ *  - An EMPTY persisted set (`loadedLines.length === 0`) means the table was never
+ *    written for this project — removal is OFF (full catalog from the legacy blobs), so
+ *    both sections return `[]`. (Without this guard a never-saved project would read as
+ *    "every line removed".)
+ *  - When the table HAS rows, a section with no present codes correctly yields its whole
+ *    catalog as removed (the degenerate "removed every line in the section" case).
+ *
+ * APP-BORN ONLY. The caller must not apply this to imported projects (D4): their persisted
+ * lines are the frozen `imported_step23_lines` whose codes need not match the catalog.
+ */
+export function deriveRemovedCodesFromLines(
+  loadedLines: readonly EstimateSectionLine[]
+): { gc: string[]; siteOps: string[] } {
+  if (loadedLines.length === 0) return { gc: [], siteOps: [] };
+
+  const presentGc = new Set<string>();
+  const presentSiteOps = new Set<string>();
+  for (const line of loadedLines) {
+    if (line.section === "gc") presentGc.add(line.code);
+    else if (line.section === "site_ops") presentSiteOps.add(line.code);
+  }
+  return {
+    gc: [...GC_CATALOG_CODES].filter((c) => !presentGc.has(c)),
+    siteOps: [...SITEOPS_CATALOG_CODES].filter((c) => !presentSiteOps.has(c)),
+  };
+}
+
 /** The project-level (non-line) calc inputs the engine still needs. */
 export interface SectionCalcContext {
   durationMonths: number;

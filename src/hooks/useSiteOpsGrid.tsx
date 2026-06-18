@@ -17,6 +17,7 @@ import {
 import { ENTRY_KIND } from "@/lib/sectionLines/entryKinds";
 import { siteOpsLeafNodeId } from "@/lib/bindings/types";
 import {
+  SITEOPS_CATALOG_LINES,
   SITEOPS_ROW_META,
   buildSiteOpsCalcLookup,
   entryValue,
@@ -229,6 +230,10 @@ export function useSiteOpsGrid(
     }
   }, []);
 
+  // B4 (D2): remove / re-add a catalog line — drives the calc hook's removed-codes set.
+  const applyRemove = useCallback((code: string) => infraRef.current.removeLine(code), []);
+  const applyRestore = useCallback((code: string) => infraRef.current.restoreLine(code), []);
+
   return useSectionLineGrid(
     {
       columnDefs: STEP3_COLUMN_DEFS,
@@ -245,6 +250,9 @@ export function useSiteOpsGrid(
       getGroupLabel: siteOpsGroupLabel,
       squareFootage,
       isDerivedQtyLine: siteOpsIsDerivedQtyLine,
+      catalog: SITEOPS_CATALOG_LINES,
+      applyRemove,
+      applyRestore,
     },
     onSaveOverride
   );

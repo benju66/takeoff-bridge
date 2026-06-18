@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computeSiteOperations, DEFAULT_SITE_OPS_LINES, SiteOpsCalcResult, RateLookup } from "@/lib/calculations";
+import { computeSiteOperations, buildSiteOpsLineSet, SiteOpsCalcResult, RateLookup } from "@/lib/calculations";
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { SITE_OPS_MANUAL_DEFAULTS } from "@/lib/constants";
 import { synthesizeSiteOpsSectionLines } from "@/lib/sectionLines/synthesize";
@@ -21,6 +21,18 @@ export interface UseInfrastructureCalculationsReturn {
   /** Phase 4 generic handlers (cover legacy + new lines) */
   handleLineQuantityChange: (key: string, valStr: string) => void;
   handleLineRateChange: (key: string, valStr: string) => void;
+  /**
+   * GC/Site-Ops Addressability Phase B4 (D2): the catalog codes the estimator has
+   * REMOVED from this project (the active line set is the catalog minus these). A removed
+   * code drops from `calcResult` (grand total / linked-division bridge / export all
+   * exclude it) and from `sectionLines` (grid row + dual-write both omit it). Empty by
+   * default → byte-identical → goldens tie $0.00.
+   */
+  removedCodes: string[];
+  /** Remove a catalog line by `code` (B4 / D2) — the active set becomes a subset. */
+  removeLine: (code: string) => void;
+  /** Re-add a previously-removed catalog line by `code` (B4 / D2) — inverse of removeLine. */
+  restoreLine: (code: string) => void;
   calcResult: SiteOpsCalcResult;
   siteOperationsTotal: number;
   // Serializable snapshots for persistence
@@ -94,10 +106,19 @@ export function useInfrastructureCalculations(
    * goldens tie $0.00). The Step-3 grid (B3) records these via the type-over gesture;
    * the page passes the resolved active map in.
    */
-  lineOverrides: EstimateOverrideMap = {}
+  lineOverrides: EstimateOverrideMap = {},
+  /**
+   * GC/Site-Ops Addressability Phase B4 (D2): the persisted REMOVED catalog codes,
+   * derived from the project's `estimate_section_lines` on load (catalog − present) by
+   * `deriveRemovedCodesFromLines`. Applied once when `isLoaded`. APP-BORN ONLY — the page
+   * passes `undefined` for imported projects (D4). Defaults to none → full catalog.
+   */
+  initialRemovedCodes?: string[]
 ): UseInfrastructureCalculationsReturn {
   const [quantities, setQuantities] = useState<Record<string, number>>(() => quantitiesFromSnapshot(initialQuantities));
   const [rates, setRates] = useState<Record<string, number>>(() => ratesFromSnapshot(initialRates));
+  // Phase B4 (D2): removed catalog codes (catalog − present). Re-applied once on load.
+  const [removedCodes, setRemovedCodes] = useState<string[]>(initialRemovedCodes ?? []);
 
   // ---------------------------------------------------------------------------
   // One-time DB sync: update state once estimate data arrives from the database.
@@ -123,6 +144,31 @@ export function useInfrastructureCalculations(
     }
   }, [isLoaded]);
 
+  // Phase B4 (D2): one-time sync of the persisted removed-codes once the project loads
+  // (separate from the blob sync — a removal lives in the section-lines table, not the
+  // blobs). `initialRemovedCodes` is referentially stable (the workspace hook stores it).
+  const hasInitRemovedRef = useRef(false);
+  useEffect(() => {
+    if (isLoaded && !hasInitRemovedRef.current) {
+      Promise.resolve().then(() => {
+        setRemovedCodes(initialRemovedCodes ?? []);
+        hasInitRemovedRef.current = true;
+      });
+    } else if (!isLoaded) {
+      hasInitRemovedRef.current = false;
+    }
+  }, [isLoaded, initialRemovedCodes]);
+
+  // Phase B4 (D2): remove / re-add a catalog line by code. Removal does NOT clear the
+  // line's blob inputs (quantity / typed rate) — they stay, so a re-add restores the line
+  // with its prior inputs automatically (synthesis re-reads the blobs).
+  const removeLine = (code: string) => {
+    setRemovedCodes((prev) => (prev.includes(code) ? prev : [...prev, code]));
+  };
+  const restoreLine = (code: string) => {
+    setRemovedCodes((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : prev));
+  };
+
   const handleLineQuantityChange = (key: string, valStr: string) => {
     if (!ALL_LINE_KEYS.has(key)) return;
     const parsed = valStr === "" ? 0 : parseFloat(valStr) || 0;
@@ -140,6 +186,9 @@ export function useInfrastructureCalculations(
   const quantitiesString = JSON.stringify(quantities);
   const ratesString = JSON.stringify(rates);
   const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+  // B4 (D2): a stable key over the removed-codes set so the calc memo + section lines +
+  // dual-read tripwire recompute when a line is removed/re-added.
+  const removedCodesString = JSON.stringify(removedCodes);
   // A+1 (D3): a stable key over the active line type-overs so the calc memo +
   // dual-read tripwire recompute when an override is set/reverted. `{}` → inert.
   const lineOverridesString = JSON.stringify(lineOverrides);
@@ -149,13 +198,14 @@ export function useInfrastructureCalculations(
   const rateLookup: RateLookup = (code, fallback) =>
     rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
-  // Compute via pure calculation layer. `DEFAULT_SITE_OPS_LINES` is the explicit
-  // default 6th arg so `lineOverrides` (7th) can be threaded; with no overrides the
-  // result is byte-identical (the A+1 layer is a pure passthrough on `{}`).
+  // Compute via pure calculation layer. The active line set is the catalog minus the
+  // removed codes (B4 / D2); with none removed `buildSiteOpsLineSet` returns the same
+  // catalog array refs as `DEFAULT_SITE_OPS_LINES`, so the result is byte-identical (the
+  // A+1 `lineOverrides` layer is a pure passthrough on `{}`). Goldens tie $0.00.
   const calcResult = useMemo(
-    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates, rateLookup, DEFAULT_SITE_OPS_LINES, lineOverrides),
+    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates, rateLookup, buildSiteOpsLineSet({ removeCodes: removedCodes }), lineOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, quantitiesString, ratesString, rateCardSnapshotString, lineOverridesString]
+    [durationMonths, squareFootage, quantitiesString, ratesString, rateCardSnapshotString, lineOverridesString, removedCodesString]
   );
 
   // Serializable persistence snapshots: legacy lines keep their original
@@ -178,10 +228,17 @@ export function useInfrastructureCalculations(
   // ---------------------------------------------------------------------------
   const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
   const siteOpsRatesString = JSON.stringify(siteOpsRates);
+  // B4 (D2): synthesize the full catalog seed, then drop the removed codes. The grid rows
+  // + the dual-write persist this filtered set (removal = absent from the table).
   const sectionLines = useMemo(
-    () => synthesizeSiteOpsSectionLines(siteOpsQuantities, siteOpsRates),
+    () => {
+      const all = synthesizeSiteOpsSectionLines(siteOpsQuantities, siteOpsRates);
+      if (removedCodes.length === 0) return all;
+      const removed = new Set(removedCodes);
+      return all.filter((l) => !removed.has(l.code));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [siteOpsQuantitiesString, siteOpsRatesString]
+    [siteOpsQuantitiesString, siteOpsRatesString, removedCodesString]
   );
 
   // Dual-read tripwire (DEV ONLY): driving the A1 engine off the synthesized
@@ -208,6 +265,9 @@ export function useInfrastructureCalculations(
     rates,
     handleLineQuantityChange,
     handleLineRateChange,
+    removedCodes,
+    removeLine,
+    restoreLine,
     calcResult,
     siteOperationsTotal: calcResult.grandTotal,
     siteOpsQuantities,

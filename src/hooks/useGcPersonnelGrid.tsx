@@ -17,6 +17,7 @@ import {
 import { ENTRY_KIND } from "@/lib/sectionLines/entryKinds";
 import { gcLeafNodeId } from "@/lib/bindings/types";
 import {
+  GC_CATALOG_LINES,
   GC_ROW_META,
   buildCalcLookup,
   entryValue,
@@ -268,6 +269,10 @@ export function useGcPersonnelGrid(
     }
   }, []);
 
+  // B4 (D2): remove / re-add a catalog line — drives the calc hook's removed-codes set.
+  const applyRemove = useCallback((code: string) => personnelRef.current.removeLine(code), []);
+  const applyRestore = useCallback((code: string) => personnelRef.current.restoreLine(code), []);
+
   return useSectionLineGrid(
     {
       columnDefs: STEP2_COLUMN_DEFS,
@@ -284,6 +289,9 @@ export function useGcPersonnelGrid(
       getGroupLabel: gcGroupLabel,
       squareFootage,
       isDerivedQtyLine: gcIsDerivedQtyLine,
+      catalog: GC_CATALOG_LINES,
+      applyRemove,
+      applyRestore,
     },
     onSaveOverride
   );

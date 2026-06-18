@@ -1,4 +1,5 @@
 import type { Binding } from "@/lib/bindings/types";
+import type { EstimateSectionLine } from "./db";
 
 export interface TogalRowPayload {
   Classification: string;
@@ -354,9 +355,35 @@ export interface ToggleSectionCellLockCommand {
   nextLocked: boolean;
 }
 
+/**
+ * Remove a catalog section line that doesn't apply (Phase B4 / D2). The active line set
+ * becomes a SUBSET — the line drops from the grid, the grand total, the linked-division
+ * bridge, and the export. `code` is what the calc hook's removed-codes set keys on; `line`
+ * is the full snapshot captured for inverse fidelity (AGENTS.md compounding-history). Undo
+ * restores the code (re-synthesizing the catalog seed with its preserved blob inputs).
+ */
+export interface RemoveSectionLineCommand {
+  type: "REMOVE_SECTION_LINE";
+  code: string;
+  line: EstimateSectionLine;
+}
+
+/**
+ * Re-add a previously-removed catalog line from the per-section picker (Phase B4 / D2). The
+ * inverse of REMOVE: the code leaves the removed-codes set and the catalog seed line returns
+ * (re-synthesized from the preserved blob inputs — so only `code` is needed). Only catalog
+ * lines are re-addable — bespoke structured lines are removable but NOT user-mintable (ID-4).
+ */
+export interface AddSectionLineCommand {
+  type: "ADD_SECTION_LINE";
+  code: string;
+}
+
 export type SectionGridCommand =
   | EditSectionCellCommand
-  | ToggleSectionCellLockCommand;
+  | ToggleSectionCellLockCommand
+  | RemoveSectionLineCommand
+  | AddSectionLineCommand;
 
 export interface GridSelectionState {
   rowId: string | null;

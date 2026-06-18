@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computePersonnelCosts, DEFAULT_PERSONNEL_LINES, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
+import { computePersonnelCosts, buildPersonnelLineSet, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
 import { synthesizePersonnelSectionLines } from "@/lib/sectionLines/synthesize";
@@ -25,6 +25,18 @@ export interface UsePersonnelCalculationsReturn {
   rateOverrides: Record<string, number>;
   handleRateChange: (key: string, valStr: string) => void;
   resetRate: (key: string) => void;
+  /**
+   * GC/Site-Ops Addressability Phase B4 (D2): the catalog codes the estimator has
+   * REMOVED from this project (the active line set is the catalog minus these). A
+   * removed code drops from `calcResult` (so the grand total / linked-division bridge
+   * / export all exclude it) and from `sectionLines` (so its grid row + the persisted
+   * dual-write both omit it). Empty by default → byte-identical → goldens tie $0.00.
+   */
+  removedCodes: string[];
+  /** Remove a catalog line by `code` (B4 / D2) — the active set becomes a subset. */
+  removeLine: (code: string) => void;
+  /** Re-add a previously-removed catalog line by `code` (B4 / D2) — inverse of removeLine. */
+  restoreLine: (code: string) => void;
   calcResult: PersonnelCalcResult;
   totalGCs: number;
   // Serializable snapshots for persistence
@@ -72,7 +84,15 @@ export function usePersonnelCalculations(
    * result, goldens tie $0.00). The Step-2 grid (B2) records these via the
    * type-over gesture; the page passes the resolved active map in.
    */
-  lineOverrides: EstimateOverrideMap = {}
+  lineOverrides: EstimateOverrideMap = {},
+  /**
+   * GC/Site-Ops Addressability Phase B4 (D2): the persisted REMOVED catalog codes,
+   * derived from the project's `estimate_section_lines` on load (catalog − present) by
+   * `deriveRemovedCodesFromLines`. Applied once when `isLoaded`, mirroring the blob
+   * one-time sync. APP-BORN ONLY — the page passes `undefined` for imported projects
+   * (D4). Defaults to none → full catalog → byte-identical.
+   */
+  initialRemovedCodes?: string[]
 ): UsePersonnelCalculationsReturn {
   // Individual utilization percentages (0-100)
   const [utilEx, setUtilEx] = useState<number>(initialUtilizations?.utilEx ?? 0);
@@ -97,6 +117,10 @@ export function usePersonnelCalculations(
   // a role absent from the map uses its corporate default rate
   // (STAFF_ROLE_DEFAULTS, the sole rate authority via computePersonnelCosts).
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>({});
+
+  // Phase B4 (D2): removed catalog codes. Initialized from the persisted section
+  // lines (catalog − present) and re-applied once on load (the effect below).
+  const [removedCodes, setRemovedCodes] = useState<string[]>(initialRemovedCodes ?? []);
 
   // ---------------------------------------------------------------------------
   // One-time DB sync: update state once estimate data arrives from the database.
@@ -147,6 +171,22 @@ export function usePersonnelCalculations(
       hasInitializedRef.current = false;
     }
   }, [isLoaded]);
+
+  // Phase B4 (D2): one-time sync of the persisted removed-codes once the project loads
+  // (separate from the blob sync above — a removal lives in the section-lines table, not
+  // the blobs). `initialRemovedCodes` is referentially stable (the workspace hook stores
+  // it in state), so this applies exactly once per project load.
+  const hasInitRemovedRef = useRef(false);
+  useEffect(() => {
+    if (isLoaded && !hasInitRemovedRef.current) {
+      Promise.resolve().then(() => {
+        setRemovedCodes(initialRemovedCodes ?? []);
+        hasInitRemovedRef.current = true;
+      });
+    } else if (!isLoaded) {
+      hasInitRemovedRef.current = false;
+    }
+  }, [isLoaded, initialRemovedCodes]);
 
   const utilizations: Record<string, number> = {
     ex: utilEx, srPm: utilSrPm, pm: utilPm, pe: utilPe,
@@ -200,9 +240,22 @@ export function usePersonnelCalculations(
     });
   };
 
+  // Phase B4 (D2): remove / re-add a catalog line by code. Removal does NOT clear the
+  // line's blob inputs (utilization / equipment / manual value) — they stay, so a re-add
+  // restores the line with its prior inputs automatically (synthesis re-reads the blobs).
+  const removeLine = (code: string) => {
+    setRemovedCodes((prev) => (prev.includes(code) ? prev : [...prev, code]));
+  };
+  const restoreLine = (code: string) => {
+    setRemovedCodes((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : prev));
+  };
+
   const manualEntriesString = JSON.stringify(manualEntries);
   const rateOverridesString = JSON.stringify(rateOverrides);
   const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+  // B4 (D2): a stable key over the removed-codes set so the calc memo + the synthesized
+  // section lines + the dual-read tripwire all recompute when a line is removed/re-added.
+  const removedCodesString = JSON.stringify(removedCodes);
   // A+1 (D3): a stable key over the active line type-overs so the calc memo +
   // dual-read tripwire recompute when an override is set/reverted. `{}` → inert.
   const lineOverridesString = JSON.stringify(lineOverrides);
@@ -213,13 +266,14 @@ export function usePersonnelCalculations(
   const rateLookup: RateLookup = (code, fallback) =>
     rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
-  // Compute via pure calculation layer. `DEFAULT_PERSONNEL_LINES` is the explicit
-  // default 8th arg so `lineOverrides` (9th) can be threaded; with no overrides
-  // the result is byte-identical (the A+1 layer is a pure passthrough on `{}`).
+  // Compute via pure calculation layer. The active line set is the catalog minus the
+  // removed codes (B4 / D2); with none removed `buildPersonnelLineSet` returns the same
+  // catalog array refs as `DEFAULT_PERSONNEL_LINES`, so the result is byte-identical (the
+  // A+1 `lineOverrides` layer is a pure passthrough on `{}`). Goldens tie $0.00.
   const calcResult = useMemo(
-    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup, DEFAULT_PERSONNEL_LINES, lineOverrides),
+    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup, buildPersonnelLineSet({ removeCodes: removedCodes }), lineOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString, lineOverridesString]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString, lineOverridesString, removedCodesString]
   );
 
   // Serializable persistence snapshots (matching existing ProjectEstimate shape).
@@ -244,10 +298,17 @@ export function usePersonnelCalculations(
   // ---------------------------------------------------------------------------
   const gcUtilizationString = JSON.stringify(gcUtilization);
   const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
+  // B4 (D2): synthesize the full catalog seed, then drop the removed codes. The grid
+  // rows + the dual-write persist this filtered set (removal = absent from the table).
   const sectionLines = useMemo(
-    () => synthesizePersonnelSectionLines(gcUtilization, gcEquipmentOverrides),
+    () => {
+      const all = synthesizePersonnelSectionLines(gcUtilization, gcEquipmentOverrides);
+      if (removedCodes.length === 0) return all;
+      const removed = new Set(removedCodes);
+      return all.filter((l) => !removed.has(l.code));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [gcUtilizationString, gcEquipmentOverridesString]
+    [gcUtilizationString, gcEquipmentOverridesString, removedCodesString]
   );
 
   // Dual-read tripwire (DEV ONLY): driving the A1 engine off the synthesized
@@ -281,6 +342,9 @@ export function usePersonnelCalculations(
     rateOverrides,
     handleRateChange,
     resetRate,
+    removedCodes,
+    removeLine,
+    restoreLine,
     calcResult,
     totalGCs: calcResult.grandTotal,
     gcUtilization,

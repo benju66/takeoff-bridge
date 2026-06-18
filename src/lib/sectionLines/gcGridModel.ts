@@ -65,11 +65,42 @@ export const GC_ROW_META: ReadonlyMap<string, GcRowMeta> = (() => {
 /** GC_MANUAL config by code — for the qty-vs-lumpSum entry hint + rate column. */
 export const GC_MANUAL_BY_CODE = new Map(GC_MANUAL_DEFAULTS.map((m) => [m.code, m]));
 
+/**
+ * A catalog line offered by the "+ Add line" picker (Phase B4 / D2). `groupKey` /
+ * `groupLabel` are the line's section, so the host groups the removed lines by the same
+ * 01.A–01.F / 02.A–02.H dividers the grid uses. Display-ordered.
+ */
+export interface SectionCatalogEntry {
+  code: string;
+  label: string;
+  groupKey: string;
+  groupLabel: string;
+}
+
 /** Stable section-divider grouping for the grid (module-level → referentially stable). */
 export const gcGroupKey = (row: EstimateSectionLine): string =>
   GC_ROW_META.get(row.code)?.group ?? "";
 export const gcGroupLabel = (key: string): string =>
   GC_GROUP_LABELS[key as GcGroupKey] ?? key;
+
+/**
+ * The full GC (Step 2) catalog as picker entries, in display order — the universe a
+ * removed line can be re-added from. Labels mirror what the synthesizer writes (staff =
+ * role label, operational = description, equipment = label, manual = label) for parity
+ * with the grid's Description column.
+ */
+export const GC_CATALOG_LINES: readonly SectionCatalogEntry[] = (() => {
+  const entries: SectionCatalogEntry[] = [];
+  const push = (code: string, label: string) => {
+    const meta = GC_ROW_META.get(code);
+    entries.push({ code, label, groupKey: meta?.group ?? "", groupLabel: gcGroupLabel(meta?.group ?? "") });
+  };
+  for (const r of STAFF_ROLE_DEFAULTS) push(r.code, r.label);
+  for (const o of OPERATIONAL_EXPENSE_DEFAULTS) push(o.code, o.description);
+  for (const e of EQUIPMENT_DEFAULTS) push(e.code, e.label);
+  for (const m of GC_MANUAL_DEFAULTS) push(m.code, m.label);
+  return entries.sort((a, b) => (GC_ROW_META.get(a.code)?.order ?? 999) - (GC_ROW_META.get(b.code)?.order ?? 999));
+})();
 
 /**
  * True for a GC line whose Quantity is DERIVED (utilization×duration for staff, the

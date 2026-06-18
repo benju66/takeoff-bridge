@@ -27,7 +27,7 @@ import type { SiteOpsCalcResult } from "@/lib/calculations";
 import type { EstimateSectionLine } from "@/types/db";
 import type { SiteOpsLineGroup } from "@/lib/bindings/types";
 import { ENTRY_KIND, isManualEntryKind } from "./entryKinds";
-import type { CalcCell } from "./gcGridModel";
+import type { CalcCell, SectionCatalogEntry } from "./gcGridModel";
 
 export type SiteOpsGroupKey = SiteOpsSection;
 
@@ -84,6 +84,21 @@ export const siteOpsGroupKey = (row: EstimateSectionLine): string =>
   SITEOPS_ROW_META.get(row.code)?.group ?? "";
 export const siteOpsGroupLabel = (key: string): string =>
   SITEOPS_GROUP_LABELS[key as SiteOpsSection] ?? key;
+
+/**
+ * The full Site-Ops (Step 3) catalog as picker entries (Phase B4 / D2), in display order
+ * — the universe a removed line can be re-added from, grouped by the 02.A–02.H sections.
+ */
+export const SITEOPS_CATALOG_LINES: readonly SectionCatalogEntry[] = (() => {
+  const entries: SectionCatalogEntry[] = [];
+  const push = (code: string, label: string) => {
+    const meta = SITEOPS_ROW_META.get(code);
+    entries.push({ code, label, groupKey: meta?.group ?? "", groupLabel: siteOpsGroupLabel(meta?.group ?? "") });
+  };
+  for (const d of SITE_OPS_DYNAMIC_DEFAULTS) push(d.code, d.label);
+  for (const m of SITE_OPS_MANUAL_DEFAULTS) push(m.code, m.label);
+  return entries.sort((a, b) => (SITEOPS_ROW_META.get(a.code)?.order ?? 999) - (SITEOPS_ROW_META.get(b.code)?.order ?? 999));
+})();
 
 /**
  * True for a Site-Ops line whose Quantity is DERIVED (the duration/sqft driver lines) →

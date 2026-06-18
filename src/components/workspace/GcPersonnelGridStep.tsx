@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef } from "react";
-import { Activity, RotateCcw, RotateCw, Lock, Unlock } from "lucide-react";
+import { Activity, RotateCcw, RotateCw, Lock, Unlock, Trash2 } from "lucide-react";
 import type { Column } from "@tanstack/react-table";
 import { GridShell } from "./GridShell";
+import { AddLinePicker } from "./AddLinePicker";
 import { EngineLinkBadge } from "./EngineLinkBadge";
 import { useGcPersonnelGrid } from "@/hooks/useGcPersonnelGrid";
 import type { UsePersonnelCalculationsReturn } from "@/hooks/usePersonnelCalculations";
@@ -60,6 +61,9 @@ export function GcPersonnelGridStep({
     redoStackSize,
     grandTotal,
     isDerivedQtyLine,
+    removedLines,
+    removeLine,
+    restoreLine,
     isQtyOverridden,
     beginQtyOverride,
     revertQtyOverride,
@@ -137,6 +141,7 @@ export function GcPersonnelGridStep({
           <span className="text-[10px] bg-background dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full border border-grid-border font-sans font-semibold">
             Active Schedule Duration: {durationMonths} Months | {squareFootage.toLocaleString()} SF
           </span>
+          <AddLinePicker removedLines={removedLines} onAdd={restoreLine} />
           <button
             onClick={handleUndo}
             disabled={!canUndo}
@@ -234,10 +239,18 @@ export function GcPersonnelGridStep({
           <button
             type="button"
             onClick={() => { toggleCellLock(ctxCellKey); dismissCtx(); }}
-            className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-foreground text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-foreground text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer border-b border-grid-border"
           >
             {ctxLocked ? <Unlock size={14} className="text-slate-500" /> : <Lock size={14} className="text-slate-500" />}
             {ctxLocked ? "Unlock cell" : "Lock cell"}
+          </button>
+          {/* Remove this catalog line (B4 / D2) — re-add it anytime from "+ Add line". */}
+          <button
+            type="button"
+            onClick={() => { removeLine(ctxLine); dismissCtx(); }}
+            className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-red-600 dark:text-red-400 text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+          >
+            <Trash2 size={14} /> Remove line
           </button>
         </div>
       )}
