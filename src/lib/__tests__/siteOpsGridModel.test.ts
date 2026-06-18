@@ -6,6 +6,7 @@ import {
   entryValue,
   resolveQtyKey,
   resolveRateKey,
+  siteOpsIsDerivedQtyLine,
 } from "@/lib/sectionLines/siteOpsGridModel";
 import { synthesizeSiteOpsSectionLines } from "@/lib/sectionLines/synthesize";
 import { computeSiteOperations } from "@/lib/calculations";
@@ -104,6 +105,13 @@ describe("entryValue / resolveQtyKey / resolveRateKey — per kind", () => {
     expect(resolveRateKey(knox)).toBeNull();
     expect(resolveRateKey(ffe)).toBeNull();
     expect(resolveRateKey(dynamic)).toBeNull();
+  });
+
+  it("siteOpsIsDerivedQtyLine: only the dynamic (duration/sqft-driven) lines have a DERIVED (locked) quantity", () => {
+    expect(siteOpsIsDerivedQtyLine(dynamic)).toBe(true);
+    expect(siteOpsIsDerivedQtyLine(knox)).toBe(false);  // manual qty
+    expect(siteOpsIsDerivedQtyLine(soil)).toBe(false);  // qtyRate
+    expect(siteOpsIsDerivedQtyLine(ffe)).toBe(false);   // lumpSum
   });
 });
 

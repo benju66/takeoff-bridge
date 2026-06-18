@@ -61,12 +61,15 @@ test.describe("GC/Site-Ops B2 — Step 2 GC Personnel grid", () => {
       // GridShell section dividers + per-line engine Links badges prove the shared surface.
       await expect(page.getByText("01.A — Staff Labour Directs", { exact: false })).toBeVisible();
       await expect(page.getByTestId("engine-inspect").first()).toBeVisible({ timeout: 15000 });
+      // Template column layout: Utilization · Quantity · … · Cost/S.F.
+      await expect(page.getByText("Utilization", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("Cost/S.F.", { exact: false }).first()).toBeVisible();
 
-      // ---- Edit the dumpsters equipment lump-sum → its total recomputes -----------
-      // (Duration-independent: total === the typed amount, so it proves the
-      // cell-edit → command → personnel setter → engine → display path regardless of
-      // the scratch project's schedule.)
-      const equipCell = page.locator('[id="cell-gc:equip:dumpsters-entry"]');
+      // ---- Edit the dumpsters equipment lump amount (in Rate) → total recomputes ----
+      // (Duration-independent: a lump amount lives in the Rate column with Quantity 1, so
+      // total === the typed amount — it proves the cell-edit → command → personnel setter
+      // → engine → display path regardless of the scratch project's schedule.)
+      const equipCell = page.locator('[id="cell-gc:equip:dumpsters-rate"]');
       const equipTotal = page.locator('[id="cell-gc:equip:dumpsters-total"]');
       await expect(equipTotal).toContainText("$0.00");
       await equipCell.click(); // select

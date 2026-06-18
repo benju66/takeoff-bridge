@@ -71,6 +71,18 @@ export const gcGroupKey = (row: EstimateSectionLine): string =>
 export const gcGroupLabel = (key: string): string =>
   GC_GROUP_LABELS[key as GcGroupKey] ?? key;
 
+/**
+ * True for a GC line whose Quantity is DERIVED (utilization×duration for staff, the
+ * driver for operational) → the Quantity cell is locked-but-overridable (B3). Equipment
+ * and manual lines return false (their amount/quantity is a direct input).
+ */
+export const gcIsDerivedQtyLine = (row: EstimateSectionLine): boolean =>
+  row.entryKind === ENTRY_KIND.StaffRole || row.entryKind === ENTRY_KIND.OperationalExpense;
+
+/** Compact quantity formatter for the Quantity column (e.g. 346.4, 10, 1.5). */
+export const fmtQty = (n: number): string =>
+  n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
 const STAFF_KEY_BY_CODE = new Map(STAFF_ROLE_DEFAULTS.map((r) => [r.code, r.key]));
 const EQUIP_KEY_BY_CODE = new Map(EQUIPMENT_DEFAULTS.map((e) => [e.code, e.key]));
 
@@ -88,7 +100,10 @@ export function buildCalcLookup(calc: PersonnelCalcResult): Map<string, CalcCell
   const m = new Map<string, CalcCell>();
   for (const l of calc.staffLines) m.set(l.code, { qty: l.qty, rate: l.rate, total: l.total });
   for (const l of calc.operationalLines) m.set(l.code, { qty: l.qty, rate: l.rate, total: l.total });
-  for (const l of calc.equipmentLines) m.set(l.code, { qty: 0, rate: 0, total: l.total });
+  // Equipment is a lump (the export carries only a total): present it uniformly as the
+  // template's Quantity 1 × Rate(amount) = Total so the grid's Quantity/Rate columns read
+  // consistently with the lump-sum lines (the editable amount itself rides in `inputs.amount`).
+  for (const l of calc.equipmentLines) m.set(l.code, { qty: l.total > 0 ? 1 : 0, rate: l.total, total: l.total });
   for (const l of calc.manualLines) m.set(l.code, { qty: l.qty, rate: l.rate, total: l.total });
   return m;
 }

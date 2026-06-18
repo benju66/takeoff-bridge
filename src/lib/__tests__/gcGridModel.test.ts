@@ -4,6 +4,7 @@ import {
   GC_ROW_META,
   buildCalcLookup,
   entryValue,
+  gcIsDerivedQtyLine,
   resolveEntryTarget,
   resolveRoleKey,
   type GcGroupKey,
@@ -103,6 +104,13 @@ describe("entryValue / resolveEntryTarget / resolveRoleKey — per kind", () => 
     expect(resolveRoleKey(staff)).toBe(STAFF_ROLE_DEFAULTS[0].key);
     expect(resolveRoleKey(equip)).toBeNull();
     expect(resolveRoleKey(operational)).toBeNull();
+  });
+
+  it("gcIsDerivedQtyLine: staff + operational have a DERIVED (locked) quantity; equipment + manual do not", () => {
+    expect(gcIsDerivedQtyLine(staff)).toBe(true);
+    expect(gcIsDerivedQtyLine(operational)).toBe(true);
+    expect(gcIsDerivedQtyLine(equip)).toBe(false);
+    expect(gcIsDerivedQtyLine(manual)).toBe(false);
   });
 });
 

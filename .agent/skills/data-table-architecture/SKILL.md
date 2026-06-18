@@ -247,6 +247,10 @@ Active row (matching `selection.rowId`): `bg-blue-50/60 dark:bg-blue-950/40` + `
 
 6. **Do NOT add `tabIndex` or `onKeyDown` to individual cell display divs** — Per-cell focus management is fragile: non-editable columns have no focusable elements, stale closures capture wrong coordinates, and focus is lost during virtualizer re-renders. Use the single-container pattern via `useGridKeyboard` instead.
 
+7. **Do NOT rely on a menu's `onMouseDown={e => e.stopPropagation()}` to keep an open context menu from dismissing** — a `document.addEventListener("mousedown", …)` outside-click dismiss handler still fires (React's synthetic `stopPropagation` does not reliably stop the native document listener), closing the menu on the button's `mousedown` so the `onClick` never lands. Dismiss instead by checking the event target against a **menu ref** (`if (menuRef.current?.contains(e.target)) return;`). The section-grid hosts (`GcPersonnelGridStep` / `SiteOpsGridStep`) use this for the "Override quantity" / lock menu.
+
+8. **Do NOT render a `renderCellOverlay` (the override ⚑) as an inline sibling after a `w-full h-full` cell `div`** — the full-size cell content obscures/overflows it and it is not clickable. Position the overlay `absolute` in the cell corner (the GridShell `<td>` is `relative`) so it sits above the content and the revert click works.
+
 ---
 
 ## 9. Row Virtualization

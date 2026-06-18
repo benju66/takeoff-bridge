@@ -17,49 +17,52 @@ import {
 import { ENTRY_KIND } from "@/lib/sectionLines/entryKinds";
 import { gcLeafNodeId } from "@/lib/bindings/types";
 import {
-  GC_MANUAL_BY_CODE,
   GC_ROW_META,
   buildCalcLookup,
   entryValue,
+  fmtQty,
   gcGroupKey,
   gcGroupLabel,
+  gcIsDerivedQtyLine,
   num,
   resolveEntryTarget,
   resolveRoleKey,
 } from "@/lib/sectionLines/gcGridModel";
 
+// (derived-quantity cell rendering is centralized in the core's `renderDerivedQtyCell`)
+
 // ---------------------------------------------------------------------------
-// useGcPersonnelGrid — Step 2 (GC Personnel) grid spec (Phase B2; B3 onto the core)
+// useGcPersonnelGrid — Step 2 (GC Personnel) grid spec (B2; B3 onto the core)
 //
 // A thin specialization of the shared useSectionLineGrid core: it supplies ONLY the
 // GC-specific pieces — the display-ordered GC section lines (01.A–01.F), the calc-by-
-// code lookup, the `applyEdit` setter dispatch (utilization / rate / equipment /
-// manual), the GC column definitions, and the section grouping. The core owns every
-// section-agnostic mechanic (selection, cell renderers, keyboard nav, the TanStack
-// instance + meta, undo/redo, the per-line type-over, and the GridShellConfig).
+// code lookup, the `applyEdit` setter dispatch, the GC column definitions, and the
+// section grouping. The core owns every section-agnostic mechanic.
 //
-// It is a VENEER over usePersonnelCalculations (B2-D1): that hook stays the
-// authoritative owner of the GC inputs, the legacy blob snapshots, the A3
-// dual-write/dual-read, and the authoritative `calcResult`. An input edit maps a
-// section-line cell → the matching personnel setter (`setUtilization` /
-// `handleRateChange`|`resetRate` / `handleEquipmentChange` / `handleManualEntryChange`);
-// the GC engine is PURE from inputs, so a single prev/next value is full-fidelity.
+// Columns match the company estimate template's STEP 2 sheet (row 9 headers):
+//   Code · Description · Utilization · Quantity · Unit · Rate · Total · Cost/S.F.
+// Total = Quantity × Rate; Cost/S.F. = Total ÷ Building Sqft. Per kind:
+//   - staff      : Utilization editable (→ hours); Quantity DERIVED (locked, overridable);
+//                  Rate editable ($/hr override).
+//   - operational: Quantity DERIVED (locked, overridable); Rate = card rate (read-only).
+//   - equipment  : Quantity 1; the lump amount is the editable Rate.
+//   - manual qty : Quantity editable (typed); Rate = card rate (read-only).
+//   - manual lump: Quantity 1; the lump amount is the editable Rate.
 // ---------------------------------------------------------------------------
 
-// Step-2 grid columns (display:flex like Step 4). All accessor columns so the
-// shared FilterableColumnHeader (rendered by GridShell) reads a value per column.
 const STEP2_COLUMN_DEFS: ColumnDefinition[] = [
-  { id: "code", header: "Code", type: "default", size: 120 },
-  { id: "description", header: "Staff Role / Operational Scope", type: "default", size: 320 },
-  { id: "unit", header: "Unit", type: "default", size: 70 },
+  { id: "code", header: "Code", type: "default", size: 110 },
+  { id: "description", header: "Description", type: "default", size: 300 },
+  { id: "utilization", header: "Utilization", type: "default", size: 110 },
+  { id: "quantity", header: "Quantity", type: "default", size: 130 },
+  { id: "unit", header: "Unit", type: "default", size: 64 },
   { id: "rate", header: "Rate", type: "default", size: 120 },
-  { id: "entry", header: "Utilization / Entry", type: "default", size: 160 },
-  { id: "calcQty", header: "Calculated Qty", type: "default", size: 150 },
-  { id: "total", header: "Total Cost", type: "default", size: 160 },
+  { id: "total", header: "Total", type: "default", size: 140 },
+  { id: "costPerSf", header: "Cost/S.F.", type: "default", size: 110 },
 ];
 
-const STEP2_EDITABLE_COLUMN_IDS = ["rate", "entry", "total"] as const;
-const STEP2_CENTER_ALIGNED_COLUMN_IDS = ["code", "unit", "rate", "entry", "calcQty", "total"] as const;
+const STEP2_EDITABLE_COLUMN_IDS = ["utilization", "quantity", "rate", "total"] as const;
+const STEP2_CENTER_ALIGNED_COLUMN_IDS = ["code", "utilization", "quantity", "unit", "rate", "total", "costPerSf"] as const;
 
 const columnHelper = createColumnHelper<EstimateSectionLine>();
 
@@ -67,45 +70,28 @@ const columnHelper = createColumnHelper<EstimateSectionLine>();
 // same shim useTakeoffWorkbook uses); resolved at runtime by the core's `filterFns`.
 const multiSelect = "multiSelect" as "includesString";
 
-export type UseGcPersonnelGridReturn = UseSectionLineGridReturn;
-
 /** Builds the GC (Step 2) columns using the shared cell helpers + commit fns. */
 function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
-  const { renderNumberCell, renderDisplayCell, commitInputEdit, commitOverride, calcLookupRef, canOverride } = ctx;
+  const {
+    renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride,
+    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef,
+  } = ctx;
+
   return [
     columnHelper.accessor((l) => l.code, {
-      id: "code",
-      header: "Code",
-      size: 120,
-      filterFn: multiSelect,
+      id: "code", header: "Code", size: 110, filterFn: multiSelect,
       cell: (info) => renderDisplayCell(info, info.row.original.code, "center", "text-blue-600 dark:text-blue-400 font-semibold font-mono"),
     }),
     columnHelper.accessor((l) => l.label, {
-      id: "description",
-      header: "Staff Role / Operational Scope",
-      size: 320,
-      filterFn: multiSelect,
+      id: "description", header: "Description", size: 300, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         const isStaff = line.entryKind === ENTRY_KIND.StaffRole;
         const overridden = isStaff && typeof line.inputs.rate === "number";
-        const cfg = GC_MANUAL_BY_CODE.get(line.code);
-        const hint =
-          cfg && cfg.entry === "qty"
-            ? ` (Rate ${fmtUSD(cfg.rate ?? 0)}/${cfg.unit})`
-            : cfg && cfg.entry === "lumpSum" && cfg.pctHint === undefined
-            ? " (Lump Sum — enter total $)"
-            : "";
         return renderDisplayCell(
           info,
           <span className="font-semibold text-foreground">
             {line.label}
-            {hint}
-            {cfg?.pctHint !== undefined && (
-              <span className="block text-[10px] font-normal text-slate-500 dark:text-slate-400 mt-0.5">
-                Template guidance: {(cfg.pctHint * 100).toFixed(2)}% of estimate — enter the final amount
-              </span>
-            )}
             {overridden && (
               <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400 mt-0.5">
                 Project rate override{" "}
@@ -127,27 +113,61 @@ function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
         );
       },
     }),
-    columnHelper.accessor((l) => GC_ROW_META.get(l.code)?.unit ?? "", {
-      id: "unit",
-      header: "Unit",
-      size: 70,
-      filterFn: multiSelect,
-      cell: (info) =>
-        renderDisplayCell(info, GC_ROW_META.get(info.row.original.code)?.unit ?? "", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
+    // Utilization — editable % for staff; "—" otherwise.
+    columnHelper.accessor((l) => (l.entryKind === ENTRY_KIND.StaffRole ? entryValue(l) : 0), {
+      id: "utilization", header: "Utilization", size: 110, filterFn: multiSelect,
+      cell: (info) => {
+        const line = info.row.original;
+        if (line.entryKind !== ENTRY_KIND.StaffRole) {
+          return renderDisplayCell(info, "—", "center", "text-slate-500 dark:text-slate-500 font-mono");
+        }
+        const val = entryValue(line);
+        const tgt = resolveEntryTarget(line); // { target: "utilization", key }
+        return renderNumberCell(info, {
+          colId: "utilization",
+          value: val,
+          display: `${val}%`,
+          editable: !!tgt,
+          onCommit: (n) => { if (tgt) commitInputEdit(line.id, tgt.target, tgt.key, val, Math.max(0, Math.min(100, n))); },
+        });
+      },
     }),
-    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.rate ?? 0, {
-      id: "rate",
-      header: "Rate",
-      size: 120,
-      filterFn: multiSelect,
+    // Quantity — derived (locked) for staff/operational; editable for manual qty; 1 for lump/equipment.
+    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.qty ?? 0, {
+      id: "quantity", header: "Quantity", size: 130, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
-        const cfg = GC_MANUAL_BY_CODE.get(line.code);
+        if (gcIsDerivedQtyLine(line)) return renderDerivedQtyCell(info);
+        if (line.entryKind === ENTRY_KIND.Qty) {
+          // Manual qty line — the quantity is the estimator's direct input.
+          const val = entryValue(line);
+          const tgt = resolveEntryTarget(line); // { target: "manual", key }
+          return renderNumberCell(info, {
+            colId: "quantity",
+            value: val,
+            display: fmtQty(val),
+            editable: !!tgt,
+            onCommit: (n) => { if (tgt) commitInputEdit(line.id, tgt.target, tgt.key, val, Math.max(0, n)); },
+          });
+        }
+        // Equipment / lump-sum — quantity is 1 (the dollar amount lives in Rate).
+        return renderDisplayCell(info, fmtQty(calc?.qty ?? 0), "center", "text-slate-600 dark:text-slate-400 font-mono");
+      },
+    }),
+    columnHelper.accessor((l) => GC_ROW_META.get(l.code)?.unit ?? "", {
+      id: "unit", header: "Unit", size: 64, filterFn: multiSelect,
+      cell: (info) => renderDisplayCell(info, GC_ROW_META.get(info.row.original.code)?.unit ?? "", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
+    }),
+    // Rate — editable $/hr override for staff; editable lump amount for equipment/lump; card rate read-only otherwise.
+    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.rate ?? 0, {
+      id: "rate", header: "Rate", size: 120, filterFn: multiSelect,
+      cell: (info) => {
+        const line = info.row.original;
+        const calc = calcLookupRef.current.get(line.code);
         const roleKey = resolveRoleKey(line);
-        // Rate is editable only for staff (project rate override). Operational +
-        // qty-manual lines show their card rate read-only; equipment / lumpSum show "—".
         if (roleKey) {
+          // staff: project $/hr rate override
           return renderNumberCell(info, {
             colId: "rate",
             value: calc?.rate ?? 0,
@@ -156,56 +176,25 @@ function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
             onCommit: (n) => commitInputEdit(line.id, "rate", roleKey, typeof line.inputs.rate === "number" ? num(line.inputs.rate) : undefined, n),
           });
         }
-        const showsRate =
-          line.entryKind === ENTRY_KIND.OperationalExpense || (cfg && cfg.entry === "qty");
-        return renderDisplayCell(info, showsRate ? fmtUSD(calc?.rate ?? 0) : "—", "center", "text-foreground font-mono");
-      },
-    }),
-    columnHelper.accessor((l) => entryValue(l), {
-      id: "entry",
-      header: "Utilization / Entry",
-      size: 160,
-      filterFn: multiSelect,
-      cell: (info) => {
-        const line = info.row.original;
-        if (line.entryKind === ENTRY_KIND.OperationalExpense) {
-          return renderDisplayCell(info, "auto", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono");
+        if (line.entryKind === ENTRY_KIND.Equipment || line.entryKind === ENTRY_KIND.LumpSum) {
+          // the dollar amount lives in Rate (quantity = 1); edit drives the equipment/manual setter
+          const val = entryValue(line);
+          const tgt = resolveEntryTarget(line);
+          return renderNumberCell(info, {
+            colId: "rate",
+            value: val,
+            display: fmtUSD(val),
+            editable: !!tgt,
+            onCommit: (n) => { if (tgt) commitInputEdit(line.id, tgt.target, tgt.key, val, Math.max(0, n)); },
+          });
         }
-        const val = entryValue(line);
-        const isStaff = line.entryKind === ENTRY_KIND.StaffRole;
-        const display = isStaff ? `${val}%` : fmtUSD(val);
-        const tgt = resolveEntryTarget(line);
-        const clamp = (n: number) => (isStaff ? Math.max(0, Math.min(100, n)) : Math.max(0, n));
-        const onCommit = (n: number) => {
-          if (tgt) commitInputEdit(line.id, tgt.target, tgt.key, val, clamp(n));
-        };
-        return renderNumberCell(info, { colId: "entry", value: val, display, editable: !!tgt, onCommit });
+        // operational + manual-qty: read-only card rate
+        return renderDisplayCell(info, fmtUSD(calc?.rate ?? 0), "center", "text-foreground font-mono");
       },
     }),
-    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.qty ?? 0, {
-      id: "calcQty",
-      header: "Calculated Qty",
-      size: 150,
-      filterFn: multiSelect,
-      cell: (info) => {
-        const line = info.row.original;
-        const calc = calcLookupRef.current.get(line.code);
-        const hasQty = line.entryKind === ENTRY_KIND.StaffRole || line.entryKind === ENTRY_KIND.OperationalExpense;
-        const meta = GC_ROW_META.get(line.code);
-        const content =
-          line.entryKind === ENTRY_KIND.StaffRole
-            ? `${(calc?.qty ?? 0).toFixed(1)} hrs`
-            : hasQty
-            ? `${(calc?.qty ?? 0).toFixed(2)} ${meta?.unit ?? ""}`
-            : "—";
-        return renderDisplayCell(info, content, "center", "text-slate-600 dark:text-slate-400 font-semibold font-mono");
-      },
-    }),
+    // Total — Quantity × Rate; carries the engine 🔗 badge + the audited type-over.
     columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.total ?? 0, {
-      id: "total",
-      header: "Total Cost",
-      size: 160,
-      filterFn: multiSelect,
+      id: "total", header: "Total", size: 140, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
@@ -221,15 +210,31 @@ function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
           value: calc?.total ?? 0,
           display,
           editable: canOverride,
-          onCommit: (n) => commitOverride(line.id, line.code, n),
+          onCommit: (n) => commitFieldOverride(line.id, "total", line.code, n),
         });
+      },
+    }),
+    // Cost/S.F. — Total ÷ project square footage (read-only); "—" when sqft is unset.
+    columnHelper.accessor((l) => {
+      const total = calcLookupRef.current.get(l.code)?.total ?? 0;
+      const sf = squareFootageRef.current;
+      return sf > 0 ? total / sf : 0;
+    }, {
+      id: "costPerSf", header: "Cost/S.F.", size: 110, filterFn: multiSelect,
+      cell: (info) => {
+        const total = calcLookupRef.current.get(info.row.original.code)?.total ?? 0;
+        const sf = squareFootageRef.current;
+        return renderDisplayCell(info, sf > 0 ? fmtUSD(total / sf) : "—", "center", "text-slate-600 dark:text-slate-400 font-mono");
       },
     }),
   ];
 }
 
+export type UseGcPersonnelGridReturn = UseSectionLineGridReturn;
+
 export function useGcPersonnelGrid(
   personnel: UsePersonnelCalculationsReturn,
+  squareFootage: number,
   onSaveOverride?: (payload: OverridePayload) => Promise<void>,
 ): UseGcPersonnelGridReturn {
   // Live ref so `applyEdit` stays stable while always driving the latest setters.
@@ -277,6 +282,8 @@ export function useGcPersonnelGrid(
       buildColumns: buildGcColumns,
       getGroupKey: gcGroupKey,
       getGroupLabel: gcGroupLabel,
+      squareFootage,
+      isDerivedQtyLine: gcIsDerivedQtyLine,
     },
     onSaveOverride
   );

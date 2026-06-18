@@ -17,48 +17,45 @@ import {
 import { ENTRY_KIND } from "@/lib/sectionLines/entryKinds";
 import { siteOpsLeafNodeId } from "@/lib/bindings/types";
 import {
-  SITEOPS_DYNAMIC_BY_CODE,
-  SITEOPS_MANUAL_BY_CODE,
   SITEOPS_ROW_META,
   buildSiteOpsCalcLookup,
   entryValue,
+  fmtQty,
   num,
   resolveQtyKey,
   resolveRateKey,
   siteOpsGroupKey,
   siteOpsGroupLabel,
+  siteOpsIsDerivedQtyLine,
 } from "@/lib/sectionLines/siteOpsGridModel";
 
 // ---------------------------------------------------------------------------
-// useSiteOpsGrid — Step 3 (Site Operations) grid spec (Phase B3; on the shared core)
+// useSiteOpsGrid — Step 3 (Site Operations) grid spec (B3; on the shared core)
 //
-// The Site-Ops twin of useGcPersonnelGrid: a thin specialization of useSectionLineGrid
-// that supplies ONLY the Site-Ops pieces — the display-ordered Site-Ops section lines
-// (02.A–02.H), the calc-by-code lookup, the `applyEdit` setter dispatch (quantity /
-// rate), the Site-Ops column definitions, and the section grouping. The core owns every
-// section-agnostic mechanic.
+// The Site-Ops twin of useGcPersonnelGrid: supplies the Site-Ops pieces to the shared
+// useSectionLineGrid core. A veneer over useInfrastructureCalculations.
 //
-// It is a VENEER over useInfrastructureCalculations: that hook stays the authoritative
-// owner of the Site-Ops inputs, the legacy blob snapshots, the A3 dual-write/dual-read,
-// and `calcResult`. Site-Ops differs from GC in ONE way that matters here: a `qtyRate`
-// manual line (today only Soil Borings) has BOTH a typed quantity AND a typed rate, so
-// its rate cell is editable (`resolveRateKey`) on top of the editable quantity cell.
+// Columns match the company estimate template's STEP 3 sheet (row 9 headers):
+//   Code · Description · Quantity · Unit · Rate · Total · Cost/S.F.
+// Total = Quantity × Rate; Cost/S.F. = Total ÷ Building Sqft. Per kind:
+//   - dynamic (auto): Quantity DERIVED (locked, overridable); Rate = card rate (read-only).
+//   - qty           : Quantity editable (typed); Rate = card rate (read-only).
+//   - qtyRate       : Quantity editable AND Rate editable (e.g. Soil Borings).
+//   - lumpSum       : Quantity 1; the lump amount is the editable Rate.
 // ---------------------------------------------------------------------------
 
-// Step-3 grid columns (display:flex like Step 2/4). All accessor columns so the shared
-// FilterableColumnHeader (rendered by GridShell) reads a value per column.
 const STEP3_COLUMN_DEFS: ColumnDefinition[] = [
-  { id: "code", header: "Code", type: "default", size: 120 },
-  { id: "description", header: "Description", type: "default", size: 340 },
-  { id: "unit", header: "Unit", type: "default", size: 70 },
+  { id: "code", header: "Code", type: "default", size: 110 },
+  { id: "description", header: "Description", type: "default", size: 320 },
+  { id: "quantity", header: "Quantity", type: "default", size: 130 },
+  { id: "unit", header: "Unit", type: "default", size: 64 },
   { id: "rate", header: "Rate", type: "default", size: 130 },
-  { id: "entry", header: "Estimator Entry", type: "default", size: 150 },
-  { id: "calcQty", header: "Calculated Qty", type: "default", size: 150 },
-  { id: "total", header: "Total Cost", type: "default", size: 160 },
+  { id: "total", header: "Total", type: "default", size: 140 },
+  { id: "costPerSf", header: "Cost/S.F.", type: "default", size: 110 },
 ];
 
-const STEP3_EDITABLE_COLUMN_IDS = ["rate", "entry", "total"] as const;
-const STEP3_CENTER_ALIGNED_COLUMN_IDS = ["code", "unit", "rate", "entry", "calcQty", "total"] as const;
+const STEP3_EDITABLE_COLUMN_IDS = ["quantity", "rate", "total"] as const;
+const STEP3_CENTER_ALIGNED_COLUMN_IDS = ["code", "quantity", "unit", "rate", "total", "costPerSf"] as const;
 
 const columnHelper = createColumnHelper<EstimateSectionLine>();
 
@@ -66,125 +63,103 @@ const columnHelper = createColumnHelper<EstimateSectionLine>();
 // same shim useTakeoffWorkbook uses); resolved at runtime by the core's `filterFns`.
 const multiSelect = "multiSelect" as "includesString";
 
-/** The description hint per entry kind (mirrors the old InfrastructureStep copy). */
+/** The concise description hint per entry kind. */
 function describeLine(line: EstimateSectionLine): string {
-  const cfg = SITEOPS_MANUAL_BY_CODE.get(line.code);
-  if (line.entryKind === ENTRY_KIND.Dynamic) {
-    const d = SITEOPS_DYNAMIC_BY_CODE.get(line.code);
-    if (!d) return "";
-    const driver = d.quantityDriver === "duration" ? "schedule duration" : "project square footage";
-    return ` (Rate ${fmtUSD(d.rate)}/${d.unit}, quantity follows ${driver})`;
-  }
-  if (!cfg) return "";
-  if (cfg.entry === "lumpSum") return " (Lump Sum — enter total $)";
-  if (cfg.entry === "qtyRate") return " (enter quantity and rate)";
-  return ` (Rate ${fmtUSD(cfg.rate ?? 0)}/${cfg.unit})`;
+  if (line.entryKind === ENTRY_KIND.Dynamic) return " (auto — quantity follows schedule/sqft)";
+  if (line.entryKind === ENTRY_KIND.LumpSum) return " (lump sum)";
+  if (line.entryKind === ENTRY_KIND.QtyRate) return " (quantity × rate)";
+  return "";
 }
 
 /** Builds the Site-Ops (Step 3) columns using the shared cell helpers + commit fns. */
 function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
-  const { renderNumberCell, renderDisplayCell, commitInputEdit, commitOverride, calcLookupRef, canOverride } = ctx;
+  const {
+    renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride,
+    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef,
+  } = ctx;
+
   return [
     columnHelper.accessor((l) => l.code, {
-      id: "code",
-      header: "Code",
-      size: 120,
-      filterFn: multiSelect,
+      id: "code", header: "Code", size: 110, filterFn: multiSelect,
       cell: (info) => renderDisplayCell(info, info.row.original.code, "center", "text-blue-600 dark:text-blue-400 font-semibold font-mono"),
     }),
     columnHelper.accessor((l) => l.label, {
-      id: "description",
-      header: "Description",
-      size: 340,
-      filterFn: multiSelect,
+      id: "description", header: "Description", size: 320, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         return renderDisplayCell(
           info,
           <span className="font-semibold text-foreground">
             {line.label}
-            {describeLine(line)}
+            <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">{describeLine(line)}</span>
           </span>,
           "left"
         );
       },
     }),
-    columnHelper.accessor((l) => SITEOPS_ROW_META.get(l.code)?.unit ?? "", {
-      id: "unit",
-      header: "Unit",
-      size: 70,
-      filterFn: multiSelect,
-      cell: (info) =>
-        renderDisplayCell(info, SITEOPS_ROW_META.get(info.row.original.code)?.unit ?? "", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
-    }),
-    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.rate ?? 0, {
-      id: "rate",
-      header: "Rate",
-      size: 130,
-      filterFn: multiSelect,
+    // Quantity — derived (locked) for dynamic; editable for qty/qtyRate; 1 for lump-sum.
+    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.qty ?? 0, {
+      id: "quantity", header: "Quantity", size: 130, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
-        // Rate is editable ONLY for `qtyRate` lines (typed rate, e.g. soil borings).
-        // Dynamic + qty lines show their card rate read-only; lump-sum shows "—".
-        const rateKey = resolveRateKey(line);
-        if (rateKey) {
+        if (siteOpsIsDerivedQtyLine(line)) return renderDerivedQtyCell(info);
+        if (line.entryKind === ENTRY_KIND.Qty || line.entryKind === ENTRY_KIND.QtyRate) {
+          // typed quantity — the estimator's direct input
+          const val = entryValue(line);
+          const qtyKey = resolveQtyKey(line);
+          return renderNumberCell(info, {
+            colId: "quantity",
+            value: val,
+            display: fmtQty(val),
+            editable: !!qtyKey,
+            onCommit: (n) => { if (qtyKey) commitInputEdit(line.id, "quantity", qtyKey, val, Math.max(0, n)); },
+          });
+        }
+        // lump-sum — quantity is 1 (the dollar amount lives in Rate).
+        return renderDisplayCell(info, fmtQty(calc?.qty ?? 0), "center", "text-slate-600 dark:text-slate-400 font-mono");
+      },
+    }),
+    columnHelper.accessor((l) => SITEOPS_ROW_META.get(l.code)?.unit ?? "", {
+      id: "unit", header: "Unit", size: 64, filterFn: multiSelect,
+      cell: (info) => renderDisplayCell(info, SITEOPS_ROW_META.get(info.row.original.code)?.unit ?? "", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
+    }),
+    // Rate — editable for qtyRate (typed rate) + lump-sum (the amount); card rate read-only otherwise.
+    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.rate ?? 0, {
+      id: "rate", header: "Rate", size: 130, filterFn: multiSelect,
+      cell: (info) => {
+        const line = info.row.original;
+        const calc = calcLookupRef.current.get(line.code);
+        if (line.entryKind === ENTRY_KIND.QtyRate) {
+          const rateKey = resolveRateKey(line);
           return renderNumberCell(info, {
             colId: "rate",
             value: calc?.rate ?? 0,
             display: fmtUSD(calc?.rate ?? 0),
-            editable: true,
-            onCommit: (n) => commitInputEdit(line.id, "rate", rateKey, num(line.inputs.rate), n),
+            editable: !!rateKey,
+            onCommit: (n) => { if (rateKey) commitInputEdit(line.id, "rate", rateKey, num(line.inputs.rate), n); },
           });
         }
-        const isLump = line.entryKind === ENTRY_KIND.LumpSum;
-        return renderDisplayCell(info, isLump ? "—" : fmtUSD(calc?.rate ?? 0), "center", "text-foreground font-mono");
-      },
-    }),
-    columnHelper.accessor((l) => entryValue(l), {
-      id: "entry",
-      header: "Estimator Entry",
-      size: 150,
-      filterFn: multiSelect,
-      cell: (info) => {
-        const line = info.row.original;
-        if (line.entryKind === ENTRY_KIND.Dynamic) {
-          return renderDisplayCell(info, "auto", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono");
+        if (line.entryKind === ENTRY_KIND.LumpSum) {
+          // the lump amount lives in Rate (quantity = 1); edit drives the quantity setter
+          // (a lump-sum line stores its dollar amount in `quantities`).
+          const val = entryValue(line);
+          const qtyKey = resolveQtyKey(line);
+          return renderNumberCell(info, {
+            colId: "rate",
+            value: val,
+            display: fmtUSD(val),
+            editable: !!qtyKey,
+            onCommit: (n) => { if (qtyKey) commitInputEdit(line.id, "quantity", qtyKey, val, Math.max(0, n)); },
+          });
         }
-        const val = entryValue(line);
-        const isLump = line.entryKind === ENTRY_KIND.LumpSum;
-        // lump-sum lines hold a dollar amount; qty / qtyRate hold a plain quantity.
-        const display = isLump ? fmtUSD(val) : String(val);
-        const qtyKey = resolveQtyKey(line);
-        const onCommit = (n: number) => {
-          if (qtyKey) commitInputEdit(line.id, "quantity", qtyKey, val, Math.max(0, n));
-        };
-        return renderNumberCell(info, { colId: "entry", value: val, display, editable: !!qtyKey, onCommit });
+        // dynamic + qty: read-only card rate
+        return renderDisplayCell(info, fmtUSD(calc?.rate ?? 0), "center", "text-foreground font-mono");
       },
     }),
-    columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.qty ?? 0, {
-      id: "calcQty",
-      header: "Calculated Qty",
-      size: 150,
-      filterFn: multiSelect,
-      cell: (info) => {
-        const line = info.row.original;
-        const calc = calcLookupRef.current.get(line.code);
-        const meta = SITEOPS_ROW_META.get(line.code);
-        // Only dynamic (driver) lines have a derived qty; manual lines show "—"
-        // (their typed quantity already lives in the Estimator Entry column).
-        const content =
-          line.entryKind === ENTRY_KIND.Dynamic
-            ? `${(calc?.qty ?? 0).toLocaleString()} ${meta?.unit ?? ""}`
-            : "—";
-        return renderDisplayCell(info, content, "center", "text-slate-600 dark:text-slate-400 font-semibold font-mono");
-      },
-    }),
+    // Total — Quantity × Rate; carries the engine 🔗 badge + the audited type-over.
     columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.total ?? 0, {
-      id: "total",
-      header: "Total Cost",
-      size: 160,
-      filterFn: multiSelect,
+      id: "total", header: "Total", size: 140, filterFn: multiSelect,
       cell: (info) => {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
@@ -200,8 +175,21 @@ function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
           value: calc?.total ?? 0,
           display,
           editable: canOverride,
-          onCommit: (n) => commitOverride(line.id, line.code, n),
+          onCommit: (n) => commitFieldOverride(line.id, "total", line.code, n),
         });
+      },
+    }),
+    // Cost/S.F. — Total ÷ project square footage (read-only); "—" when sqft is unset.
+    columnHelper.accessor((l) => {
+      const total = calcLookupRef.current.get(l.code)?.total ?? 0;
+      const sf = squareFootageRef.current;
+      return sf > 0 ? total / sf : 0;
+    }, {
+      id: "costPerSf", header: "Cost/S.F.", size: 110, filterFn: multiSelect,
+      cell: (info) => {
+        const total = calcLookupRef.current.get(info.row.original.code)?.total ?? 0;
+        const sf = squareFootageRef.current;
+        return renderDisplayCell(info, sf > 0 ? fmtUSD(total / sf) : "—", "center", "text-slate-600 dark:text-slate-400 font-mono");
       },
     }),
   ];
@@ -211,6 +199,7 @@ export type UseSiteOpsGridReturn = UseSectionLineGridReturn;
 
 export function useSiteOpsGrid(
   infrastructure: UseInfrastructureCalculationsReturn,
+  squareFootage: number,
   onSaveOverride?: (payload: OverridePayload) => Promise<void>,
 ): UseSiteOpsGridReturn {
   // Live ref so `applyEdit` stays stable while always driving the latest setters.
@@ -254,6 +243,8 @@ export function useSiteOpsGrid(
       buildColumns: buildSiteOpsColumns,
       getGroupKey: siteOpsGroupKey,
       getGroupLabel: siteOpsGroupLabel,
+      squareFootage,
+      isDerivedQtyLine: siteOpsIsDerivedQtyLine,
     },
     onSaveOverride
   );

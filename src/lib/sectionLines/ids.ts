@@ -44,13 +44,28 @@ export function siteOpsManualLineId(key: string): string {
 }
 
 /**
- * The `estimate_overrides.field` key for a section line's TOTAL — the single address
- * an audited type-over (D3, Phase A+1) and a Linked-Values binding (A5) SHARE. Equal
- * by contract to the bindings layer's `lineFieldNodeId(sectionLineId, "total")`
- * (asserted in `calculationsLineOverrides.test.ts` so the two can never drift). Kept
- * here, in the zero-dep id module, so `calculations.ts` need not import the bindings
- * layer (which would create a cycle via `bindings/registry.ts → calculations.ts`).
+ * The `estimate_overrides.field` key for a section line FIELD — the single address an
+ * audited type-over (D3, Phase A+1) and a Linked-Values binding (A5) SHARE. Equal by
+ * contract to the bindings layer's `lineFieldNodeId(sectionLineId, field)` (asserted in
+ * `calculationsLineOverrides.test.ts` so the two can never drift). Kept here, in the
+ * zero-dep id module, so `calculations.ts` need not import the bindings layer (which
+ * would create a cycle via `bindings/registry.ts → calculations.ts`).
+ *
+ * `field` is `"total"` for the type-over A+1 introduced, and `"qty"` for the
+ * duration-driven-quantity override (B3 follow-on): a derived auto line's computed
+ * quantity is locked but the estimator may override it, and total then recomputes as
+ * (override qty) × rate.
  */
+export function sectionLineFieldOverrideKey(sectionLineId: string, field: string): string {
+  return `line:${sectionLineId}:${field}`;
+}
+
+/** The `estimate_overrides.field` key for a section line's TOTAL (the A+1 type-over). */
 export function sectionLineTotalOverrideKey(sectionLineId: string): string {
-  return `line:${sectionLineId}:total`;
+  return sectionLineFieldOverrideKey(sectionLineId, "total");
+}
+
+/** The `estimate_overrides.field` key for a derived line's QUANTITY override (B3 follow-on). */
+export function sectionLineQtyOverrideKey(sectionLineId: string): string {
+  return sectionLineFieldOverrideKey(sectionLineId, "qty");
 }

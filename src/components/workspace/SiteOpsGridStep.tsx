@@ -41,7 +41,7 @@ export function SiteOpsGridStep({
   squareFootage,
   onSaveOverride,
 }: SiteOpsGridStepProps) {
-  const grid = useSiteOpsGrid(infrastructure, onSaveOverride);
+  const grid = useSiteOpsGrid(infrastructure, squareFootage, onSaveOverride);
   const {
     table,
     rows,
@@ -60,6 +60,10 @@ export function SiteOpsGridStep({
     undoStackSize,
     redoStackSize,
     grandTotal,
+    isDerivedQtyLine,
+    isQtyOverridden,
+    beginQtyOverride,
+    revertQtyOverride,
   } = grid;
 
   // Step-local global undo/redo (mounted only on step3; the page's listener is
@@ -103,9 +107,16 @@ export function SiteOpsGridStep({
   const ctxLocked = ctxCellKey ? !!lockedCells[ctxCellKey] : false;
   const dismissCtx = () => setContextMenu((prev) => ({ ...prev, visible: false }));
 
+  // Dismiss the menu on an OUTSIDE mousedown — but ignore mousedowns inside the menu (a
+  // ref check, not stopPropagation, which does not reliably stop this document listener),
+  // so a menu item's click lands before the menu closes.
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!contextMenu.visible) return;
-    const onDocClick = () => dismissCtx();
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      dismissCtx();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismissCtx(); };
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("keydown", onKey);
@@ -176,6 +187,10 @@ export function SiteOpsGridStep({
                     );
                     alignClass = "text-center text-sm text-emerald-600 dark:text-emerald-400 font-black font-mono";
                   }
+                  else if (column.id === "costPerSf") {
+                    content = squareFootage > 0 ? fmtUSD(grandTotal / squareFootage) : "—";
+                    alignClass = "text-center text-emerald-600 dark:text-emerald-400 font-black font-mono";
+                  }
                   return (
                     <td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>
                       {content}
@@ -189,13 +204,34 @@ export function SiteOpsGridStep({
         }
       />
 
-      {/* Cell lock/unlock context menu (in-session, B2-D3) */}
-      {contextMenu.visible && ctxCellKey && (
+      {/* Cell context menu: the derived-Quantity override (B3) + the in-session cell lock (B2-D3) */}
+      {contextMenu.visible && ctxLine && ctxCellKey && (
         <div
-          className="fixed z-50 bg-card border border-grid-border rounded-lg shadow-lg overflow-hidden animate-fade-in min-w-[160px] text-xs"
+          ref={menuRef}
+          className="fixed z-50 bg-card border border-grid-border rounded-lg shadow-lg overflow-hidden animate-fade-in min-w-[180px] text-xs"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {/* "Override quantity" — only on a derived (duration/sqft-driven) Quantity cell. */}
+          {onSaveOverride && contextMenu.columnId === "quantity" && isDerivedQtyLine(ctxLine) && (
+            isQtyOverridden(ctxLine.id) ? (
+              <button
+                type="button"
+                onClick={() => { revertQtyOverride(ctxLine.id); dismissCtx(); }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-amber-600 dark:text-amber-400 text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer border-b border-grid-border"
+              >
+                <RotateCcw size={14} /> Revert quantity to computed
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { beginQtyOverride(ctxLine.id); dismissCtx(); }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-foreground text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer border-b border-grid-border"
+              >
+                <Unlock size={14} className="text-slate-500" /> Override quantity
+              </button>
+            )
+          )}
           <button
             type="button"
             onClick={() => { toggleCellLock(ctxCellKey); dismissCtx(); }}

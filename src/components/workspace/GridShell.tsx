@@ -149,6 +149,7 @@ export function GridShell<TRow>({
   }, [tableRows, collapsedGroups, groupTotals, getGroupKey, getGroupLabel]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => parentRef.current,
@@ -385,11 +386,13 @@ export function GridShell<TRow>({
                       return (
                         <td
                           key={cell.id}
-                          className={`${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} ${editAffordance} ${cellSelectionClass}`}
+                          className={`relative ${paddingClass} border-r border-b border-grid-border ${alignClass} ${rowHoverClass} ${editAffordance} ${cellSelectionClass}`}
                           style={{ width: cell.column.getSize(), flex: "none" }}
                           onClick={handleNonEditableCellClick}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          {/* renderCellOverlay (override ⚑) is absolutely positioned by the host so
+                              it sits ABOVE the full-width cell content and stays clickable. */}
                           {renderCellOverlay?.(row.original, cell.column.id)}
                         </td>
                       );

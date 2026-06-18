@@ -9,7 +9,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import type { CellContext, ColumnDef, ColumnFiltersState, Table } from "@tanstack/react-table";
-import { Flag } from "lucide-react";
+import { Flag, Lock } from "lucide-react";
 import { NumberCellInput } from "@/components/workspace/NumberCellInput";
 import type { GridShellConfig } from "@/components/workspace/GridShell";
 import {
@@ -22,8 +22,12 @@ import type { EstimateSectionLine } from "@/types/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import type { LineOverrideTrace } from "@/lib/calculations";
 import { useCommandHistory } from "./useCommandHistory";
-import { sectionLineTotalOverrideKey } from "@/lib/sectionLines/ids";
+import { sectionLineFieldOverrideKey } from "@/lib/sectionLines/ids";
 import type { CalcCell } from "@/lib/sectionLines/gcGridModel";
+
+/** The overridable section-line fields: the whole line `total` (A+1 type-over) and the
+ *  duration/sqft-driven `qty` (B3 — locked-but-overridable derived quantity). */
+export type OverrideField = "total" | "qty";
 
 // ---------------------------------------------------------------------------
 // useSectionLineGrid — the shared Step-2 / Step-3 grid CORE (Phase B3).
@@ -58,6 +62,8 @@ import type { CalcCell } from "@/lib/sectionLines/gcGridModel";
 const fmtUSD = (n: number) =>
   "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const fmtQty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
 /**
  * A heterogeneous section-grid column array. `columnHelper.accessor` infers a specific
  * `TValue` per column (string / number / …), so the array element must accept any
@@ -72,7 +78,10 @@ export type SectionColumnDefs = ColumnDef<EstimateSectionLine, any>[];
  *  click-to-toggle select/edit pattern). */
 export interface SectionColumnContext {
   /** A numeric cell with the click-to-toggle select→edit pattern. `value` feeds the
-   *  editor; `display` is the non-editing content (formatted value + any badges). */
+   *  editor; `display` is the non-editing content (formatted value + any badges).
+   *  `editOnClick` (default true) gates whether clicking an editable cell enters edit
+   *  mode — the derived-quantity cell passes `false` so it edits ONLY via the explicit
+   *  "Override quantity" gesture (the cell reads as locked). */
   renderNumberCell: (
     info: CellContext<EstimateSectionLine, unknown>,
     opts: {
@@ -82,6 +91,7 @@ export interface SectionColumnContext {
       editable: boolean;
       onCommit: (n: number) => void;
       align?: "center" | "left";
+      editOnClick?: boolean;
     }
   ) => React.ReactNode;
   /** A read-only display cell (code / label / unit / auto entry / non-editable rate). */
@@ -99,12 +109,21 @@ export interface SectionColumnContext {
     prevValue: number | undefined,
     nextValue: number | undefined
   ) => void;
-  /** Commit a per-line type-over (D3) — an append-only override action, NOT a command. */
-  commitOverride: (lineId: string, code: string, nextValue: number) => void;
+  /** Commit a per-line override (D3) on a field — an append-only override action, NOT a
+   *  command. `field` is `"total"` (the type-over) or `"qty"` (the derived-quantity override). */
+  commitFieldOverride: (lineId: string, field: OverrideField, code: string, nextValue: number) => void;
+  /** True when a `line:<id>:<field>` override is currently recorded (drives the lock vs ⚑). */
+  isFieldOverridden: (lineId: string, field: OverrideField) => boolean;
+  /** Renders the shared DERIVED-quantity cell (locked, with a lock glyph; overridable via the
+   *  gesture). Both Step 2 (staff/operational) and Step 3 (dynamic) use it verbatim → one visual. */
+  renderDerivedQtyCell: (info: CellContext<EstimateSectionLine, unknown>) => React.ReactNode;
   /** Live ref to the calc-by-code lookup (read `.current` at render → always fresh). */
   calcLookupRef: React.MutableRefObject<Map<string, CalcCell>>;
-  /** Whether a type-over is possible (i.e. the page passed an `onSaveOverride`). */
+  /** Whether an override is possible (i.e. the page passed an `onSaveOverride`). */
   canOverride: boolean;
+  /** Live ref to project square footage — the Cost/S.F. column divides each line total
+   *  by `.current` (read at render → fresh without recomputing the columns memo). */
+  squareFootageRef: React.MutableRefObject<number>;
 }
 
 /** How a step specializes the shared grid core. */
@@ -126,6 +145,12 @@ export interface SectionGridSpec {
   /** Section-divider grouping (stable references → keeps the gridConfig memo cheap). */
   getGroupKey: (row: EstimateSectionLine) => string;
   getGroupLabel: (key: string) => string;
+  /** Project square footage — threaded into the Cost/S.F. column. */
+  squareFootage: number;
+  /** True for a line whose Quantity is derived (duration/sqft-driven) → locked-but-
+   *  overridable. The host uses it to offer "Override quantity" on a right-clicked
+   *  Quantity cell. Manual/lump lines return false (their quantity is a direct input). */
+  isDerivedQtyLine: (row: EstimateSectionLine) => boolean;
 }
 
 export interface UseSectionLineGridReturn {
@@ -146,6 +171,14 @@ export interface UseSectionLineGridReturn {
   undoStackSize: number;
   redoStackSize: number;
   grandTotal: number;
+  /** True for a line whose Quantity is derived (duration/sqft-driven). */
+  isDerivedQtyLine: (row: EstimateSectionLine) => boolean;
+  /** True when this line's derived Quantity currently carries an audited override. */
+  isQtyOverridden: (rowId: string) => boolean;
+  /** Begin a Quantity override (the "Override quantity" gesture) — unlocks the cell for edit. */
+  beginQtyOverride: (rowId: string) => void;
+  /** Revert a Quantity override back to the computed (duration/sqft-driven) value. */
+  revertQtyOverride: (rowId: string) => void;
 }
 
 export function useSectionLineGrid(
@@ -166,6 +199,9 @@ export function useSectionLineGrid(
   applyEditRef.current = spec.applyEdit;
   const editableColumnIdsRef = useRef(spec.editableColumnIds);
   editableColumnIdsRef.current = spec.editableColumnIds;
+  const squareFootageRef = useRef(spec.squareFootage);
+  squareFootageRef.current = spec.squareFootage;
+  const isDerivedQtyLine = spec.isDerivedQtyLine;
 
   const canOverride = !!onSaveOverride;
 
@@ -211,33 +247,54 @@ export function useSectionLineGrid(
     [history]
   );
 
-  // The per-line type-over (D3) — an append-only override action, NOT a command.
-  const commitOverride = useCallback(
-    (lineId: string, code: string, nextValue: number) => {
+  // Per-line overrides (D3) — append-only override actions, NOT commands. `field` is
+  // "total" (the type-over A+1 built) or "qty" (the B3 derived-quantity override). The
+  // retained computed value is that field's computed value (total / qty) from the result.
+  const commitFieldOverride = useCallback(
+    (lineId: string, field: OverrideField, code: string, nextValue: number) => {
       if (!onSaveOverride) return;
-      const field = sectionLineTotalOverrideKey(lineId);
-      const trace = overridesTraceRef.current?.[field];
-      const computedValue = trace ? trace.computedValue : (calcLookupRef.current.get(code)?.total ?? 0);
+      const key = sectionLineFieldOverrideKey(lineId, field);
+      const trace = overridesTraceRef.current?.[key];
+      const computedValue = trace
+        ? trace.computedValue
+        : field === "total"
+        ? (calcLookupRef.current.get(code)?.total ?? 0)
+        : (calcLookupRef.current.get(code)?.qty ?? 0);
       if (trace && trace.overrideValue === nextValue) return; // no-op re-type
-      onSaveOverride({ field, computedValue, overrideValue: nextValue, reason: "" }).catch((err) =>
-        console.error("Failed to record section line type-over:", err)
+      onSaveOverride({ field: key, computedValue, overrideValue: nextValue, reason: "" }).catch((err) =>
+        console.error("Failed to record section line override:", err)
       );
     },
     [onSaveOverride]
   );
 
-  const revertOverride = useCallback(
-    (lineId: string) => {
+  const revertFieldOverride = useCallback(
+    (lineId: string, field: OverrideField) => {
       if (!onSaveOverride) return;
-      const field = sectionLineTotalOverrideKey(lineId);
-      const trace = overridesTraceRef.current?.[field];
+      const key = sectionLineFieldOverrideKey(lineId, field);
+      const trace = overridesTraceRef.current?.[key];
       if (!trace) return;
-      onSaveOverride({ field, computedValue: trace.computedValue, overrideValue: null, reason: "" }).catch((err) =>
-        console.error("Failed to revert section line type-over:", err)
+      onSaveOverride({ field: key, computedValue: trace.computedValue, overrideValue: null, reason: "" }).catch((err) =>
+        console.error("Failed to revert section line override:", err)
       );
     },
     [onSaveOverride]
   );
+
+  const isFieldOverridden = useCallback(
+    (lineId: string, field: OverrideField) => !!overridesTraceRef.current?.[sectionLineFieldOverrideKey(lineId, field)],
+    []
+  );
+
+  // The "Override quantity" gesture (B3): right-click a locked derived-Quantity cell →
+  // unlock it for an in-place edit (set the cell editing), whose commit records a `:qty`
+  // override. The cell renders read-only otherwise (editOnClick=false), so a plain click
+  // never edits it — only this explicit gesture does. Revert returns to the computed value.
+  const beginQtyOverride = useCallback((rowId: string) => {
+    setSelection({ rowId, columnId: "quantity", isEditing: true });
+  }, []);
+  const revertQtyOverride = useCallback((rowId: string) => revertFieldOverride(rowId, "qty"), [revertFieldOverride]);
+  const isQtyOverridden = useCallback((rowId: string) => isFieldOverridden(rowId, "qty"), [isFieldOverridden]);
 
   // ---------------------------------------------------------------------------
   // Keyboard navigation — the section-grid copy of useKeyboardNavigation, specialized
@@ -363,14 +420,17 @@ export function useSectionLineGrid(
         );
       }
 
-      const editAffordance = editable ? "cursor-text hover:bg-blue-50/50 dark:hover:bg-blue-950/10" : "cursor-default";
+      const editOnClick = opts.editOnClick !== false;
+      const editAffordance = editable && editOnClick ? "cursor-text hover:bg-blue-50/50 dark:hover:bg-blue-950/10" : "cursor-default";
       const selectedClass = isSelected ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative" : "";
       return (
         <div
           id={`cell-${rowId}-${colId}`}
           className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center ${alignClass} font-mono text-xs text-foreground ${editAffordance} ${selectedClass} ${locked ? "opacity-60 cursor-not-allowed" : ""}`}
           onClick={() => {
-            if (isSelected && editable) meta.setSelection({ rowId, columnId: colId, isEditing: true });
+            // editOnClick=false (derived-quantity cell) never enters edit mode on click —
+            // it unlocks only via the explicit "Override quantity" gesture (which sets editing).
+            if (isSelected && editable && editOnClick) meta.setSelection({ rowId, columnId: colId, isEditing: true });
             else meta.setSelection({ rowId, columnId: colId, isEditing: false });
           }}
           onContextMenu={(e) => {
@@ -420,10 +480,35 @@ export function useSectionLineGrid(
   // Columns — delegated to the section's `buildColumns`, given the shared helpers.
   // `selection` is intentionally NOT a dep (§8 #4); cells read meta.selection live.
   // ---------------------------------------------------------------------------
+  // The shared DERIVED-quantity cell — locked (a lock glyph), overridable via the gesture.
+  // Centralized here so Step 2 (staff/operational) and Step 3 (dynamic) read identically.
+  const renderDerivedQtyCell = useCallback(
+    (info: CellContext<EstimateSectionLine, unknown>): React.ReactNode => {
+      const line = info.row.original;
+      const calc = calcLookupRef.current.get(line.code);
+      const overridden = !!overridesTraceRef.current?.[sectionLineFieldOverrideKey(line.id, "qty")];
+      const display = (
+        <span className={`inline-flex items-center gap-1 font-mono ${overridden ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-slate-600 dark:text-slate-400"}`}>
+          {fmtQty(calc?.qty ?? 0)}
+          {!overridden && <Lock size={9} className="opacity-40" />}
+        </span>
+      );
+      return renderNumberCell(info, {
+        colId: "quantity",
+        value: calc?.qty ?? 0,
+        display,
+        editable: canOverride,
+        editOnClick: false, // locked: edits only via the "Override quantity" gesture
+        onCommit: (n) => commitFieldOverride(line.id, "qty", line.code, Math.max(0, n)),
+      });
+    },
+    [renderNumberCell, commitFieldOverride, canOverride]
+  );
+
   const buildColumns = spec.buildColumns;
   const columns = useMemo(
-    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitOverride, calcLookupRef, canOverride }),
-    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitOverride, canOverride]
+    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef }),
+    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, canOverride]
   );
 
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -504,30 +589,33 @@ export function useSectionLineGrid(
       isRowFlagged: () => false,
       editableColumnIds,
       centerAlignedColumnIds,
-      // A+1 override ⚑ — rendered atop the `total` cell when a type-over is active.
-      // Click to revert to the retained computed value (B2-D2 audited set/revert).
+      // Override ⚑ — rendered atop the `total` cell (A+1 type-over) AND the `quantity`
+      // cell (B3 derived-quantity override) when an override is active. Click to revert
+      // to the retained computed value (audited set/revert; the qty/total formatting differs).
       renderCellOverlay: (row, columnId) => {
-        if (columnId !== "total") return null;
-        const trace = overridesTrace?.[sectionLineTotalOverrideKey(row.id)];
+        const field: OverrideField | null = columnId === "total" ? "total" : columnId === "quantity" ? "qty" : null;
+        if (!field) return null;
+        const trace = overridesTrace?.[sectionLineFieldOverrideKey(row.id, field)];
         if (!trace) return null;
+        const fmt = field === "total" ? fmtUSD : (n: number) => n.toLocaleString();
         return (
           <button
             type="button"
-            data-testid="section-override-flag"
+            data-testid={field === "qty" ? "section-qty-override-flag" : "section-override-flag"}
             onClick={(e) => {
               e.stopPropagation();
-              revertOverride(row.id);
+              revertFieldOverride(row.id, field);
             }}
-            title={`Overridden — computed ${fmtUSD(trace.computedValue)} → override ${fmtUSD(trace.overrideValue)}. Click to revert to computed.`}
+            title={`Overridden — computed ${fmt(trace.computedValue)} → override ${fmt(trace.overrideValue)}. Click to revert to computed.`}
             aria-label="Overridden value — click to revert to computed"
-            className="ml-1 inline-flex shrink-0 align-middle text-amber-600 dark:text-amber-400 hover:opacity-70 cursor-pointer"
+            className="absolute top-0.5 right-1 z-20 inline-flex shrink-0 text-amber-600 dark:text-amber-400 hover:opacity-70 cursor-pointer"
           >
             <Flag size={11} />
           </button>
         );
       },
     }),
-    [calcLookup, overridesTrace, revertOverride, getGroupKey, getGroupLabel, editableColumnIds, centerAlignedColumnIds]
+    [calcLookup, overridesTrace, revertFieldOverride, getGroupKey, getGroupLabel, editableColumnIds, centerAlignedColumnIds]
   );
 
   return {
@@ -548,6 +636,10 @@ export function useSectionLineGrid(
     undoStackSize: history.undoStackSize,
     redoStackSize: history.redoStackSize,
     grandTotal,
+    isDerivedQtyLine,
+    isQtyOverridden,
+    beginQtyOverride,
+    revertQtyOverride,
   };
 }
 

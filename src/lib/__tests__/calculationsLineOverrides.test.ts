@@ -24,15 +24,19 @@ import type { PersonnelLineSet, SiteOpsLineSet } from "../calculations";
 import { lineFieldNodeId } from "../bindings/compile";
 import {
   gcStaffLineId,
+  gcOperationalLineId,
   siteOpsDynamicLineId,
   siteOpsManualLineId,
   sectionLineTotalOverrideKey,
+  sectionLineQtyOverrideKey,
+  sectionLineFieldOverrideKey,
 } from "../sectionLines/ids";
 import { synthesizePersonnelSectionLines } from "../sectionLines/synthesize";
 import { computePersonnelFromSectionLines } from "../sectionLines/project";
 import { projectAppBornSectionLines } from "../bindings/registry";
 import {
   STAFF_ROLE_DEFAULTS,
+  OPERATIONAL_EXPENSE_DEFAULTS,
   SITE_OPS_DYNAMIC_DEFAULTS,
   SITE_OPS_MANUAL_DEFAULTS,
 } from "../constants";
@@ -158,6 +162,72 @@ describe("Phase A+1 — recognized-keys guard (a stale override cannot mis-apply
     expect(r).toEqual(baseSubset);
     expect(r.overrides).toBeUndefined();
     expect(r.staffLines.some((l) => l.code === exRole.code)).toBe(false);
+  });
+});
+
+describe("B3 follow-on — audited QUANTITY override on the duration/sqft-driven lines (D3 on :qty)", () => {
+  const exQtyKey = sectionLineQtyOverrideKey(gcStaffLineId(exRole.key)); // line:gc:staff:ex:qty
+  const opLine = OPERATIONAL_EXPENSE_DEFAULTS[0];
+  const opQtyKey = sectionLineQtyOverrideKey(gcOperationalLineId(opLine.code));
+  const safetyQtyKey = sectionLineQtyOverrideKey(siteOpsDynamicLineId(safetyDyn.code));
+  const knoxQtyKey = sectionLineQtyOverrideKey(siteOpsManualLineId(knoxManual.key));
+
+  it("the qty key is the line's `:qty` field address (a private override field, not a binding rollup field)", () => {
+    expect(exQtyKey).toBe("line:gc:staff:ex:qty");
+    // Same `line:<id>:<field>` scheme as the total key, just on the `qty` field.
+    expect(sectionLineQtyOverrideKey("gc:staff:ex")).toBe(sectionLineFieldOverrideKey("gc:staff:ex", "qty"));
+  });
+
+  it("GC staff: an overridden quantity recomputes total = override-qty × rate; computed qty retained", () => {
+    const base = gc();
+    const baseEx = base.staffLines.find((l) => l.code === exRole.code)!;
+    expect(baseEx.qty).toBeGreaterThan(0);
+
+    const r = gc({ [exQtyKey]: 100 }); // override the computed hours to 100
+    const ex = r.staffLines.find((l) => l.code === exRole.code)!;
+    expect(ex.qty).toBe(100);                       // effective qty is the override
+    expect(ex.rate).toBe(baseEx.rate);              // rate untouched
+    expect(ex.total).toBe(100 * baseEx.rate);       // total recomputes as override-qty × rate
+    expect(r.overrides).toEqual({ [exQtyKey]: { computedValue: baseEx.qty, overrideValue: 100 } });
+    expect(r.grandTotal).toBe(base.grandTotal + (100 * baseEx.rate - baseEx.total));
+  });
+
+  it("GC operational + Site-Ops dynamic lines carry the qty override too", () => {
+    const baseGc = gc();
+    const baseOp = baseGc.operationalLines.find((l) => l.code === opLine.code)!;
+    const rGc = gc({ [opQtyKey]: 3 });
+    const op = rGc.operationalLines.find((l) => l.code === opLine.code)!;
+    expect(op.qty).toBe(3);
+    expect(op.total).toBe(3 * baseOp.rate);
+
+    const baseSo = so();
+    const baseSafety = baseSo.dynamicLines.find((l) => l.code === safetyDyn.code)!;
+    const rSo = so({ [safetyQtyKey]: 7 });
+    const safety = rSo.dynamicLines.find((l) => l.code === safetyDyn.code)!;
+    expect(safety.qty).toBe(7);
+    expect(safety.total).toBe(7 * baseSafety.rate);
+    expect(rSo.overrides).toEqual({ [safetyQtyKey]: { computedValue: baseSafety.qty, overrideValue: 7 } });
+  });
+
+  it("a qty override is IGNORED for a MANUAL line (its quantity is a direct input, not derived)", () => {
+    const base = so();
+    const r = so({ [knoxQtyKey]: 999 }); // knox is a manual `qty` line — `:qty` is never looked up
+    expect(r).toEqual(base);
+    expect(r.overrides).toBeUndefined();
+  });
+
+  it("when BOTH a qty and a total override exist, the total override wins (applied last)", () => {
+    const base = gc();
+    const baseEx = base.staffLines.find((l) => l.code === exRole.code)!;
+    const r = gc({ [exQtyKey]: 100, [exNodeKey]: 555 });
+    const ex = r.staffLines.find((l) => l.code === exRole.code)!;
+    expect(ex.qty).toBe(100);     // the qty override still drives the displayed quantity
+    expect(ex.total).toBe(555);   // but the explicit total override wins for the total
+    // The total trace's computedValue is the override-qty-based total (qty applied first).
+    expect(r.overrides).toEqual({
+      [exQtyKey]: { computedValue: baseEx.qty, overrideValue: 100 },
+      [exNodeKey]: { computedValue: 100 * baseEx.rate, overrideValue: 555 },
+    });
   });
 });
 

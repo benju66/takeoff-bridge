@@ -65,9 +65,12 @@ test.describe("GC/Site-Ops B3 — Step 3 Site Operations grid", () => {
       // GridShell section dividers + per-line engine Links badges prove the shared surface.
       await expect(page.getByText("02.A — Site Operations", { exact: false })).toBeVisible();
       await expect(page.getByTestId("engine-inspect").first()).toBeVisible({ timeout: 15000 });
+      // Template column layout: Quantity · Unit · Rate · Total · Cost/S.F.
+      await expect(page.getByText("Cost/S.F.", { exact: false }).first()).toBeVisible();
 
-      // ---- Edit the FFE Relocation lump-sum → its total recomputes ----------------
-      const entryCell = page.locator('[id="cell-siteops:manual:ffeRelocation-entry"]');
+      // ---- Edit the FFE Relocation lump amount (in Rate) → its total recomputes -----
+      // A lump-sum line carries Quantity 1 and the dollar amount in the Rate column.
+      const entryCell = page.locator('[id="cell-siteops:manual:ffeRelocation-rate"]');
       const totalCell = page.locator('[id="cell-siteops:manual:ffeRelocation-total"]');
       await expect(totalCell).toContainText("$0.00");
       await entryCell.click(); // select
@@ -81,6 +84,25 @@ test.describe("GC/Site-Ops B3 — Step 3 Site Operations grid", () => {
       // ---- Ctrl+Z restores the prior value (full inverse data) --------------------
       await page.keyboard.press("Control+z");
       await expect(totalCell).toContainText("$0.00", { timeout: 10000 });
+
+      // ---- Override a duration-driven Quantity (locked → unlock via context menu) --
+      // Safety (02-9015.001) is duration-driven, so its Quantity is derived/locked. The
+      // estimator right-clicks → "Override quantity" → types a value → an audited override
+      // (the ⚑) records; clicking the ⚑ reverts to the computed quantity.
+      const safetyQty = page.locator('[id="cell-siteops:dynamic:02-9015.001-quantity"]');
+      await safetyQty.click({ button: "right" });
+      const overrideBtn = page.getByRole("button", { name: "Override quantity" });
+      await expect(overrideBtn).toBeVisible({ timeout: 10000 });
+      await overrideBtn.click();
+      // The locked cell unlocks into an editable input (located by id, then `fill` focuses it).
+      const qtyInput = page.locator('[id^="quantity-input"]');
+      await expect(qtyInput).toBeVisible({ timeout: 10000 });
+      await qtyInput.fill("24");
+      await qtyInput.press("Enter");
+      await expect(page.getByTestId("section-qty-override-flag")).toBeVisible({ timeout: 10000 });
+      // Revert via the ⚑ → the override clears.
+      await page.getByTestId("section-qty-override-flag").click();
+      await expect(page.getByTestId("section-qty-override-flag")).toHaveCount(0, { timeout: 10000 });
 
       // ---- A 🔗 badge opens the STEP 4 Trust "Links" tab on that Site-Ops node ----
       await page.getByTestId("engine-inspect").first().click();

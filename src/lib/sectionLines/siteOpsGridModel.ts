@@ -86,6 +86,18 @@ export const siteOpsGroupLabel = (key: string): string =>
   SITEOPS_GROUP_LABELS[key as SiteOpsSection] ?? key;
 
 /**
+ * True for a Site-Ops line whose Quantity is DERIVED (the duration/sqft driver lines) →
+ * the Quantity cell is locked-but-overridable (B3). Manual lines (qty / qtyRate / lumpSum)
+ * return false (their quantity is the estimator's direct input).
+ */
+export const siteOpsIsDerivedQtyLine = (row: EstimateSectionLine): boolean =>
+  row.entryKind === ENTRY_KIND.Dynamic;
+
+/** Compact quantity formatter for the Quantity column (e.g. 12, 30,000, 1.5). */
+export const fmtQty = (n: number): string =>
+  n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+/**
  * The per-row computed numbers, joined by `code` (the canonical join). Every Site-Ops
  * code is unique across the dynamic + manual arrays, so the join is collision-free.
  */
