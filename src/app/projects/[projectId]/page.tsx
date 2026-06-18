@@ -41,7 +41,7 @@ import { useEstimateBindings } from "@/hooks/useEstimateBindings";
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
 import { GcPersonnelGridStep } from "@/components/workspace/GcPersonnelGridStep";
-import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
+import { SiteOpsGridStep } from "@/components/workspace/SiteOpsGridStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
 import { DefineLinkPanel } from "@/components/workspace/DefineLinkPanel";
@@ -126,7 +126,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     activeOverrides,
   );
 
-  // Step 3: Division 02 Site Operations
+  // Step 3: Division 02 Site Operations. `activeOverrides` threads the per-line
+  // type-overs (D3 / A+1) into the Site-Ops engine — `{}` until one is recorded, so
+  // the result stays byte-identical and the export goldens tie $0.00 (gc-siteops B3).
   const infrastructure = useInfrastructureCalculations(
     projectDurationMonths,
     squareFootage,
@@ -134,6 +136,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     projectEstimate?.siteOpsQuantities,
     projectEstimate?.siteOpsRates,
     rateCardSnapshot,
+    activeOverrides,
   );
 
   // GC/Site-Ops Addressability section lines (GC first, then Site Ops — sort_order
@@ -586,15 +589,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
               linkedTotals={linkedDivisionTotals}
             />
           ) : (
-            <InfrastructureStep
+            <SiteOpsGridStep
+              infrastructure={infrastructure}
               durationMonths={projectDurationMonths}
               squareFootage={squareFootage}
-              quantities={infrastructure.quantities}
-              rates={infrastructure.rates}
-              onLineQuantityChange={infrastructure.handleLineQuantityChange}
-              onLineRateChange={infrastructure.handleLineRateChange}
-              calcResult={infrastructure.calcResult}
-              siteOperationsTotal={infrastructure.siteOperationsTotal}
+              onSaveOverride={handleSaveOverride}
             />
           )}
         </ErrorBoundary>

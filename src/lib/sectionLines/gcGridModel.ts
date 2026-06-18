@@ -65,6 +65,12 @@ export const GC_ROW_META: ReadonlyMap<string, GcRowMeta> = (() => {
 /** GC_MANUAL config by code — for the qty-vs-lumpSum entry hint + rate column. */
 export const GC_MANUAL_BY_CODE = new Map(GC_MANUAL_DEFAULTS.map((m) => [m.code, m]));
 
+/** Stable section-divider grouping for the grid (module-level → referentially stable). */
+export const gcGroupKey = (row: EstimateSectionLine): string =>
+  GC_ROW_META.get(row.code)?.group ?? "";
+export const gcGroupLabel = (key: string): string =>
+  GC_GROUP_LABELS[key as GcGroupKey] ?? key;
+
 const STAFF_KEY_BY_CODE = new Map(STAFF_ROLE_DEFAULTS.map((r) => [r.code, r.key]));
 const EQUIP_KEY_BY_CODE = new Map(EQUIPMENT_DEFAULTS.map((e) => [e.code, e.key]));
 

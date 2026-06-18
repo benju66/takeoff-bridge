@@ -312,15 +312,16 @@ export type WorkbookCommand =
   | ClearBindingCommand;
 
 // ---------------------------------------------------------------------------
-// GcGridCommand — the Step-2 (GC Personnel) grid's undo/redo payloads (B2).
+// SectionGridCommand — the Step-2 / Step-3 (GC Personnel / Site Operations) grid
+// undo/redo payloads (B2 introduced it for GC; B3 generalized it for both).
 //
-// Step 2's grid is backed by `EstimateSectionLine` rows, not `ProcessedTakeoffRow`,
-// so it carries its OWN command union rather than widening WorkbookCommand with
-// foreign-row-typed variants. Consumed by useGcPersonnelGrid via the generic
-// useCommandHistory<GcGridCommand>. Each command holds FULL inverse data
-// (AGENTS.md compounding-history): the GC engine is PURE from inputs, so a single
-// prev/next input value is full-fidelity — every derived qty/total recomputes
-// from it, no cascade snapshot needed.
+// The section grids are backed by `EstimateSectionLine` rows, not
+// `ProcessedTakeoffRow`, so they carry their OWN command union rather than widening
+// WorkbookCommand with foreign-row-typed variants. Consumed by the shared
+// `useSectionLineGrid` core via the generic useCommandHistory<SectionGridCommand>.
+// Each command holds FULL inverse data (AGENTS.md compounding-history): both engines
+// are PURE from inputs, so a single prev/next input value is full-fidelity — every
+// derived qty/total recomputes from it, no cascade snapshot needed.
 //
 // NOTE: the per-line type-over (D3 / Phase A+1) is deliberately NOT a command — it
 // is an append-only `estimate_overrides` audit action with its own set/revert
@@ -328,23 +329,24 @@ export type WorkbookCommand =
 // ---------------------------------------------------------------------------
 
 /**
- * A single Step-2 input edit: a utilization %, a staff rate override, an
- * equipment lump sum, or a manual GC entry. `target` selects which
- * usePersonnelCalculations setter the dispatcher drives; `key` is the catalog
- * config key (role/equipment/manual key) the setter expects. A `prevValue` of
- * `undefined` for a `rate` edit means "no override existed" → undo calls
- * `resetRate` (clears the override) rather than setting a number.
+ * A single section-grid input edit. For GC (Step 2): a utilization %, a staff rate
+ * override, an equipment lump sum, or a manual entry. For Site-Ops (Step 3): a typed
+ * quantity or a typed rate. `target` selects which calc-hook setter the section's
+ * `applyEdit` dispatcher drives (it is section-defined, so the type is an open
+ * `string`); `key` is the catalog config key (role/equipment/manual/line key) the
+ * setter expects. A `prevValue` of `undefined` for a GC `rate` edit means "no override
+ * existed" → undo calls `resetRate` (clears the override) rather than setting a number.
  */
 export interface EditSectionCellCommand {
   type: "EDIT_SECTION_CELL";
   lineId: string;
-  target: "utilization" | "rate" | "equipment" | "manual";
+  target: string;
   key: string;
   prevValue: number | undefined;
   nextValue: number | undefined;
 }
 
-/** Toggle a Step-2 cell lock (in-session only for B2 — not persisted). */
+/** Toggle a section-grid cell lock (in-session only for B2/B3 — not persisted). */
 export interface ToggleSectionCellLockCommand {
   type: "TOGGLE_SECTION_CELL_LOCK";
   cellKey: string;
@@ -352,7 +354,7 @@ export interface ToggleSectionCellLockCommand {
   nextLocked: boolean;
 }
 
-export type GcGridCommand =
+export type SectionGridCommand =
   | EditSectionCellCommand
   | ToggleSectionCellLockCommand;
 

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computeSiteOperations, SiteOpsCalcResult, RateLookup } from "@/lib/calculations";
+import { computeSiteOperations, DEFAULT_SITE_OPS_LINES, SiteOpsCalcResult, RateLookup } from "@/lib/calculations";
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { SITE_OPS_MANUAL_DEFAULTS } from "@/lib/constants";
 import { synthesizeSiteOpsSectionLines } from "@/lib/sectionLines/synthesize";
 import { computeSiteOpsFromSectionLines } from "@/lib/sectionLines/project";
 import type { EstimateSectionLine } from "@/types/db";
+import type { EstimateOverrideMap } from "@/types";
 
 // ---------------------------------------------------------------------------
 // useInfrastructureCalculations — Step 3 Site Operations state & calculations
@@ -83,7 +84,17 @@ export function useInfrastructureCalculations(
   initialRates?: Record<string, number>,
   /** Frozen per-project rate snapshot (Phase B). Layered over the company card:
    *  rate = projectSnapshot ?? companyCard ?? constants (qty/dynamic lines). */
-  rateCardSnapshot?: Record<string, number>
+  rateCardSnapshot?: Record<string, number>,
+  /**
+   * Audited per-line type-overs (gc-siteops Phase A+1 / D3), the active
+   * `estimate_overrides` map keyed by `field`. Forwarded straight to
+   * `computeSiteOperations` as `lineOverrides`; only the `line:<id>:total` keys for
+   * the Site-Ops lines this engine produces are consumed (recognized-keys guard),
+   * every other key ignored. Defaults to `{}` → fully INERT (byte-identical result,
+   * goldens tie $0.00). The Step-3 grid (B3) records these via the type-over gesture;
+   * the page passes the resolved active map in.
+   */
+  lineOverrides: EstimateOverrideMap = {}
 ): UseInfrastructureCalculationsReturn {
   const [quantities, setQuantities] = useState<Record<string, number>>(() => quantitiesFromSnapshot(initialQuantities));
   const [rates, setRates] = useState<Record<string, number>>(() => ratesFromSnapshot(initialRates));
@@ -129,17 +140,22 @@ export function useInfrastructureCalculations(
   const quantitiesString = JSON.stringify(quantities);
   const ratesString = JSON.stringify(rates);
   const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+  // A+1 (D3): a stable key over the active line type-overs so the calc memo +
+  // dual-read tripwire recompute when an override is set/reverted. `{}` → inert.
+  const lineOverridesString = JSON.stringify(lineOverrides);
 
   // Layered company-default lookup (Phase B): frozen project snapshot wins over
   // the live company card; both fall through to the calc's constants fallback.
   const rateLookup: RateLookup = (code, fallback) =>
     rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
-  // Compute via pure calculation layer
+  // Compute via pure calculation layer. `DEFAULT_SITE_OPS_LINES` is the explicit
+  // default 6th arg so `lineOverrides` (7th) can be threaded; with no overrides the
+  // result is byte-identical (the A+1 layer is a pure passthrough on `{}`).
   const calcResult = useMemo(
-    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates, rateLookup),
+    () => computeSiteOperations(durationMonths, squareFootage, quantities, rates, rateLookup, DEFAULT_SITE_OPS_LINES, lineOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, quantitiesString, ratesString, rateCardSnapshotString]
+    [durationMonths, squareFootage, quantitiesString, ratesString, rateCardSnapshotString, lineOverridesString]
   );
 
   // Serializable persistence snapshots: legacy lines keep their original
@@ -176,6 +192,7 @@ export function useInfrastructureCalculations(
       durationMonths,
       squareFootage,
       rateLookup,
+      lineOverrides,
     });
     if (JSON.stringify(viaLines) !== JSON.stringify(calcResult)) {
       console.error(
@@ -184,7 +201,7 @@ export function useInfrastructureCalculations(
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString]);
+  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString, lineOverridesString]);
 
   return {
     quantities,

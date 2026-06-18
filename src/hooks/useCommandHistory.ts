@@ -11,9 +11,9 @@ import { WorkbookCommand } from "@/types";
 // (canUndo/canRedo) stay in sync without relying on undocumented React
 // state-updater timing.
 //
-// Generic over the command payload type (B2): Step 4 uses the default
-// `WorkbookCommand`; Step 2's grid (useGcPersonnelGrid) instantiates it with
-// its own leaner `GcGridCommand` union. The default keeps every existing
+// Generic over the command payload type (B2/B3): Step 4 uses the default
+// `WorkbookCommand`; the Step 2/3 section grids (useSectionLineGrid) instantiate it
+// with their own leaner `SectionGridCommand` union. The default keeps every existing
 // caller byte-identical — `useCommandHistory()` resolves exactly as before.
 // ---------------------------------------------------------------------------
 
