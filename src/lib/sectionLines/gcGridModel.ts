@@ -26,8 +26,12 @@ import type { PersonnelCalcResult } from "@/lib/calculations";
 import type { EstimateSectionLine } from "@/types/db";
 import type { GcSubtotalGroup } from "@/lib/bindings/types";
 import { ENTRY_KIND, isManualEntryKind } from "./entryKinds";
+import { isOneOffLine, oneOffUnit } from "./oneOff";
 
-export type GcGroupKey = "01.A" | "01.B" | "01.C" | "01.D" | "01.E" | "01.F";
+export type GcGroupKey = "01.A" | "01.B" | "01.C" | "01.D" | "01.E" | "01.F" | "01.G";
+
+/** The section divider key for estimator-authored one-off GC lines (B5 / D1). */
+export const GC_ONE_OFF_GROUP: GcGroupKey = "01.G";
 
 export const GC_GROUP_LABELS: Record<GcGroupKey, string> = {
   "01.A": "01.A — Staff Labour Directs",
@@ -36,6 +40,7 @@ export const GC_GROUP_LABELS: Record<GcGroupKey, string> = {
   "01.D": "01.D — Design & Preconstruction",
   "01.E": "01.E — General Conditions — Monthly (Auto)",
   "01.F": "01.F — General Conditions — Manual Entries",
+  "01.G": "01.G — One-off Lines",
 };
 
 export interface GcRowMeta {
@@ -77,11 +82,17 @@ export interface SectionCatalogEntry {
   groupLabel: string;
 }
 
-/** Stable section-divider grouping for the grid (module-level → referentially stable). */
+/** Stable section-divider grouping for the grid (module-level → referentially stable).
+ *  One-off lines (B5 / D1) are not in the catalog ROW_META, so they fall into their own
+ *  01.G — One-off Lines divider. */
 export const gcGroupKey = (row: EstimateSectionLine): string =>
-  GC_ROW_META.get(row.code)?.group ?? "";
+  isOneOffLine(row) ? GC_ONE_OFF_GROUP : (GC_ROW_META.get(row.code)?.group ?? "");
 export const gcGroupLabel = (key: string): string =>
   GC_GROUP_LABELS[key as GcGroupKey] ?? key;
+
+/** The unit shown for a GC line: the catalog ROW_META unit, or a one-off's stored unit (B5). */
+export const gcRowUnit = (line: EstimateSectionLine): string =>
+  GC_ROW_META.get(line.code)?.unit ?? oneOffUnit(line);
 
 /**
  * The full GC (Step 2) catalog as picker entries, in display order — the universe a

@@ -5,11 +5,13 @@ import { Activity, RotateCcw, RotateCw, Lock, Unlock, Trash2 } from "lucide-reac
 import type { Column } from "@tanstack/react-table";
 import { GridShell } from "./GridShell";
 import { AddLinePicker } from "./AddLinePicker";
+import { AddOneOffLineForm } from "./AddOneOffLineForm";
 import { EngineLinkBadge } from "./EngineLinkBadge";
 import { useGcPersonnelGrid } from "@/hooks/useGcPersonnelGrid";
 import type { UsePersonnelCalculationsReturn } from "@/hooks/usePersonnelCalculations";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import type { EstimateSectionLine } from "@/types/db";
+import { isOneOffLine } from "@/lib/sectionLines/oneOff";
 import { GC_GRAND_TOTAL_NODE_ID } from "@/lib/bindings/types";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +66,8 @@ export function GcPersonnelGridStep({
     removedLines,
     removeLine,
     restoreLine,
+    addOneOff,
+    removeOneOff,
     isQtyOverridden,
     beginQtyOverride,
     revertQtyOverride,
@@ -142,6 +146,7 @@ export function GcPersonnelGridStep({
             Active Schedule Duration: {durationMonths} Months | {squareFootage.toLocaleString()} SF
           </span>
           <AddLinePicker removedLines={removedLines} onAdd={restoreLine} />
+          <AddOneOffLineForm section="gc" onAdd={addOneOff} />
           <button
             onClick={handleUndo}
             disabled={!canUndo}
@@ -244,14 +249,25 @@ export function GcPersonnelGridStep({
             {ctxLocked ? <Unlock size={14} className="text-slate-500" /> : <Lock size={14} className="text-slate-500" />}
             {ctxLocked ? "Unlock cell" : "Lock cell"}
           </button>
-          {/* Remove this catalog line (B4 / D2) — re-add it anytime from "+ Add line". */}
-          <button
-            type="button"
-            onClick={() => { removeLine(ctxLine); dismissCtx(); }}
-            className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-red-600 dark:text-red-400 text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
-          >
-            <Trash2 size={14} /> Remove line
-          </button>
+          {/* Remove a line: a one-off (B5 / D1) is removed outright; a catalog line (B4 / D2)
+              is removed but re-addable from "+ Add line". */}
+          {isOneOffLine(ctxLine) ? (
+            <button
+              type="button"
+              onClick={() => { removeOneOff(ctxLine); dismissCtx(); }}
+              className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-red-600 dark:text-red-400 text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+            >
+              <Trash2 size={14} /> Remove one-off line
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { removeLine(ctxLine); dismissCtx(); }}
+              className="w-full flex items-center gap-2 px-4 py-2.5 font-bold text-red-600 dark:text-red-400 text-left hover:bg-background/80 dark:hover:bg-slate-800/60 transition-colors cursor-pointer"
+            >
+              <Trash2 size={14} /> Remove line
+            </button>
+          )}
         </div>
       )}
     </div>

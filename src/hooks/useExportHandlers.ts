@@ -88,9 +88,24 @@ export function useExportHandlers(
       clearExportBlockers();
       return true;
     }
-    if (readiness.blockers.length > 0) {
+    // Phase B5 (D1): one-off GC/Site-Ops lines without a valid Procore code can't be fixed by
+    // the takeoff-row override modal — they're coded on Step 2/3. Surface a clear, line-named
+    // message and prioritize them (the user fixes these first), so we never open the modal on
+    // a blocker it can't resolve.
+    const oneOffBlockers = readiness.blockers.filter((b) => b.kind === "oneOff");
+    const takeoffBlockers = readiness.blockers.filter((b) => b.kind !== "oneOff");
+    if (oneOffBlockers.length > 0) {
+      const detail = oneOffBlockers
+        .map((b) => `"${b.description}" ($${b.amount.toFixed(2)})`)
+        .join(", ");
+      setExportError(
+        `Export blocked: ${oneOffBlockers.length} one-off line${oneOffBlockers.length === 1 ? "" : "s"} ` +
+          `need${oneOffBlockers.length === 1 ? "s" : ""} a valid Procore code before export — ` +
+          `assign it in the line's Code cell on Step 2/3: ${detail}.`
+      );
+    } else if (takeoffBlockers.length > 0) {
       setPendingExportKind(kind);
-      setExportBlockers(readiness.blockers);
+      setExportBlockers(takeoffBlockers);
     } else {
       const { lineItemTotal, rollupTotal, delta } = readiness.reconciliation;
       setExportError(

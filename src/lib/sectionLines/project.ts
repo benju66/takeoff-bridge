@@ -38,6 +38,13 @@ import {
 import type { EstimateSectionLine } from "@/types/db";
 import type { EstimateOverrideMap } from "@/types";
 import { ENTRY_KIND, isManualEntryKind } from "./entryKinds";
+import {
+  isOneOffLine,
+  oneOffToGcManualConfig,
+  oneOffToSiteOpsManualConfig,
+  oneOffValueInjection,
+} from "./oneOff";
+import type { GcManualConfig, SiteOpsManualConfig } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Catalog lookups (code → config) and the full catalog code sets
@@ -100,6 +107,30 @@ export function deriveRemovedCodesFromLines(
   };
 }
 
+/**
+ * Reconstructs a project's ONE-OFF lines (Phase B5 / D1) from its persisted
+ * `estimate_section_lines` — the `source: 'manual'` lines that are NOT catalog seed
+ * (mirrors `deriveRemovedCodesFromLines`: the non-catalog present codes ARE the
+ * one-offs). The page passes these as `initialOneOffLines` to the calc hooks so a
+ * one-off survives reload. Split by section.
+ *
+ * APP-BORN ONLY (D4): the caller must not apply this to imported projects — their
+ * persisted lines are the frozen `imported_step23_lines` (synthesized on a separate
+ * read-only path), never live one-offs.
+ */
+export function deriveOneOffsFromLines(
+  loadedLines: readonly EstimateSectionLine[]
+): { gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] } {
+  const gc: EstimateSectionLine[] = [];
+  const siteOps: EstimateSectionLine[] = [];
+  for (const line of loadedLines) {
+    if (!isOneOffLine(line)) continue;
+    if (line.section === "gc") gc.push(line);
+    else if (line.section === "site_ops") siteOps.push(line);
+  }
+  return { gc, siteOps };
+}
+
 /** The project-level (non-line) calc inputs the engine still needs. */
 export interface SectionCalcContext {
   durationMonths: number;
@@ -133,6 +164,7 @@ export function computePersonnelFromSectionLines(
   const rateOverrides: Record<string, number> = {};
   const equipment = { dumpsters: 0, toilets: 0, electric: 0 };
   const manualEntries: Record<string, number> = {};
+  const oneOffConfigs: GcManualConfig[] = [];
   const presentCodes = new Set<string>();
 
   for (const line of sectionLines) {
@@ -151,14 +183,22 @@ export function computePersonnelFromSectionLines(
       equipment[eq.key] = num(line.inputs.amount);
     } else if (isManualEntryKind(line.entryKind)) {
       const cfg = GC_MANUAL_BY_CODE.get(line.code);
-      if (cfg) manualEntries[cfg.key] = num(line.inputs.value);
-      // else: a non-catalog one-off (B5) — deferred.
+      if (cfg) {
+        manualEntries[cfg.key] = num(line.inputs.value);
+      } else if (isOneOffLine(line)) {
+        // A non-catalog one-off (B5 / D1): rebuild its manual config + inject its typed value
+        // keyed by `line.id` (the engine's manual-config key), then append via `addManual`. The
+        // hook builds these IDENTICALLY, so the dual-read tripwire stays green.
+        oneOffConfigs.push(oneOffToGcManualConfig(line));
+        const inj = oneOffValueInjection(line);
+        manualEntries[inj.key] = inj.value;
+      }
     }
     // operationalExpense: no per-line estimator input.
   }
 
   const removeCodes = [...GC_CATALOG_CODES].filter((c) => !presentCodes.has(c));
-  const lines = buildPersonnelLineSet({ removeCodes });
+  const lines = buildPersonnelLineSet({ removeCodes, addManual: oneOffConfigs });
 
   return computePersonnelCosts(
     ctx.durationMonths,
@@ -188,6 +228,7 @@ export function computeSiteOpsFromSectionLines(
 ): SiteOpsCalcResult {
   const quantities: Record<string, number> = {};
   const rates: Record<string, number> = {};
+  const oneOffConfigs: SiteOpsManualConfig[] = [];
   const presentCodes = new Set<string>();
 
   for (const line of sectionLines) {
@@ -198,15 +239,23 @@ export function computeSiteOpsFromSectionLines(
     if (!isManualEntryKind(line.entryKind)) continue;
 
     const cfg = SITEOPS_MANUAL_BY_CODE.get(line.code);
-    if (!cfg) continue; // a non-catalog one-off (B5) — deferred.
-    quantities[cfg.key] = num(line.inputs.value);
-    if (cfg.entry === "qtyRate" && typeof line.inputs.rate === "number") {
-      rates[cfg.key] = line.inputs.rate;
+    if (cfg) {
+      quantities[cfg.key] = num(line.inputs.value);
+      if (cfg.entry === "qtyRate" && typeof line.inputs.rate === "number") {
+        rates[cfg.key] = line.inputs.rate;
+      }
+    } else if (isOneOffLine(line)) {
+      // A non-catalog one-off (B5 / D1): rebuild its config + inject its typed value keyed by
+      // `line.id`, then append via `addManual`. A qty one-off's rate rides config.rate (not the
+      // `rates` map). Mirrors the hook exactly → dual-read tripwire stays green.
+      oneOffConfigs.push(oneOffToSiteOpsManualConfig(line));
+      const inj = oneOffValueInjection(line);
+      quantities[inj.key] = inj.value;
     }
   }
 
   const removeCodes = [...SITEOPS_CATALOG_CODES].filter((c) => !presentCodes.has(c));
-  const lines = buildSiteOpsLineSet({ removeCodes });
+  const lines = buildSiteOpsLineSet({ removeCodes, addManual: oneOffConfigs });
 
   return computeSiteOperations(
     ctx.durationMonths,

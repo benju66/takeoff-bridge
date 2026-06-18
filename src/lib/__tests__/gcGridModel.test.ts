@@ -50,7 +50,8 @@ describe("GC_ROW_META — section grouping (01.A–01.F)", () => {
     const sorted = [...GC_ROW_META.values()].sort((a, b) => a.order - b.order);
     expect(sorted.map((m) => m.order)).toEqual(sorted.map((_, i) => i));
     // Group keys, read in display order, never go backwards (all 01.A before 01.B, …).
-    const rank: Record<GcGroupKey, number> = { "01.A": 0, "01.B": 1, "01.C": 2, "01.D": 3, "01.E": 4, "01.F": 5 };
+    // "01.G" is the one-off divider (B5) — not used by any catalog ROW_META row, but part of GcGroupKey.
+    const rank: Record<GcGroupKey, number> = { "01.A": 0, "01.B": 1, "01.C": 2, "01.D": 3, "01.E": 4, "01.F": 5, "01.G": 6 };
     const ranks = sorted.map((m) => rank[m.group]);
     for (let i = 1; i < ranks.length; i++) expect(ranks[i]).toBeGreaterThanOrEqual(ranks[i - 1]);
   });

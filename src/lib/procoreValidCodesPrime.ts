@@ -20,7 +20,9 @@ import { primeProcoreValidCodes } from "@/lib/procoreValidCodes";
 export function primeProcoreValidCodesFromList(codes: ProcoreCostCode[]): void {
   const active = codes
     .filter((c) => c.status === "active")
-    .map((c) => ({ code: c.code, description: c.description }));
+    // Carry the Procore type through (Phase B5 / D1): the one-off assign flow stamps an
+    // assigned one-off's cost type from it. Harmless for every other consumer.
+    .map((c) => ({ code: c.code, description: c.description, type: c.type }));
   if (active.length > 0) primeProcoreValidCodes(active);
 }
 

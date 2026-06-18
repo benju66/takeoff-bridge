@@ -124,6 +124,10 @@ export interface SectionColumnContext {
   /** Live ref to project square footage — the Cost/S.F. column divides each line total
    *  by `.current` (read at render → fresh without recomputing the columns memo). */
   squareFootageRef: React.MutableRefObject<number>;
+  /** Assign / re-assign a one-off line's resolved Procore code + cost type (B5 / D1). The
+   *  Code column's `OneOffCodeCell` calls this for an estimator-authored one-off row; it
+   *  pushes the undoable ASSIGN_ONE_OFF_CODE command (prev captured from the line). */
+  assignOneOff: (line: EstimateSectionLine, procoreCode: string, costType: string) => void;
 }
 
 /** How a step specializes the shared grid core. */
@@ -159,6 +163,12 @@ export interface SectionGridSpec {
   applyRemove: (code: string) => void;
   /** Re-adds a removed catalog line by `code` (drives the calc hook's `restoreLine`). */
   applyRestore: (code: string) => void;
+  /** Appends a one-off line (B5 / D1) — drives the calc hook's `addOneOff`. */
+  applyAddOneOff: (line: EstimateSectionLine) => void;
+  /** Removes a one-off line (B5 / D1) — drives the calc hook's `removeOneOff(line.id)`. */
+  applyRemoveOneOff: (line: EstimateSectionLine) => void;
+  /** Assigns a one-off's resolved Procore code + cost type (B5 / D1) — drives `assignOneOffCode`. */
+  applyAssignOneOffCode: (id: string, procoreCode: string, costType: string) => void;
 }
 
 export interface UseSectionLineGridReturn {
@@ -188,6 +198,13 @@ export interface UseSectionLineGridReturn {
   removeLine: (line: EstimateSectionLine) => void;
   /** Re-add a removed catalog line by `code` (B4 / D2) — undoable (ADD_SECTION_LINE command). */
   restoreLine: (code: string) => void;
+  /** Append a new one-off line (B5 / D1) — undoable (ADD_ONE_OFF_LINE command). */
+  addOneOff: (line: EstimateSectionLine) => void;
+  /** Remove a one-off line (B5 / D1) — undoable (REMOVE_ONE_OFF_LINE command). */
+  removeOneOff: (line: EstimateSectionLine) => void;
+  /** Assign / re-assign a one-off's resolved Procore code + cost type (B5 / D1) — undoable
+   *  (ASSIGN_ONE_OFF_CODE command; prev values captured from `line`). */
+  assignOneOffCode: (line: EstimateSectionLine, procoreCode: string, costType: string) => void;
   /** True when this line's derived Quantity currently carries an audited override. */
   isQtyOverridden: (rowId: string) => boolean;
   /** Begin a Quantity override (the "Override quantity" gesture) — unlocks the cell for edit. */
@@ -216,6 +233,12 @@ export function useSectionLineGrid(
   applyRemoveRef.current = spec.applyRemove;
   const applyRestoreRef = useRef(spec.applyRestore);
   applyRestoreRef.current = spec.applyRestore;
+  const applyAddOneOffRef = useRef(spec.applyAddOneOff);
+  applyAddOneOffRef.current = spec.applyAddOneOff;
+  const applyRemoveOneOffRef = useRef(spec.applyRemoveOneOff);
+  applyRemoveOneOffRef.current = spec.applyRemoveOneOff;
+  const applyAssignOneOffCodeRef = useRef(spec.applyAssignOneOffCode);
+  applyAssignOneOffCodeRef.current = spec.applyAssignOneOffCode;
   const editableColumnIdsRef = useRef(spec.editableColumnIds);
   editableColumnIdsRef.current = spec.editableColumnIds;
   const squareFootageRef = useRef(spec.squareFootage);
@@ -281,6 +304,40 @@ export function useSectionLineGrid(
     (code: string) => {
       history.pushCommand({ type: "ADD_SECTION_LINE", code });
       applyRestoreRef.current(code);
+    },
+    [history]
+  );
+
+  // One-off lines (B5 / D1). Push the command BEFORE driving the section dispatcher
+  // (guardrail); each command snapshots full inverse data (AGENTS.md compounding-history):
+  // ADD/REMOVE carry the whole line (id = code = engine key + typed inputs + assigned code),
+  // ASSIGN carries prev/next code+type.
+  const addOneOff = useCallback(
+    (line: EstimateSectionLine) => {
+      history.pushCommand({ type: "ADD_ONE_OFF_LINE", line });
+      applyAddOneOffRef.current(line);
+    },
+    [history]
+  );
+  const removeOneOff = useCallback(
+    (line: EstimateSectionLine) => {
+      history.pushCommand({ type: "REMOVE_ONE_OFF_LINE", line });
+      applyRemoveOneOffRef.current(line);
+    },
+    [history]
+  );
+  const assignOneOffCode = useCallback(
+    (line: EstimateSectionLine, procoreCode: string, costType: string) => {
+      if (line.procoreCode === procoreCode && line.costType === costType) return; // no-op re-assign
+      history.pushCommand({
+        type: "ASSIGN_ONE_OFF_CODE",
+        id: line.id,
+        prevProcoreCode: line.procoreCode,
+        prevCostType: line.costType,
+        nextProcoreCode: procoreCode,
+        nextCostType: costType,
+      });
+      applyAssignOneOffCodeRef.current(line.id, procoreCode, costType);
     },
     [history]
   );
@@ -545,8 +602,8 @@ export function useSectionLineGrid(
 
   const buildColumns = spec.buildColumns;
   const columns = useMemo(
-    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef }),
-    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, canOverride]
+    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, assignOneOff: assignOneOffCode }),
+    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, canOverride, assignOneOffCode]
   );
 
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -604,6 +661,9 @@ export function useSectionLineGrid(
     else if (cmd.type === "TOGGLE_SECTION_CELL_LOCK") setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.prevLocked }));
     else if (cmd.type === "REMOVE_SECTION_LINE") applyRestoreRef.current(cmd.code); // undo a removal = re-add
     else if (cmd.type === "ADD_SECTION_LINE") applyRemoveRef.current(cmd.code); // undo a re-add = remove
+    else if (cmd.type === "ADD_ONE_OFF_LINE") applyRemoveOneOffRef.current(cmd.line); // undo add = remove
+    else if (cmd.type === "REMOVE_ONE_OFF_LINE") applyAddOneOffRef.current(cmd.line); // undo remove = re-add
+    else if (cmd.type === "ASSIGN_ONE_OFF_CODE") applyAssignOneOffCodeRef.current(cmd.id, cmd.prevProcoreCode, cmd.prevCostType);
   }, [history]);
 
   const handleRedo = useCallback(() => {
@@ -613,6 +673,9 @@ export function useSectionLineGrid(
     else if (cmd.type === "TOGGLE_SECTION_CELL_LOCK") setLockedCells((prev) => ({ ...prev, [cmd.cellKey]: cmd.nextLocked }));
     else if (cmd.type === "REMOVE_SECTION_LINE") applyRemoveRef.current(cmd.code);
     else if (cmd.type === "ADD_SECTION_LINE") applyRestoreRef.current(cmd.code);
+    else if (cmd.type === "ADD_ONE_OFF_LINE") applyAddOneOffRef.current(cmd.line);
+    else if (cmd.type === "REMOVE_ONE_OFF_LINE") applyRemoveOneOffRef.current(cmd.line);
+    else if (cmd.type === "ASSIGN_ONE_OFF_CODE") applyAssignOneOffCodeRef.current(cmd.id, cmd.nextProcoreCode, cmd.nextCostType);
   }, [history]);
 
   // ---------------------------------------------------------------------------
@@ -690,6 +753,9 @@ export function useSectionLineGrid(
     removedLines,
     removeLine,
     restoreLine,
+    addOneOff,
+    removeOneOff,
+    assignOneOffCode,
     isQtyOverridden,
     beginQtyOverride,
     revertQtyOverride,

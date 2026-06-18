@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createColumnHelper } from "@tanstack/react-table";
 import { EngineLinkBadge } from "@/components/workspace/EngineLinkBadge";
+import { OneOffCodeCell } from "@/components/workspace/OneOffCodeCell";
 import { ColumnDefinition } from "@/types";
 import type { EstimateSectionLine } from "@/types/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
+import { isOneOffLine } from "@/lib/sectionLines/oneOff";
 import type { UseInfrastructureCalculationsReturn } from "./useInfrastructureCalculations";
 import {
   useSectionLineGrid,
@@ -28,6 +30,7 @@ import {
   siteOpsGroupKey,
   siteOpsGroupLabel,
   siteOpsIsDerivedQtyLine,
+  siteOpsRowUnit,
 } from "@/lib/sectionLines/siteOpsGridModel";
 
 // ---------------------------------------------------------------------------
@@ -76,13 +79,24 @@ function describeLine(line: EstimateSectionLine): string {
 function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
   const {
     renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride,
-    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef,
+    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, assignOneOff,
   } = ctx;
 
   return [
     columnHelper.accessor((l) => l.code, {
       id: "code", header: "Code", size: 110, filterFn: multiSelect,
-      cell: (info) => renderDisplayCell(info, info.row.original.code, "center", "text-blue-600 dark:text-blue-400 font-semibold font-mono"),
+      cell: (info) => {
+        const line = info.row.original;
+        // One-off lines (B5 / D1): the Code cell is the assign-and-place affordance.
+        if (isOneOffLine(line)) {
+          return renderDisplayCell(
+            info,
+            <OneOffCodeCell line={line} onAssign={(code, costType) => assignOneOff(line, code, costType)} />,
+            "center"
+          );
+        }
+        return renderDisplayCell(info, line.code, "center", "text-blue-600 dark:text-blue-400 font-semibold font-mono");
+      },
     }),
     columnHelper.accessor((l) => l.label, {
       id: "description", header: "Description", size: 320, filterFn: multiSelect,
@@ -105,6 +119,17 @@ function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
         if (siteOpsIsDerivedQtyLine(line)) return renderDerivedQtyCell(info);
+        // One-off (B5): qty/qtyRate → editable quantity (setOneOffValue); lump-sum → 1 (display).
+        if (isOneOffLine(line)) {
+          if (line.entryKind === ENTRY_KIND.LumpSum) {
+            return renderDisplayCell(info, fmtQty(calc?.qty ?? 0), "center", "text-slate-600 dark:text-slate-400 font-mono");
+          }
+          const val = entryValue(line);
+          return renderNumberCell(info, {
+            colId: "quantity", value: val, display: fmtQty(val), editable: true,
+            onCommit: (n) => commitInputEdit(line.id, "oneOffValue", line.id, val, Math.max(0, n)),
+          });
+        }
         if (line.entryKind === ENTRY_KIND.Qty || line.entryKind === ENTRY_KIND.QtyRate) {
           // typed quantity — the estimator's direct input
           const val = entryValue(line);
@@ -121,9 +146,9 @@ function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
         return renderDisplayCell(info, fmtQty(calc?.qty ?? 0), "center", "text-slate-600 dark:text-slate-400 font-mono");
       },
     }),
-    columnHelper.accessor((l) => SITEOPS_ROW_META.get(l.code)?.unit ?? "", {
+    columnHelper.accessor((l) => siteOpsRowUnit(l), {
       id: "unit", header: "Unit", size: 64, filterFn: multiSelect,
-      cell: (info) => renderDisplayCell(info, SITEOPS_ROW_META.get(info.row.original.code)?.unit ?? "", "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
+      cell: (info) => renderDisplayCell(info, siteOpsRowUnit(info.row.original), "center", "text-slate-600 dark:text-slate-400 uppercase text-[10px] font-bold font-mono"),
     }),
     // Rate — editable for qtyRate (typed rate) + lump-sum (the amount); card rate read-only otherwise.
     columnHelper.accessor((l) => calcLookupRef.current.get(l.code)?.rate ?? 0, {
@@ -131,6 +156,21 @@ function buildSiteOpsColumns(ctx: SectionColumnContext): SectionColumnDefs {
       cell: (info) => {
         const line = info.row.original;
         const calc = calcLookupRef.current.get(line.code);
+        // One-off (B5): qty/qtyRate → editable $/unit rate (setOneOffRate); lump-sum → the
+        // editable lump amount lives in Rate (setOneOffValue), like the catalog lump lines.
+        if (isOneOffLine(line)) {
+          if (line.entryKind === ENTRY_KIND.LumpSum) {
+            const val = entryValue(line);
+            return renderNumberCell(info, {
+              colId: "rate", value: val, display: fmtUSD(val), editable: true,
+              onCommit: (n) => commitInputEdit(line.id, "oneOffValue", line.id, val, Math.max(0, n)),
+            });
+          }
+          return renderNumberCell(info, {
+            colId: "rate", value: num(line.inputs.rate), display: fmtUSD(calc?.rate ?? 0), editable: true,
+            onCommit: (n) => commitInputEdit(line.id, "oneOffRate", line.id, num(line.inputs.rate), Math.max(0, n)),
+          });
+        }
         if (line.entryKind === ENTRY_KIND.QtyRate) {
           const rateKey = resolveRateKey(line);
           return renderNumberCell(info, {
@@ -227,12 +267,19 @@ export function useSiteOpsGrid(
     switch (target) {
       case "quantity": inf.handleLineQuantityChange(key, String(value ?? 0)); break;
       case "rate": inf.handleLineRateChange(key, String(value ?? 0)); break;
+      // B5 (D1): one-off value / rate edits (key = the one-off line id).
+      case "oneOffValue": inf.setOneOffValue(key, value ?? 0); break;
+      case "oneOffRate": inf.setOneOffRate(key, value ?? 0); break;
     }
   }, []);
 
   // B4 (D2): remove / re-add a catalog line — drives the calc hook's removed-codes set.
   const applyRemove = useCallback((code: string) => infraRef.current.removeLine(code), []);
   const applyRestore = useCallback((code: string) => infraRef.current.restoreLine(code), []);
+  // B5 (D1): one-off line appliers — drive the calc hook's one-off setters.
+  const applyAddOneOff = useCallback((line: EstimateSectionLine) => infraRef.current.addOneOff(line), []);
+  const applyRemoveOneOff = useCallback((line: EstimateSectionLine) => infraRef.current.removeOneOff(line.id), []);
+  const applyAssignOneOffCode = useCallback((id: string, code: string, type: string) => infraRef.current.assignOneOffCode(id, code, type), []);
 
   return useSectionLineGrid(
     {
@@ -253,6 +300,9 @@ export function useSiteOpsGrid(
       catalog: SITEOPS_CATALOG_LINES,
       applyRemove,
       applyRestore,
+      applyAddOneOff,
+      applyRemoveOneOff,
+      applyAssignOneOffCode,
     },
     onSaveOverride
   );

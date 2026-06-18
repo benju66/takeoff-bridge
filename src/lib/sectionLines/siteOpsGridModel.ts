@@ -27,9 +27,15 @@ import type { SiteOpsCalcResult } from "@/lib/calculations";
 import type { EstimateSectionLine } from "@/types/db";
 import type { SiteOpsLineGroup } from "@/lib/bindings/types";
 import { ENTRY_KIND, isManualEntryKind } from "./entryKinds";
+import { isOneOffLine, oneOffUnit } from "./oneOff";
 import type { CalcCell, SectionCatalogEntry } from "./gcGridModel";
 
 export type SiteOpsGroupKey = SiteOpsSection;
+
+/** The section divider key + label for estimator-authored one-off Site-Ops lines (B5 / D1).
+ *  A synthetic key (NOT a SiteOpsSection) so it groups separately after the 02.A–02.H catalog. */
+export const SITEOPS_ONE_OFF_GROUP = "siteOpsOneOff";
+export const SITEOPS_ONE_OFF_GROUP_LABEL = "02.I — One-off Lines";
 
 /** Coerce a JSONB `inputs` value to a finite number (synthesis writes numbers; guards reads). */
 export const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -79,11 +85,17 @@ export const SITEOPS_MANUAL_BY_CODE = new Map(SITE_OPS_MANUAL_DEFAULTS.map((m) =
 /** SITE_OPS_DYNAMIC config by code — for the auto-line description hint (driver). */
 export const SITEOPS_DYNAMIC_BY_CODE = new Map(SITE_OPS_DYNAMIC_DEFAULTS.map((d) => [d.code, d]));
 
-/** Stable section-divider grouping for the grid (module-level → referentially stable). */
+/** Stable section-divider grouping for the grid (module-level → referentially stable).
+ *  One-off lines (B5 / D1) are not in the catalog ROW_META, so they fall into their own
+ *  02.I — One-off Lines divider. */
 export const siteOpsGroupKey = (row: EstimateSectionLine): string =>
-  SITEOPS_ROW_META.get(row.code)?.group ?? "";
+  isOneOffLine(row) ? SITEOPS_ONE_OFF_GROUP : (SITEOPS_ROW_META.get(row.code)?.group ?? "");
 export const siteOpsGroupLabel = (key: string): string =>
-  SITEOPS_GROUP_LABELS[key as SiteOpsSection] ?? key;
+  key === SITEOPS_ONE_OFF_GROUP ? SITEOPS_ONE_OFF_GROUP_LABEL : (SITEOPS_GROUP_LABELS[key as SiteOpsSection] ?? key);
+
+/** The unit shown for a Site-Ops line: the catalog ROW_META unit, or a one-off's stored unit (B5). */
+export const siteOpsRowUnit = (line: EstimateSectionLine): string =>
+  SITEOPS_ROW_META.get(line.code)?.unit ?? oneOffUnit(line);
 
 /**
  * The full Site-Ops (Step 3) catalog as picker entries (Phase B4 / D2), in display order

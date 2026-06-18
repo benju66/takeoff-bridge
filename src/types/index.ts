@@ -379,11 +379,47 @@ export interface AddSectionLineCommand {
   code: string;
 }
 
+/**
+ * Add an estimator-authored ONE-OFF line (Phase B5 / D1) — a generic manual entry NOT in the
+ * catalog, routed through the existing manual-line evaluator (no new per-line math, ID-4). The
+ * full new line is carried so undo (remove it) / redo (re-add the identical line, preserving its
+ * id = code = engine key + typed inputs) is full-fidelity (AGENTS.md compounding-history).
+ */
+export interface AddOneOffLineCommand {
+  type: "ADD_ONE_OFF_LINE";
+  line: EstimateSectionLine;
+}
+
+/** Remove a one-off line (Phase B5 / D1) — the inverse of ADD_ONE_OFF_LINE; the full line
+ *  snapshot lets undo re-add it identically (with its assigned code + typed value preserved). */
+export interface RemoveOneOffLineCommand {
+  type: "REMOVE_ONE_OFF_LINE";
+  line: EstimateSectionLine;
+}
+
+/**
+ * Assign / re-assign a one-off's resolved Procore code + cost type (Phase B5 / D1 — the
+ * validated escape hatch). Carries prev/next code+type so undo restores the prior assignment
+ * (or the uncoded state). The code is validated against the Procore authority BEFORE this
+ * command is pushed, so an invalid code never reaches the undo stack.
+ */
+export interface AssignOneOffCodeCommand {
+  type: "ASSIGN_ONE_OFF_CODE";
+  id: string;
+  prevProcoreCode: string;
+  prevCostType: string;
+  nextProcoreCode: string;
+  nextCostType: string;
+}
+
 export type SectionGridCommand =
   | EditSectionCellCommand
   | ToggleSectionCellLockCommand
   | RemoveSectionLineCommand
-  | AddSectionLineCommand;
+  | AddSectionLineCommand
+  | AddOneOffLineCommand
+  | RemoveOneOffLineCommand
+  | AssignOneOffCodeCommand;
 
 export interface GridSelectionState {
   rowId: string | null;

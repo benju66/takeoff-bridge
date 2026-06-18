@@ -5,6 +5,7 @@ import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import { resolveProcoreCode } from "./costCodeResolver";
+import { isValidProcoreCode } from "./procoreValidCodes";
 import JSZip from "jszip";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
@@ -462,6 +463,13 @@ export interface ExportBlocker {
   itemId: string;
   description: string;
   amount: number;
+  /**
+   * Which surface fixes this blocker (Phase B5 / D1). `'takeoff'` (default) = an unmapped
+   * STEP 4 takeoff row → routes to the ExportOverrideModal. `'oneOff'` = a GC/Site-Ops one-off
+   * line carrying dollars without a valid Procore code → fixed by assigning the code on
+   * Step 2/3 (the override modal cannot touch it), so the handler surfaces a clear message.
+   */
+  kind?: 'takeoff' | 'oneOff';
 }
 
 export interface ExportReadiness {
@@ -525,6 +533,26 @@ export function validateExportReadiness(
     : collectGcSiteOpsLines(gcCalcResult, siteOpsCalcResult);
   for (const line of gcSiteOpsLines) {
     lineItemTotal += line.total;
+    // Phase B5 (D1) — the validated escape hatch. A GC/Site-Ops line carrying dollars whose
+    // Procore code is NOT a valid `procore_cost_codes` entry blocks the export. Every CATALOG
+    // line's procoreCode is valid by construction (verified), so this signal uniquely catches
+    // an UNCODED/invalid ONE-OFF — it never trips on a catalog line, so a default project (no
+    // one-offs) is byte-identical and the goldens tie $0.00. Routed to the Step-2/3 assign
+    // gesture (kind 'oneOff'), NOT the takeoff-row override modal. Imported basis is exempt
+    // (its codes resolve through the seeded cost_code_map, not user-assigned).
+    if (
+      !opts?.importedLinkedBasis &&
+      Math.abs(line.total) > RECONCILIATION_TOLERANCE &&
+      !isValidProcoreCode((line.procoreCode || "").trim())
+    ) {
+      blockers.push({
+        rowId: line.code,
+        itemId: line.procoreCode || "",
+        description: line.desc,
+        amount: line.total,
+        kind: 'oneOff',
+      });
+    }
   }
   const rollupTotal =
     Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0) +

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Project, ProjectEstimate } from "@/types/db";
+import { Project, ProjectEstimate, EstimateSectionLine } from "@/types/db";
 import { getProject, getProjectEstimate, getSectionLines, saveProject } from "@/lib/db";
 import { getMonthsBetween } from "@/lib/calculations";
-import { deriveRemovedCodesFromLines } from "@/lib/sectionLines/project";
+import { deriveRemovedCodesFromLines, deriveOneOffsFromLines } from "@/lib/sectionLines/project";
 
 // ---------------------------------------------------------------------------
 // useProjectWorkspace — Project metadata loading, saving, and param changes
@@ -25,14 +25,23 @@ export interface UseProjectWorkspaceReturn {
    * state) so the hooks' one-time apply fires exactly once.
    */
   persistedRemovedCodes: { gc: string[]; siteOps: string[] };
+  /**
+   * GC/Site-Ops Addressability Phase B5 (D1): the persisted ONE-OFF lines on this project,
+   * reconstructed from the `source: 'manual'` `estimate_section_lines` at load. The page
+   * threads these into the calc hooks as `initialOneOffLines` — APP-BORN ONLY (empty for
+   * imported projects, D4). Referentially stable (state) so the hooks' one-time apply fires once.
+   */
+  persistedOneOffLines: { gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] };
 }
 
 const NO_REMOVED_CODES: { gc: string[]; siteOps: string[] } = { gc: [], siteOps: [] };
+const NO_ONE_OFFS: { gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] } = { gc: [], siteOps: [] };
 
 export function useProjectWorkspace(projectId: string): UseProjectWorkspaceReturn {
   const [project, setProject] = useState<Project | null>(null);
   const [projectEstimate, setProjectEstimate] = useState<Omit<ProjectEstimate, "items"> | null>(null);
   const [persistedRemovedCodes, setPersistedRemovedCodes] = useState<{ gc: string[]; siteOps: string[] }>(NO_REMOVED_CODES);
+  const [persistedOneOffLines, setPersistedOneOffLines] = useState<{ gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] }>(NO_ONE_OFFS);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +55,7 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
       setIsLoaded(false);
       setProjectEstimate(null);
       setPersistedRemovedCodes(NO_REMOVED_CODES);
+      setPersistedOneOffLines(NO_ONE_OFFS);
       setError(null);
     });
 
@@ -67,6 +77,11 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
           // match the catalog, so deriving removed-codes from them is meaningless. Skip it.
           setPersistedRemovedCodes(
             meta?.isImported ? NO_REMOVED_CODES : deriveRemovedCodesFromLines(sectionLines)
+          );
+          // Phase B5 (D1): reconstruct one-off lines from the persisted `source: 'manual'`
+          // rows (app-born only — imported lines are the frozen detail, D4).
+          setPersistedOneOffLines(
+            meta?.isImported ? NO_ONE_OFFS : deriveOneOffsFromLines(sectionLines)
           );
           setIsLoaded(true);
         }
@@ -105,5 +120,6 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
     projectDurationMonths,
     handleProjectParamChange,
     persistedRemovedCodes,
+    persistedOneOffLines,
   };
 }

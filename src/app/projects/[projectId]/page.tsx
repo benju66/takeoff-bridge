@@ -89,6 +89,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     projectDurationMonths,
     handleProjectParamChange,
     persistedRemovedCodes,
+    persistedOneOffLines,
   } = useProjectWorkspace(projectId);
 
   const squareFootage: number = project ? project.squareFootage : 0;
@@ -129,6 +130,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     // imported, D4). The page guards on isImported; the workspace hook already returns
     // empties for imports, this keeps the intent explicit at the call site.
     project?.isImported ? undefined : persistedRemovedCodes.gc,
+    // Phase B5 (D1): persisted one-off GC lines (app-born only; undefined for imported, D4).
+    project?.isImported ? undefined : persistedOneOffLines.gc,
   );
 
   // Step 3: Division 02 Site Operations. `activeOverrides` threads the per-line
@@ -145,6 +148,8 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     // Phase B4 (D2): persisted removed Site-Ops catalog lines (app-born only; undefined
     // for imported, D4).
     project?.isImported ? undefined : persistedRemovedCodes.siteOps,
+    // Phase B5 (D1): persisted one-off Site-Ops lines (app-born only; undefined for imported, D4).
+    project?.isImported ? undefined : persistedOneOffLines.siteOps,
   );
 
   // GC/Site-Ops Addressability section lines (GC first, then Site Ops — sort_order

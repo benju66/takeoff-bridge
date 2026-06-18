@@ -1,4 +1,5 @@
 import procoreValidCodes from "./procore-valid-codes.json";
+import type { ProcoreCostCodeType } from "@/types/db";
 
 // ---------------------------------------------------------------------------
 // Procore valid-code oracle — the SINGLE shared view over the set of codes a
@@ -25,6 +26,14 @@ import procoreValidCodes from "./procore-valid-codes.json";
 export interface ProcoreValidCode {
   code: string;
   description: string;
+  /**
+   * Procore cost type (Labor/Material/Subcontract/Equipment), present only when the
+   * oracle was primed from the live `procore_cost_codes` master list (Phase B5 — the
+   * one-off escape hatch needs it to stamp an assigned one-off's cost type, D1). The
+   * JSON baseline has no type, so it is OPTIONAL — `getProcoreCostType` returns null
+   * for an unprimed/baseline code, and the one-off assign flow defaults sensibly.
+   */
+  type?: ProcoreCostCodeType;
 }
 
 const numericSort = (a: ProcoreValidCode, b: ProcoreValidCode) =>
@@ -48,6 +57,10 @@ const descByCode = new Map<string, string>(
   JSON_BASELINE.map((v) => [v.code, v.description]),
 );
 
+/** Internal mutable backing for the code → Procore type lookup. Empty under the JSON
+ *  baseline (no type), populated by primeProcoreValidCodes when given typed rows. */
+const typeByCode = new Map<string, ProcoreCostCodeType>();
+
 /** code → Procore description lookup (mutated in place by primeProcoreValidCodes). */
 export const PROCORE_CODE_DESCRIPTIONS: ReadonlyMap<string, string> = descByCode;
 
@@ -55,6 +68,15 @@ export const PROCORE_CODE_DESCRIPTIONS: ReadonlyMap<string, string> = descByCode
  *  or — before the prime runs / if it failed — on the JSON baseline. */
 export function isValidProcoreCode(code: string): boolean {
   return descByCode.has(code);
+}
+
+/**
+ * The Procore cost type for a code, or null when unknown (the JSON baseline carries no
+ * type, so this is null until the oracle is primed from the live master list). Phase B5
+ * (D1): the one-off assign flow uses this to stamp an assigned one-off's cost type.
+ */
+export function getProcoreCostType(code: string): ProcoreCostCodeType | null {
+  return typeByCode.get(code) ?? null;
 }
 
 /**
@@ -69,7 +91,11 @@ export function primeProcoreValidCodes(codes: ProcoreValidCode[]): void {
   PROCORE_VALID_CODES.length = 0;
   PROCORE_VALID_CODES.push(...sorted);
   descByCode.clear();
-  for (const v of sorted) descByCode.set(v.code, v.description);
+  typeByCode.clear();
+  for (const v of sorted) {
+    descByCode.set(v.code, v.description);
+    if (v.type) typeByCode.set(v.code, v.type);
+  }
 }
 
 /** Restore the JSON baseline backing set (used by tests; also the explicit

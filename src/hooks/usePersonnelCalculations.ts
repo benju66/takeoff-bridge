@@ -6,6 +6,7 @@ import { resolveCompanyRate } from "@/lib/rateResolver";
 import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
 import { synthesizePersonnelSectionLines } from "@/lib/sectionLines/synthesize";
 import { computePersonnelFromSectionLines } from "@/lib/sectionLines/project";
+import { oneOffToGcManualConfig, oneOffValueInjection } from "@/lib/sectionLines/oneOff";
 import type { EstimateSectionLine } from "@/types/db";
 import type { EstimateOverrideMap } from "@/types";
 
@@ -37,6 +38,24 @@ export interface UsePersonnelCalculationsReturn {
   removeLine: (code: string) => void;
   /** Re-add a previously-removed catalog line by `code` (B4 / D2) — inverse of removeLine. */
   restoreLine: (code: string) => void;
+  /**
+   * GC/Site-Ops Addressability Phase B5 (D1): the estimator-authored ONE-OFF GC lines
+   * (`source: 'manual'`, NOT catalog). Each runs through the EXISTING manual-line evaluator
+   * via `buildPersonnelLineSet({ addManual })`; it counts in the export ONLY once it carries a
+   * valid Procore code (validateExportReadiness). Empty by default → byte-identical → goldens
+   * tie $0.00. The synthesized one-offs ride `sectionLines` (dual-write + reload).
+   */
+  oneOffLines: EstimateSectionLine[];
+  /** Append a new one-off GC line (B5 / D1) — undoable via the grid's ADD_ONE_OFF_LINE command. */
+  addOneOff: (line: EstimateSectionLine) => void;
+  /** Remove a one-off GC line by id (B5 / D1) — inverse of addOneOff. */
+  removeOneOff: (id: string) => void;
+  /** Set a one-off's typed value (qty or lump-sum dollars) by id (B5 / D1). */
+  setOneOffValue: (id: string, value: number) => void;
+  /** Set a one-off's typed rate ($/unit) by id (B5 / D1). */
+  setOneOffRate: (id: string, value: number) => void;
+  /** Assign / re-assign a one-off's resolved Procore code + cost type by id (B5 / D1). */
+  assignOneOffCode: (id: string, procoreCode: string, costType: string) => void;
   calcResult: PersonnelCalcResult;
   totalGCs: number;
   // Serializable snapshots for persistence
@@ -92,7 +111,14 @@ export function usePersonnelCalculations(
    * one-time sync. APP-BORN ONLY — the page passes `undefined` for imported projects
    * (D4). Defaults to none → full catalog → byte-identical.
    */
-  initialRemovedCodes?: string[]
+  initialRemovedCodes?: string[],
+  /**
+   * GC/Site-Ops Addressability Phase B5 (D1): the persisted ONE-OFF GC lines, reconstructed
+   * from the project's `estimate_section_lines` on load (the `source: 'manual'` GC lines) by
+   * `deriveOneOffsFromLines`. Applied once when `isLoaded`, mirroring the removed-codes sync.
+   * APP-BORN ONLY — the page passes `undefined` for imported projects (D4). Defaults to none.
+   */
+  initialOneOffLines?: EstimateSectionLine[]
 ): UsePersonnelCalculationsReturn {
   // Individual utilization percentages (0-100)
   const [utilEx, setUtilEx] = useState<number>(initialUtilizations?.utilEx ?? 0);
@@ -121,6 +147,10 @@ export function usePersonnelCalculations(
   // Phase B4 (D2): removed catalog codes. Initialized from the persisted section
   // lines (catalog − present) and re-applied once on load (the effect below).
   const [removedCodes, setRemovedCodes] = useState<string[]>(initialRemovedCodes ?? []);
+
+  // Phase B5 (D1): estimator-authored one-off GC lines. Initialized from the persisted
+  // `source: 'manual'` GC lines and re-applied once on load (the effect below).
+  const [oneOffLines, setOneOffLines] = useState<EstimateSectionLine[]>(initialOneOffLines ?? []);
 
   // ---------------------------------------------------------------------------
   // One-time DB sync: update state once estimate data arrives from the database.
@@ -188,6 +218,21 @@ export function usePersonnelCalculations(
     }
   }, [isLoaded, initialRemovedCodes]);
 
+  // Phase B5 (D1): one-time sync of the persisted one-off lines once the project loads
+  // (separate from the blob/removed-codes syncs — one-offs live in the section-lines table).
+  // `initialOneOffLines` is referentially stable (the workspace hook stores it in state).
+  const hasInitOneOffRef = useRef(false);
+  useEffect(() => {
+    if (isLoaded && !hasInitOneOffRef.current) {
+      Promise.resolve().then(() => {
+        setOneOffLines(initialOneOffLines ?? []);
+        hasInitOneOffRef.current = true;
+      });
+    } else if (!isLoaded) {
+      hasInitOneOffRef.current = false;
+    }
+  }, [isLoaded, initialOneOffLines]);
+
   const utilizations: Record<string, number> = {
     ex: utilEx, srPm: utilSrPm, pm: utilPm, pe: utilPe,
     srSu: utilSrSu, su: utilSu, asstSu: utilAsstSu, pa: utilPa,
@@ -250,12 +295,40 @@ export function usePersonnelCalculations(
     setRemovedCodes((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : prev));
   };
 
+  // Phase B5 (D1): one-off line mutations. All keyed by the line `id` (= code = engine key).
+  const addOneOff = (line: EstimateSectionLine) => {
+    setOneOffLines((prev) => (prev.some((l) => l.id === line.id) ? prev : [...prev, line]));
+  };
+  const removeOneOff = (id: string) => {
+    setOneOffLines((prev) => prev.filter((l) => l.id !== id));
+  };
+  const setOneOffValue = (id: string, value: number) => {
+    const clamped = Math.max(0, value);
+    setOneOffLines((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, inputs: { ...l.inputs, value: clamped } } : l))
+    );
+  };
+  const setOneOffRate = (id: string, value: number) => {
+    const clamped = Math.max(0, value);
+    setOneOffLines((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, inputs: { ...l.inputs, rate: clamped } } : l))
+    );
+  };
+  const assignOneOffCode = (id: string, procoreCode: string, costType: string) => {
+    setOneOffLines((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, procoreCode, costType } : l))
+    );
+  };
+
   const manualEntriesString = JSON.stringify(manualEntries);
   const rateOverridesString = JSON.stringify(rateOverrides);
   const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
   // B4 (D2): a stable key over the removed-codes set so the calc memo + the synthesized
   // section lines + the dual-read tripwire all recompute when a line is removed/re-added.
   const removedCodesString = JSON.stringify(removedCodes);
+  // B5 (D1): a stable key over the one-off lines so the calc memo + section lines + the
+  // dual-read tripwire recompute when a one-off is added/removed/edited/assigned a code.
+  const oneOffLinesString = JSON.stringify(oneOffLines);
   // A+1 (D3): a stable key over the active line type-overs so the calc memo +
   // dual-read tripwire recompute when an override is set/reverted. `{}` → inert.
   const lineOverridesString = JSON.stringify(lineOverrides);
@@ -271,9 +344,24 @@ export function usePersonnelCalculations(
   // catalog array refs as `DEFAULT_PERSONNEL_LINES`, so the result is byte-identical (the
   // A+1 `lineOverrides` layer is a pure passthrough on `{}`). Goldens tie $0.00.
   const calcResult = useMemo(
-    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup, buildPersonnelLineSet({ removeCodes: removedCodes }), lineOverrides),
+    () => {
+      // B5 (D1): append the one-off lines via the EXISTING manual-line evaluator (no new
+      // per-line math). Each one-off's typed value rides `manualEntries` keyed by its id
+      // (= the manual-config key); its rate rides config.rate. The dual-read bridge builds
+      // these IDENTICALLY, so the tripwire below stays green.
+      const oneOffConfigs = oneOffLines.map(oneOffToGcManualConfig);
+      const engineManualEntries: Record<string, number> = { ...manualEntries };
+      for (const l of oneOffLines) {
+        const inj = oneOffValueInjection(l);
+        engineManualEntries[inj.key] = inj.value;
+      }
+      return computePersonnelCosts(
+        durationMonths, squareFootage, utilizations, equipment, engineManualEntries, rateOverrides, rateLookup,
+        buildPersonnelLineSet({ removeCodes: removedCodes, addManual: oneOffConfigs }), lineOverrides
+      );
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString, lineOverridesString, removedCodesString]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString, lineOverridesString, removedCodesString, oneOffLinesString]
   );
 
   // Serializable persistence snapshots (matching existing ProjectEstimate shape).
@@ -303,12 +391,14 @@ export function usePersonnelCalculations(
   const sectionLines = useMemo(
     () => {
       const all = synthesizePersonnelSectionLines(gcUtilization, gcEquipmentOverrides);
-      if (removedCodes.length === 0) return all;
       const removed = new Set(removedCodes);
-      return all.filter((l) => !removed.has(l.code));
+      const catalog = removed.size === 0 ? all : all.filter((l) => !removed.has(l.code));
+      // B5 (D1): the one-off lines ride after the catalog seed (so the dual-write persists
+      // them and reload reconstructs them). Order matches the calc's `addManual` order.
+      return oneOffLines.length === 0 ? catalog : [...catalog, ...oneOffLines];
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [gcUtilizationString, gcEquipmentOverridesString, removedCodesString]
+    [gcUtilizationString, gcEquipmentOverridesString, removedCodesString, oneOffLinesString]
   );
 
   // Dual-read tripwire (DEV ONLY): driving the A1 engine off the synthesized
@@ -345,6 +435,12 @@ export function usePersonnelCalculations(
     removedCodes,
     removeLine,
     restoreLine,
+    oneOffLines,
+    addOneOff,
+    removeOneOff,
+    setOneOffValue,
+    setOneOffRate,
+    assignOneOffCode,
     calcResult,
     totalGCs: calcResult.grandTotal,
     gcUtilization,
