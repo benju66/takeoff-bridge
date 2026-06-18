@@ -40,7 +40,7 @@ import { useEstimateBindings } from "@/hooks/useEstimateBindings";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
-import { PersonnelPricingStep } from "@/components/workspace/PersonnelPricingStep";
+import { GcPersonnelGridStep } from "@/components/workspace/GcPersonnelGridStep";
 import { InfrastructureStep } from "@/components/workspace/InfrastructureStep";
 import { EstimateTable } from "@/components/workspace/EstimateTable";
 import { ContextMenuPortal } from "@/components/workspace/ContextMenuPortal";
@@ -113,7 +113,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
   const isNewEstimate = !projectEstimate;
 
-  // Step 2: Division 01 General Conditions
+  // Step 2: Division 01 General Conditions. `activeOverrides` threads the per-line
+  // type-overs (D3 / A+1) into the GC engine — `{}` until one is recorded, so the
+  // result stays byte-identical and the export goldens tie $0.00 (gc-siteops B2).
   const personnel = usePersonnelCalculations(
     projectDurationMonths,
     squareFootage,
@@ -121,6 +123,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     projectEstimate?.gcUtilization,
     projectEstimate?.gcEquipmentOverrides,
     rateCardSnapshot,
+    activeOverrides,
   );
 
   // Step 3: Division 02 Site Operations
@@ -358,10 +361,17 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   useEffect(() => { handleUndoRef.current = handleUndo; }, [handleUndo]);
   useEffect(() => { handleRedoRef.current = handleRedo; }, [handleRedo]);
 
+  // This global handler drives the STEP 4 workbook history only. STEP 2's grid
+  // (GcPersonnelGridStep, B2) owns its own command history + Ctrl+Z/Y listener while
+  // mounted, so guard here to avoid both firing on step2 (it mounts one step at a time).
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      if (activeTabRef.current !== "step4") return;
 
       if (e.key === "z" && !e.shiftKey) {
         e.preventDefault();
@@ -557,21 +567,11 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
               linkedTotals={linkedDivisionTotals}
             />
           ) : (
-            <PersonnelPricingStep
+            <GcPersonnelGridStep
+              personnel={personnel}
               durationMonths={projectDurationMonths}
               squareFootage={squareFootage}
-              utilizations={personnel.utilizations}
-              onUtilizationChange={personnel.setUtilization}
-              equipment={personnel.equipment}
-              onEquipmentChange={personnel.handleEquipmentChange}
-              manualEntries={personnel.manualEntries}
-              onManualEntryChange={personnel.handleManualEntryChange}
-              rateOverrides={personnel.rateOverrides}
-              onRateChange={personnel.handleRateChange}
-              onRateReset={personnel.resetRate}
-              estimateTotal={takeoffSummary.totalEstimatedCost}
-              calcResult={personnel.calcResult}
-              totalGCs={personnel.totalGCs}
+              onSaveOverride={handleSaveOverride}
             />
           )}
         </ErrorBoundary>

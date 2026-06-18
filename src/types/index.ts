@@ -311,6 +311,51 @@ export type WorkbookCommand =
   | SetBindingCommand
   | ClearBindingCommand;
 
+// ---------------------------------------------------------------------------
+// GcGridCommand — the Step-2 (GC Personnel) grid's undo/redo payloads (B2).
+//
+// Step 2's grid is backed by `EstimateSectionLine` rows, not `ProcessedTakeoffRow`,
+// so it carries its OWN command union rather than widening WorkbookCommand with
+// foreign-row-typed variants. Consumed by useGcPersonnelGrid via the generic
+// useCommandHistory<GcGridCommand>. Each command holds FULL inverse data
+// (AGENTS.md compounding-history): the GC engine is PURE from inputs, so a single
+// prev/next input value is full-fidelity — every derived qty/total recomputes
+// from it, no cascade snapshot needed.
+//
+// NOTE: the per-line type-over (D3 / Phase A+1) is deliberately NOT a command — it
+// is an append-only `estimate_overrides` audit action with its own set/revert
+// affordance (B2-D2), so it never enters this undo stack.
+// ---------------------------------------------------------------------------
+
+/**
+ * A single Step-2 input edit: a utilization %, a staff rate override, an
+ * equipment lump sum, or a manual GC entry. `target` selects which
+ * usePersonnelCalculations setter the dispatcher drives; `key` is the catalog
+ * config key (role/equipment/manual key) the setter expects. A `prevValue` of
+ * `undefined` for a `rate` edit means "no override existed" → undo calls
+ * `resetRate` (clears the override) rather than setting a number.
+ */
+export interface EditSectionCellCommand {
+  type: "EDIT_SECTION_CELL";
+  lineId: string;
+  target: "utilization" | "rate" | "equipment" | "manual";
+  key: string;
+  prevValue: number | undefined;
+  nextValue: number | undefined;
+}
+
+/** Toggle a Step-2 cell lock (in-session only for B2 — not persisted). */
+export interface ToggleSectionCellLockCommand {
+  type: "TOGGLE_SECTION_CELL_LOCK";
+  cellKey: string;
+  prevLocked: boolean;
+  nextLocked: boolean;
+}
+
+export type GcGridCommand =
+  | EditSectionCellCommand
+  | ToggleSectionCellLockCommand;
+
 export interface GridSelectionState {
   rowId: string | null;
   columnId: string | null;

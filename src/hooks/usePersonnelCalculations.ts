@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { computePersonnelCosts, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
+import { computePersonnelCosts, DEFAULT_PERSONNEL_LINES, PersonnelCalcResult, RateLookup } from "@/lib/calculations";
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { GC_MANUAL_DEFAULTS, STAFF_ROLE_DEFAULTS } from "@/lib/constants";
 import { synthesizePersonnelSectionLines } from "@/lib/sectionLines/synthesize";
 import { computePersonnelFromSectionLines } from "@/lib/sectionLines/project";
 import type { EstimateSectionLine } from "@/types/db";
+import type { EstimateOverrideMap } from "@/types";
 
 // ---------------------------------------------------------------------------
 // usePersonnelCalculations — Step 2 GC Personnel state & calculations
@@ -61,7 +62,17 @@ export function usePersonnelCalculations(
   initialEquipment?: Record<string, number>,
   /** Frozen per-project rate snapshot (Phase B). Layered on top of the company
    *  card: rate = rateOverrides ?? projectSnapshot ?? companyCard ?? constants. */
-  rateCardSnapshot?: Record<string, number>
+  rateCardSnapshot?: Record<string, number>,
+  /**
+   * Audited per-line type-overs (gc-siteops Phase A+1 / D3), the active
+   * `estimate_overrides` map keyed by `field`. Forwarded straight to
+   * `computePersonnelCosts` as `lineOverrides`; only the `line:<id>:total` keys
+   * for the GC lines this engine produces are consumed (recognized-keys guard),
+   * every other key ignored. Defaults to `{}` → fully INERT (byte-identical
+   * result, goldens tie $0.00). The Step-2 grid (B2) records these via the
+   * type-over gesture; the page passes the resolved active map in.
+   */
+  lineOverrides: EstimateOverrideMap = {}
 ): UsePersonnelCalculationsReturn {
   // Individual utilization percentages (0-100)
   const [utilEx, setUtilEx] = useState<number>(initialUtilizations?.utilEx ?? 0);
@@ -192,6 +203,9 @@ export function usePersonnelCalculations(
   const manualEntriesString = JSON.stringify(manualEntries);
   const rateOverridesString = JSON.stringify(rateOverrides);
   const rateCardSnapshotString = JSON.stringify(rateCardSnapshot ?? {});
+  // A+1 (D3): a stable key over the active line type-overs so the calc memo +
+  // dual-read tripwire recompute when an override is set/reverted. `{}` → inert.
+  const lineOverridesString = JSON.stringify(lineOverrides);
 
   // Layered company-default lookup (Phase B): the frozen project snapshot wins
   // over the live company card; both fall through to the constants fallback the
@@ -199,11 +213,13 @@ export function usePersonnelCalculations(
   const rateLookup: RateLookup = (code, fallback) =>
     rateCardSnapshot?.[code] ?? resolveCompanyRate(code, fallback);
 
-  // Compute via pure calculation layer
+  // Compute via pure calculation layer. `DEFAULT_PERSONNEL_LINES` is the explicit
+  // default 8th arg so `lineOverrides` (9th) can be threaded; with no overrides
+  // the result is byte-identical (the A+1 layer is a pure passthrough on `{}`).
   const calcResult = useMemo(
-    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup),
+    () => computePersonnelCosts(durationMonths, squareFootage, utilizations, equipment, manualEntries, rateOverrides, rateLookup, DEFAULT_PERSONNEL_LINES, lineOverrides),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString]
+    [durationMonths, squareFootage, utilEx, utilSrPm, utilPm, utilPe, utilSrSu, utilSu, utilAsstSu, utilPa, eqDumpsters, eqToilets, eqElectric, manualEntriesString, rateOverridesString, rateCardSnapshotString, lineOverridesString]
   );
 
   // Serializable persistence snapshots (matching existing ProjectEstimate shape).
@@ -244,6 +260,7 @@ export function usePersonnelCalculations(
       durationMonths,
       squareFootage,
       rateLookup,
+      lineOverrides,
     });
     if (JSON.stringify(viaLines) !== JSON.stringify(calcResult)) {
       console.error(
@@ -252,7 +269,7 @@ export function usePersonnelCalculations(
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString]);
+  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString, lineOverridesString]);
 
   return {
     utilizations,
