@@ -100,11 +100,10 @@ linked totals / export reflect it for free and the computed value is retained. S
   click ⚑ to revert; right-click a cell → Lock → it goes read-only.
 
 ## Git
-Committed to `gc-siteops-addressability` as **`01118f8`** (one commit, message via `git commit -F`).
-**Not pushed** (commit-only; push when the architect asks). ⚠️ The branch is now **local-only and
-ahead of origin by 6 commits**: B1b `dc9b003` + closure `f6d8b77` + B2 `dda8149` + closure `8cf281b`
-+ **B3 `01118f8`** (+ this closure). Track B follows B2's cadence — per-phase PR or one merge at
-Track B's end, the architect's call.
+B3 committed to `gc-siteops-addressability` as **`01118f8`**; the template-column + quantity-override
+**follow-on is `f2baff4`** (this closure + its follow-on section updated alongside). **PUSHED** to
+`origin/gc-siteops-addressability` (the architect asked to back it up). Track B follows B2's cadence —
+per-phase PR or one merge at Track B's end, the architect's call.
 
 ## Known limits / notes (carry-forward)
 - **Per-section subtotal 🔗 badge** absent (see /code-review parity note above) — mirrors B2.
@@ -114,6 +113,48 @@ Track B's end, the architect's call.
   pre-existing pattern as Step 4); the unfiltered default is correct.
 - The `num`/`CalcCell` shapes are shared from `gcGridModel`; `num` is also defined locally in
   `siteOpsGridModel` (a one-liner) to keep the Site-Ops model self-contained.
+
+---
+
+## Follow-on (same session) — template column alignment + audited quantity override (`f2baff4`)
+
+After B3, the architect aligned both grids to the **company estimate template**
+(`templates/Company_Estimate_Template.xlsx`, the STEP 2 / STEP 3 sheets, **row 9 headers**) and
+added the "duration-driven quantity is locked but overridable" gesture. **Presentation + an inert
+engine layer → goldens still $0.00.** Pushed alongside B3.
+
+- **Columns now match the template.** Step 2: `Code · Description · Utilization · Quantity · Unit ·
+  Rate · Total · Cost/S.F.` Step 3: `Code · Description · Quantity · Unit · Rate · Total · Cost/S.F.`
+  The old single editable **"Entry"** column is gone; the quantity is now **one** column (no more
+  Entry-vs-Calculated-Qty split). New **Cost/S.F.** = `Total ÷ sqft` (`"—"` when sqft unset);
+  `Total = Quantity × Rate`. Per kind: staff = editable Utilization (→ hours) + editable Rate;
+  operational/dynamic = read-only card rate; manual qty = editable Quantity; `qtyRate` (Soil Borings)
+  = editable Quantity **and** Rate; **lump-sum / GC equipment = Quantity 1 with the dollar amount in
+  the editable Rate** (the template models these as qty×rate; the calc already yields qty=1,
+  rate=amount → goldens-safe; `buildCalcLookup` now presents equipment uniformly as Qty 1 × Rate).
+- **Audited QUANTITY override (D3 on the `qty` field).** The override layer generalized from
+  `line:<id>:total` → `line:<id>:<field>`; the engines apply a `qty` override to the
+  duration/sqft/util-driven lines (staff, operational, dynamic) BEFORE the total (`total =
+  override-qty × rate`, a `total` type-over still winning last). Manual lines get **no** qty override
+  (their quantity is a direct input — recognized-keys guard). Inert with no overrides → byte-identical
+  → goldens $0.00; **no DB migration** (`estimate_overrides.field` is free TEXT). The derived Quantity
+  cell renders **locked** (a lock glyph, read-only) and edits ONLY via a right-click **"Override
+  quantity"** gesture (shared `renderDerivedQtyCell` + the `editOnClick=false` cell mode +
+  `beginQtyOverride`/`revertQtyOverride`; the revert ⚑ + a "Revert quantity to computed" menu item).
+- **Two latent bugs found via the new e2e + fixed** (SKILL §8 gained anti-patterns **#7/#8**):
+  (1) the context menu dismissed on the button's `mousedown` (React synthetic `stopPropagation` does
+  not reliably stop a `document` mousedown listener) so menu-item clicks never landed — **also broke
+  the existing Lock menu** — now dismissed via a **menu-ref target check**; (2) the override ⚑ overlay
+  was an inline sibling after the full-width cell `div` → obscured + un-clickable — now **absolutely
+  positioned** in the cell corner (the GridShell `<td>` is `relative`).
+- **Verify:** suite **96/1154** (+10); McKenna/synthetic/CARE goldens $0.00; tsc + build + lint clean;
+  **both e2e PASS** incl. the FULL override gesture (right-click → Override quantity → type 24 → ⚑ →
+  revert). **Spot-check worth a glance:** when you pick "Override quantity" the cell unlocks into an
+  input — confirm typing focus lands as expected (the e2e drives `fill` explicitly).
+- **Deferred (architect's earlier call):** the template makes the lump-sum lines TRUE qty×rate with
+  BOTH cells editable; the app still lets you edit only the amount (Quantity fixed at 1). A
+  `lumpSum → qtyRate` re-classification (with golden re-verification) is a separate small change if
+  wanted — NOT bundled here.
 
 ---
 
@@ -159,10 +200,11 @@ code, D1). **Stop at the B4 boundary.**
 
 > Implement **Phase B4** of GC/Site-Ops Addressability & Grid Convergence — **Removable / re-addable
 > catalog seed (D2)**. Read the plan (`docs/plans/2026-06-16-gc-siteops-addressability-grid-convergence.md`,
-> Phase B4 + decisions D2/ID-4) and this B3 closure
+> Phase B4 + decisions D2/ID-4) and this B3 closure + its **Follow-on section** (the template column
+> layout + the audited quantity override now live on the grids)
 > (`docs/handoffs/2026-06-18-gc-siteops-addressability-phase-b3-closure.md`) first. **Branch:**
-> continue on `gc-siteops-addressability` (B3 is committed at `01118f8`; ensure current with origin,
-> pull if pushed). Do NOT branch off or commit on `main`.
+> continue on `gc-siteops-addressability` (latest commit `f2baff4`, PUSHED to origin — `git pull`
+> first). Do NOT branch off or commit on `main`.
 >
 > Scope: let the estimator **hide/remove** a Step 2/3 catalog line that doesn't apply (the active
 > line set becomes a subset — reuse A1's `buildPersonnelLineSet`/`buildSiteOpsLineSet` `removeCodes`
