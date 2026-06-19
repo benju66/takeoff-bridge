@@ -274,3 +274,69 @@ export function synthesizeSectionLines(
     ...synthesizeSiteOpsSectionLines(blobs.siteOpsQuantities, blobs.siteOpsRates, projectId),
   ];
 }
+
+// ---------------------------------------------------------------------------
+// Inverse: section lines → legacy blob records (GC/Site-Ops Addressability
+// Phase B6 — the section-lines table is now the SOLE store).
+// ---------------------------------------------------------------------------
+
+/** Coerce a JSONB `inputs` value to a finite number. */
+const numIn = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+/**
+ * The EXACT inverse of `synthesize.ts`: rebuilds the four legacy blob records from
+ * a project's persisted catalog section lines, so the Step 2/3 calc hooks can keep
+ * consuming their blob-shaped initial state UNCHANGED after the blob columns were
+ * retired (Phase B6). Iterates the catalog by stable line id (mirroring the forward
+ * synthesizer), reading each PRESENT line's `inputs`:
+ *   - a catalog line ABSENT from `lines` is a B4 removal → its blob key is omitted
+ *     (the hook reads 0; the removal is tracked separately via removed-codes);
+ *   - a NON-catalog line (a B5 one-off, `id` not in the catalog id set) is skipped
+ *     here — one-offs are reconstructed separately by `deriveOneOffsFromLines`.
+ *
+ * Round-trip identity on the full catalog (`synthesizeSectionLines(sectionLinesToBlobs(
+ * lines)) === lines`) is proven in `sectionLinesSynthesis.test.ts`; combined with the
+ * forward dual-read proof this guarantees totals are unchanged to the cent. APP-BORN
+ * ONLY (imported lines are frozen lumpSum constants, never round-tripped — D4).
+ */
+export function sectionLinesToBlobs(lines: readonly EstimateSectionLine[]): {
+  gcUtilization: Record<string, number>;
+  gcEquipmentOverrides: Record<string, number>;
+  siteOpsQuantities: Record<string, number>;
+  siteOpsRates: Record<string, number>;
+} {
+  const byId = new Map(lines.map((l) => [l.id, l]));
+  const gcUtilization: Record<string, number> = {};
+  const gcEquipmentOverrides: Record<string, number> = {};
+  const siteOpsQuantities: Record<string, number> = {};
+  const siteOpsRates: Record<string, number> = {};
+
+  for (const role of STAFF_ROLE_DEFAULTS) {
+    const line = byId.get(gcStaffLineId(role.key));
+    if (!line) continue;
+    gcUtilization[utilKeyFor(role.key)] = numIn(line.inputs.utilization);
+    // Rate override rode gc_utilization as a rate* key; present only when the line carries one.
+    if (typeof line.inputs.rate === "number") gcUtilization[rateOverrideKeyFor(role.key)] = line.inputs.rate;
+  }
+
+  for (const eq of EQUIPMENT_DEFAULTS) {
+    const line = byId.get(gcEquipmentLineId(eq.key));
+    if (line) gcEquipmentOverrides[eqKeyFor(eq.key)] = numIn(line.inputs.amount);
+  }
+
+  for (const m of GC_MANUAL_DEFAULTS) {
+    const line = byId.get(gcManualLineId(m.key));
+    if (line) gcEquipmentOverrides[m.key] = numIn(line.inputs.value);
+  }
+
+  for (const m of SITE_OPS_MANUAL_DEFAULTS) {
+    const line = byId.get(siteOpsManualLineId(m.key));
+    if (!line) continue;
+    siteOpsQuantities[LEGACY_QTY_KEYS[m.key] ?? m.key] = numIn(line.inputs.value);
+    if (m.entry === "qtyRate" && typeof line.inputs.rate === "number") {
+      siteOpsRates[LEGACY_RATE_KEYS[m.key] ?? m.key] = line.inputs.rate;
+    }
+  }
+
+  return { gcUtilization, gcEquipmentOverrides, siteOpsQuantities, siteOpsRates };
+}

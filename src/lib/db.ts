@@ -137,19 +137,13 @@ function mapEstimateFromRow(row: Record<string, unknown>): Omit<ProjectEstimate,
     fee: Number(row.fee) || 0,
     totalCost: Number(row.total_cost) || 0,
     generalConditionsTotal: Number(row.general_conditions_total) || 0,
-    gcUtilization: (row.gc_utilization != null && typeof row.gc_utilization === "object" && !Array.isArray(row.gc_utilization))
-      ? (row.gc_utilization as Record<string, number>)
-      : {},
-    gcEquipmentOverrides: (row.gc_equipment_overrides != null && typeof row.gc_equipment_overrides === "object" && !Array.isArray(row.gc_equipment_overrides))
-      ? (row.gc_equipment_overrides as Record<string, number>)
-      : {},
     siteOperationsTotal: Number(row.site_operations_total) || 0,
-    siteOpsQuantities: (row.site_ops_quantities != null && typeof row.site_ops_quantities === "object" && !Array.isArray(row.site_ops_quantities))
-      ? (row.site_ops_quantities as Record<string, number>)
-      : {},
-    siteOpsRates: (row.site_ops_rates != null && typeof row.site_ops_rates === "object" && !Array.isArray(row.site_ops_rates))
-      ? (row.site_ops_rates as Record<string, number>)
-      : {},
+    // GC/Site-Ops Addressability Phase B6: the four Step 2/3 input blobs
+    // (gc_utilization, gc_equipment_overrides, site_ops_quantities, site_ops_rates)
+    // were RETIRED — the columns no longer exist. Step 2/3 inputs now live SOLELY in
+    // estimate_section_lines; useProjectWorkspace reconstructs the blob-shaped records
+    // for the hooks via sectionLinesToBlobs(). These fields stay OFF the mapped
+    // estimate (the workspace overlays them for app-born projects).
     rateCardSnapshot: (row.rate_card_snapshot != null && typeof row.rate_card_snapshot === "object" && !Array.isArray(row.rate_card_snapshot))
       ? (row.rate_card_snapshot as Record<string, number>)
       : {},
@@ -300,11 +294,11 @@ function buildEstimateRow(estimate: Omit<ProjectEstimate, "items">) {
     fee: sanitizeNum(estimate.fee),
     total_cost: sanitizeNum(estimate.totalCost),
     general_conditions_total: sanitizeNum(estimate.generalConditionsTotal),
-    gc_utilization: estimate.gcUtilization ?? {},
-    gc_equipment_overrides: estimate.gcEquipmentOverrides ?? {},
     site_operations_total: sanitizeNum(estimate.siteOperationsTotal),
-    site_ops_quantities: estimate.siteOpsQuantities ?? {},
-    site_ops_rates: estimate.siteOpsRates ?? {},
+    // GC/Site-Ops Addressability Phase B6: the four Step 2/3 input blobs were
+    // RETIRED from project_estimates + the save_estimate RPC. Step 2/3 inputs are
+    // persisted SOLELY via save_section_lines (saveSectionLines). The two NUMERIC
+    // section totals above remain (display caches, still engine-derived).
     rate_card_snapshot: estimate.rateCardSnapshot ?? {},
   };
 }

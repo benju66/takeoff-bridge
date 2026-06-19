@@ -5,6 +5,7 @@ import { Project, ProjectEstimate, EstimateSectionLine } from "@/types/db";
 import { getProject, getProjectEstimate, getSectionLines, saveProject } from "@/lib/db";
 import { getMonthsBetween } from "@/lib/calculations";
 import { deriveRemovedCodesFromLines, deriveOneOffsFromLines } from "@/lib/sectionLines/project";
+import { sectionLinesToBlobs } from "@/lib/sectionLines/synthesize";
 
 // ---------------------------------------------------------------------------
 // useProjectWorkspace — Project metadata loading, saving, and param changes
@@ -61,17 +62,28 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
 
     (async () => {
       try {
-        // The section-lines read is FAIL-SOFT (B4): the table is non-authoritative until
-        // B6, so a read failure must never block the project load — it just falls back to
-        // the full catalog (no removals).
+        // Phase B6: the section-lines read is now AUTHORITATIVE — the table is the SOLE
+        // store for Step 2/3 inputs (the four legacy blob columns were retired). A read
+        // failure must surface as a load error (no more fail-soft fallback), so it joins
+        // the Promise.all and propagates to the catch below.
         const [meta, estimate, sectionLines] = await Promise.all([
           getProject(projectId),
           getProjectEstimate(projectId),
-          getSectionLines(projectId).catch(() => []),
+          getSectionLines(projectId),
         ]);
         if (!cancelled) {
           setProject(meta);
-          setProjectEstimate(estimate);
+          // Phase B6: reconstruct the Step 2/3 input blob records FROM the authoritative
+          // section lines (the exact inverse of synthesis) and overlay them onto the
+          // estimate, so the page + calc hooks consume the same blob-shaped initial state
+          // they always did — with zero hook changes. APP-BORN ONLY: an imported project's
+          // section lines are frozen lumpSum constants, never round-tripped through the
+          // catalog inverse (D4); its hooks' output is unused (imported rides the frozen path).
+          setProjectEstimate(
+            estimate && !meta?.isImported
+              ? { ...estimate, ...sectionLinesToBlobs(sectionLines) }
+              : estimate
+          );
           // Removal only applies to app-born projects (D4): an imported project's
           // persisted lines are the frozen `imported_step23_lines` whose codes need not
           // match the catalog, so deriving removed-codes from them is meaningless. Skip it.

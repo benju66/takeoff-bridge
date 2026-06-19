@@ -792,10 +792,9 @@ export function estimateTotalsForImport(
     totalCost: summary.totalEstimatedCost,
     generalConditionsTotal,
     siteOperationsTotal,
-    gcUtilization: {},
-    gcEquipmentOverrides: {},
-    siteOpsQuantities: {},
-    siteOpsRates: {},
+    // GC/Site-Ops Addressability Phase B6: the four Step 2/3 input blobs were retired.
+    // An imported bid has no live Step 2/3 inputs anyway (its GC/Site-Ops detail is the
+    // frozen imported_step23_lines); section lines are synthesized from that frozen detail.
     rateCardSnapshot: {},
   };
 }

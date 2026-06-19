@@ -5,7 +5,6 @@ import { computeSiteOperations, buildSiteOpsLineSet, SiteOpsCalcResult, RateLook
 import { resolveCompanyRate } from "@/lib/rateResolver";
 import { SITE_OPS_MANUAL_DEFAULTS } from "@/lib/constants";
 import { synthesizeSiteOpsSectionLines } from "@/lib/sectionLines/synthesize";
-import { computeSiteOpsFromSectionLines } from "@/lib/sectionLines/project";
 import { oneOffToSiteOpsManualConfig, oneOffValueInjection } from "@/lib/sectionLines/oneOff";
 import type { EstimateSectionLine } from "@/types/db";
 import type { EstimateOverrideMap } from "@/types";
@@ -58,10 +57,9 @@ export interface UseInfrastructureCalculationsReturn {
   siteOpsQuantities: Record<string, number>;
   siteOpsRates: Record<string, number>;
   /**
-   * GC/Site-Ops Addressability Phase A3 (dual-read/dual-write): the Site Ops
-   * inputs synthesized as addressable section lines. Persisted alongside the
-   * legacy blobs (dual-write, app-born only); the legacy blob path above stays
-   * authoritative for display + export until a later phase.
+   * GC/Site-Ops Addressability: the Site Ops inputs as addressable section lines.
+   * Phase B6 made these the AUTHORITATIVE persisted Step 2/3 store (the legacy blob
+   * columns were retired); the page persists them via the section-lines save.
    */
   sectionLines: EstimateSectionLine[];
 }
@@ -308,10 +306,11 @@ export function useInfrastructureCalculations(
   }
 
   // ---------------------------------------------------------------------------
-  // Phase A3 (dual-read/dual-write): synthesize the Site Ops section lines from
-  // the legacy blob snapshots (incl. the legacy qty…/rate… key remapping above).
-  // Persisted on the next save by the dual-write path; the blob-driven
-  // `calcResult` stays authoritative for display + export.
+  // Synthesize the Site Ops section lines from the working blob state (incl. the
+  // legacy qty…/rate… key remapping above). Phase B6: these are now the
+  // AUTHORITATIVE persisted Step 2/3 inputs (the legacy blob columns were retired);
+  // on load the workspace reconstructs the blob state FROM these same lines
+  // (sectionLinesToBlobs) — a stable closed loop, persisted via the section-lines save.
   // ---------------------------------------------------------------------------
   const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
   const siteOpsRatesString = JSON.stringify(siteOpsRates);
@@ -329,25 +328,6 @@ export function useInfrastructureCalculations(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [siteOpsQuantitiesString, siteOpsRatesString, removedCodesString, oneOffLinesString]
   );
-
-  // Dual-read tripwire (DEV ONLY): driving the A1 engine off the synthesized
-  // section lines must reproduce the blob-driven `calcResult` to the byte.
-  useEffect(() => {
-    if (process.env.NODE_ENV === "production") return;
-    const viaLines = computeSiteOpsFromSectionLines(sectionLines, {
-      durationMonths,
-      squareFootage,
-      rateLookup,
-      lineOverrides,
-    });
-    if (JSON.stringify(viaLines) !== JSON.stringify(calcResult)) {
-      console.error(
-        "[sectionLines dual-read] Site Ops calc drift: section-line path != blob path",
-        { sectionLineGrandTotal: viaLines.grandTotal, blobGrandTotal: calcResult.grandTotal }
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionLines, calcResult, durationMonths, squareFootage, rateCardSnapshotString, lineOverridesString]);
 
   return {
     quantities,

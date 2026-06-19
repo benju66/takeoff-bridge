@@ -359,11 +359,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     rowVersion,
     takeoffSummary,
     importedSectionTotals?.generalConditionsTotal ?? personnel.totalGCs,
-    personnel.gcUtilization,
-    personnel.gcEquipmentOverrides,
     importedSectionTotals?.siteOperationsTotal ?? infrastructure.siteOperationsTotal,
-    infrastructure.siteOpsQuantities,
-    infrastructure.siteOpsRates,
     freezeRateCardSnapshot,
     isNewEstimate,
     sectionLines
