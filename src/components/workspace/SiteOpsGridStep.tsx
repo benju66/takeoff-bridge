@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Activity, RotateCcw, RotateCw, Lock, Unlock, Trash2 } from "lucide-react";
 import type { Column } from "@tanstack/react-table";
 import { GridShell } from "./GridShell";
 import { AddLinePicker } from "./AddLinePicker";
 import { AddOneOffLineForm } from "./AddOneOffLineForm";
+import { OneOffAssignPopover, type OneOffAssignTarget } from "./OneOffAssignPopover";
 import { EngineLinkBadge } from "./EngineLinkBadge";
 import { useSiteOpsGrid } from "@/hooks/useSiteOpsGrid";
 import type { UseInfrastructureCalculationsReturn } from "@/hooks/useInfrastructureCalculations";
@@ -44,7 +45,12 @@ export function SiteOpsGridStep({
   squareFootage,
   onSaveOverride,
 }: SiteOpsGridStepProps) {
-  const grid = useSiteOpsGrid(infrastructure, squareFootage, onSaveOverride);
+  // The one-off assign popover (B5 / D1) is host-owned (NOT inside the virtualized grid), so
+  // its open + text state survives the virtualizer's mount/unmount churn of the boundary row.
+  const [assignTarget, setAssignTarget] = useState<OneOffAssignTarget | null>(null);
+  const grid = useSiteOpsGrid(infrastructure, squareFootage, onSaveOverride, (line, x, y) =>
+    setAssignTarget({ line, x, y })
+  );
   const {
     table,
     rows,
@@ -69,6 +75,7 @@ export function SiteOpsGridStep({
     restoreLine,
     addOneOff,
     removeOneOff,
+    assignOneOffCode,
     isQtyOverridden,
     beginQtyOverride,
     revertQtyOverride,
@@ -271,6 +278,13 @@ export function SiteOpsGridStep({
           )}
         </div>
       )}
+
+      {/* One-off assign popover (B5 / D1) — host-owned so it survives grid re-mounts. */}
+      <OneOffAssignPopover
+        target={assignTarget}
+        onAssign={(line, code, costType) => assignOneOffCode(line, code, costType)}
+        onClose={() => setAssignTarget(null)}
+      />
     </div>
   );
 }

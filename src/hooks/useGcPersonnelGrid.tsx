@@ -78,7 +78,7 @@ const multiSelect = "multiSelect" as "includesString";
 function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
   const {
     renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride,
-    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, assignOneOff,
+    renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, requestAssign,
   } = ctx;
 
   return [
@@ -91,7 +91,7 @@ function buildGcColumns(ctx: SectionColumnContext): SectionColumnDefs {
         if (isOneOffLine(line)) {
           return renderDisplayCell(
             info,
-            <OneOffCodeCell line={line} onAssign={(code, costType) => assignOneOff(line, code, costType)} />,
+            <OneOffCodeCell line={line} onRequestAssign={requestAssign} />,
             "center"
           );
         }
@@ -278,6 +278,8 @@ export function useGcPersonnelGrid(
   personnel: UsePersonnelCalculationsReturn,
   squareFootage: number,
   onSaveOverride?: (payload: OverridePayload) => Promise<void>,
+  /** Opens the host-owned one-off assign popover (B5 / D1). Supplied by GcPersonnelGridStep. */
+  onRequestAssign?: (line: EstimateSectionLine, x: number, y: number) => void,
 ): UseGcPersonnelGridReturn {
   // Live ref so `applyEdit` stays stable while always driving the latest setters.
   // Updated in an effect (not at render) — `applyEdit` only reads it in event handlers
@@ -343,6 +345,7 @@ export function useGcPersonnelGrid(
       applyAddOneOff,
       applyRemoveOneOff,
       applyAssignOneOffCode,
+      onRequestAssign,
     },
     onSaveOverride
   );

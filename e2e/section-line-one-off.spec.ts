@@ -78,12 +78,13 @@ test.describe("GC/Site-Ops B5 — validated one-off lines (D1)", () => {
       await scrollGridToBottom(page);
       await expect(page.locator("[data-testid='one-off-assign']")).toBeVisible({ timeout: 10000 });
 
-      // ---- Assign a valid Procore code in the row's Code cell (exportable) --------
+      // ---- Assign a valid Procore code via the host popover (exportable) ----------
       await page.locator("[data-testid='one-off-assign']").click();
       await page.locator("[data-testid='one-off-code-input']").fill("2-29010.000");
       await page.locator("[data-testid='one-off-code-confirm']").click();
+      // The "Assign code" affordance is replaced by the assigned code (the coded button).
       await expect(page.locator("[data-testid='one-off-assign']")).toHaveCount(0, { timeout: 10000 });
-      await expect(page.getByText("2-29010.000").first()).toBeVisible({ timeout: 10000 });
+      await expect(page.locator("[data-testid='one-off-coded']")).toContainText("2-29010.000", { timeout: 10000 });
 
       // ---- Ctrl+Z reverses the assign → the row is uncoded again ------------------
       await page.keyboard.press("Control+z");

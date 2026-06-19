@@ -124,10 +124,12 @@ export interface SectionColumnContext {
   /** Live ref to project square footage — the Cost/S.F. column divides each line total
    *  by `.current` (read at render → fresh without recomputing the columns memo). */
   squareFootageRef: React.MutableRefObject<number>;
-  /** Assign / re-assign a one-off line's resolved Procore code + cost type (B5 / D1). The
-   *  Code column's `OneOffCodeCell` calls this for an estimator-authored one-off row; it
-   *  pushes the undoable ASSIGN_ONE_OFF_CODE command (prev captured from the line). */
-  assignOneOff: (line: EstimateSectionLine, procoreCode: string, costType: string) => void;
+  /** Open the HOST-owned assign popover for a one-off line (B5 / D1), anchored near the
+   *  click. The popover (not the virtualized cell) owns the validated input + calls the
+   *  grid's undoable `assignOneOffCode` — so the assign UI survives the virtualizer's
+   *  mount/unmount churn of the boundary row. Stable identity (the columns memo treats it
+   *  as fixed); a no-op when the host supplied no `onRequestAssign`. */
+  requestAssign: (line: EstimateSectionLine, x: number, y: number) => void;
 }
 
 /** How a step specializes the shared grid core. */
@@ -169,6 +171,9 @@ export interface SectionGridSpec {
   applyRemoveOneOff: (line: EstimateSectionLine) => void;
   /** Assigns a one-off's resolved Procore code + cost type (B5 / D1) — drives `assignOneOffCode`. */
   applyAssignOneOffCode: (id: string, procoreCode: string, costType: string) => void;
+  /** Opens the host-owned assign popover for a one-off (B5 / D1). The host (GcPersonnelGridStep
+   *  / SiteOpsGridStep) supplies it; the Code cell calls it on click. Omitted → assign is a no-op. */
+  onRequestAssign?: (line: EstimateSectionLine, x: number, y: number) => void;
 }
 
 export interface UseSectionLineGridReturn {
@@ -239,6 +244,8 @@ export function useSectionLineGrid(
   applyRemoveOneOffRef.current = spec.applyRemoveOneOff;
   const applyAssignOneOffCodeRef = useRef(spec.applyAssignOneOffCode);
   applyAssignOneOffCodeRef.current = spec.applyAssignOneOffCode;
+  const onRequestAssignRef = useRef(spec.onRequestAssign);
+  onRequestAssignRef.current = spec.onRequestAssign;
   const editableColumnIdsRef = useRef(spec.editableColumnIds);
   editableColumnIdsRef.current = spec.editableColumnIds;
   const squareFootageRef = useRef(spec.squareFootage);
@@ -600,10 +607,16 @@ export function useSectionLineGrid(
     [renderNumberCell, commitFieldOverride, canOverride]
   );
 
+  // Stable wrapper so the columns memo never churns on the host callback's identity; reads
+  // the live ref (the host's `onRequestAssign`). A no-op when the host supplied none.
+  const requestAssign = useCallback((line: EstimateSectionLine, x: number, y: number) => {
+    onRequestAssignRef.current?.(line, x, y);
+  }, []);
+
   const buildColumns = spec.buildColumns;
   const columns = useMemo(
-    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, assignOneOff: assignOneOffCode }),
-    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, canOverride, assignOneOffCode]
+    () => buildColumns({ renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, calcLookupRef, canOverride, squareFootageRef, requestAssign }),
+    [buildColumns, renderNumberCell, renderDisplayCell, commitInputEdit, commitFieldOverride, isFieldOverridden, renderDerivedQtyCell, canOverride, requestAssign]
   );
 
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);

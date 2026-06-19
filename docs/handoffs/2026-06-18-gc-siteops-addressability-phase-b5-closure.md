@@ -96,11 +96,29 @@ dispatch (guardrail) and inverts them in undo/redo; the spec supplies `applyAddO
 - **No DDL** — rides the existing `estimate_section_lines` `inputs` JSONB + `source`/`code`/`procore_code`/
   `cost_type` columns.
 - **Playwright e2e** `e2e/section-line-one-off.spec.ts`: add one-off → "⚠ Assign code" → assign
-  `2-29010.000` → coded → Ctrl+Z reverses the assign → Ctrl+Z reverses the add. **⚠ NOT confirmed green
-  locally** — every run (3, incl. retries) hit the **known local "Authenticating Session Node…"
-  session-refresh flake** at the assign step (the same flake the B2/B3/B4 closures document; it remounts
-  the page and wipes the unsaved one-off). The spec is correct and lean (single mount); it should pass in
-  a non-flaky env / CI. **Architect manual /verify recommended** (see below).
+  `2-29010.000` → coded → Ctrl+Z reverses the assign → Ctrl+Z reverses the add. **PASSES (9.3s)** after
+  the two follow-on fixes below.
+
+### Follow-on fixes (2026-06-19) — two real bugs the e2e surfaced (separate commits)
+The e2e was initially blocked, which exposed two genuine defects (NOT B5 logic bugs):
+1. **App-wide auth remount on every token refresh (`src/context/AuthContext.tsx`, OWN commit).** The
+   auth-change handler called `setLoading(true)` on EVERY Supabase event including `TOKEN_REFRESHED`
+   (~hourly + on tab refocus), so `ProtectedRoute` (gates on `loading || !user`) unmounted the whole app
+   subtree and remounted after the profile re-fetch — flashing "Authenticating Session Node…" and dropping
+   in-session unsaved state. Predates B5 (the B2/B3/B4 closures all noted this same flake). Fix: skip the
+   re-gate + profile re-fetch for a SAME-user event (tracked via `userIdRef`); genuine sign-in/out keep the
+   original gate. A same-user refresh still RECOVERS a null profile (transient initial-load failure) quietly
+   without gating (preserves the pre-fix self-heal — per /code-review). 
+2. **One-off assign input wiped by virtualizer churn (B5 follow-on commit).** `OneOffCodeCell` held its
+   open/text state INSIDE the virtualized grid body; the one-off (last/boundary row) mounts+unmounts as the
+   virtualizer re-measures (proven via mount/unmount probes), wiping that state so the assign input never
+   opened. Fix (matches the §2/§3 rule + the context-menu pattern): `OneOffCodeCell` is now display+dispatch
+   only; the validated code input moved to a HOST-owned `OneOffAssignPopover` (state in
+   `GcPersonnelGridStep`/`SiteOpsGridStep`, immune to grid churn). Cell → `ctx.requestAssign` (stable,
+   ref-backed) → host `setAssignTarget` → popover → `grid.assignOneOffCode`.
+
+Suite still **98/1174**, tsc + build green after both fixes; /code-review (focused reviewer agent) → 1
+finding (the profile-recovery regression), applied.
 
 ### Manual /verify (architect spot-check — kickoff DoD item)
 2-minute browser pass: (1) Step 3 → **"+ One-off line"** → add a $5,000 lump sum → the row shows
