@@ -10,26 +10,31 @@ import { WorkbookCommand } from "@/types";
 // A lightweight `sizes` state triggers re-renders so that UI elements
 // (canUndo/canRedo) stay in sync without relying on undocumented React
 // state-updater timing.
+//
+// Generic over the command payload type (B2/B3): Step 4 uses the default
+// `WorkbookCommand`; the Step 2/3 section grids (useSectionLineGrid) instantiate it
+// with their own leaner `SectionGridCommand` union. The default keeps every existing
+// caller byte-identical — `useCommandHistory()` resolves exactly as before.
 // ---------------------------------------------------------------------------
 
 const MAX_HISTORY_DEPTH = 50;
 
-export interface UseCommandHistoryReturn {
-  pushCommand: (cmd: WorkbookCommand) => void;
-  undo: () => WorkbookCommand | null;
-  redo: () => WorkbookCommand | null;
+export interface UseCommandHistoryReturn<T = WorkbookCommand> {
+  pushCommand: (cmd: T) => void;
+  undo: () => T | null;
+  redo: () => T | null;
   canUndo: boolean;
   canRedo: boolean;
   undoStackSize: number;
   redoStackSize: number;
 }
 
-export function useCommandHistory(): UseCommandHistoryReturn {
-  const undoStackRef = useRef<WorkbookCommand[]>([]);
-  const redoStackRef = useRef<WorkbookCommand[]>([]);
+export function useCommandHistory<T = WorkbookCommand>(): UseCommandHistoryReturn<T> {
+  const undoStackRef = useRef<T[]>([]);
+  const redoStackRef = useRef<T[]>([]);
   const [sizes, setSizes] = useState({ undo: 0, redo: 0 });
 
-  const pushCommand = useCallback((cmd: WorkbookCommand) => {
+  const pushCommand = useCallback((cmd: T) => {
     undoStackRef.current = [
       ...undoStackRef.current.slice(-(MAX_HISTORY_DEPTH - 1)),
       cmd,
@@ -38,7 +43,7 @@ export function useCommandHistory(): UseCommandHistoryReturn {
     setSizes({ undo: undoStackRef.current.length, redo: 0 });
   }, []);
 
-  const undo = useCallback((): WorkbookCommand | null => {
+  const undo = useCallback((): T | null => {
     const stack = undoStackRef.current;
     if (stack.length === 0) return null;
 
@@ -52,7 +57,7 @@ export function useCommandHistory(): UseCommandHistoryReturn {
     return popped;
   }, []);
 
-  const redo = useCallback((): WorkbookCommand | null => {
+  const redo = useCallback((): T | null => {
     const stack = redoStackRef.current;
     if (stack.length === 0) return null;
 

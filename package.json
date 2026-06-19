@@ -15,6 +15,7 @@
     "type-disposition": "node scripts/catalog-type-disposition.js",
     "seed-type-overrides": "node --env-file=.env.local scripts/seed-cost-type-overrides.js",
     "upload-template": "node --env-file=.env.local scripts/upload-template.js",
+    "sweep-section-lines": "vite-node -c vitest.config.ts scripts/sweep-section-lines.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test --project=chromium",

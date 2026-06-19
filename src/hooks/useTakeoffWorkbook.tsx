@@ -850,6 +850,7 @@ export function useTakeoffWorkbook(
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
+                  e.stopPropagation();
                   meta.setSelection({ rowId: row.id, columnId: def.id, isEditing: false });
                   meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: def.id });
                 }}
@@ -1046,6 +1047,7 @@ export function useTakeoffWorkbook(
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     meta.setSelection({ rowId: row.id, columnId: "itemId", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "itemId" });
                   }}
@@ -1139,6 +1141,7 @@ export function useTakeoffWorkbook(
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     meta.setSelection({ rowId: row.id, columnId: "description", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "description" });
                   }}
@@ -1245,6 +1248,7 @@ export function useTakeoffWorkbook(
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     meta.setSelection({ rowId: row.id, columnId: "matchedQty", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "matchedQty" });
                   }}
@@ -1321,6 +1325,7 @@ export function useTakeoffWorkbook(
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     meta.setSelection({ rowId: row.id, columnId: "uom", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "uom" });
                   }}
@@ -1391,6 +1396,7 @@ export function useTakeoffWorkbook(
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     meta.setSelection({ rowId: row.id, columnId: "unitPrice", isEditing: false });
                     meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "unitPrice" });
                   }}

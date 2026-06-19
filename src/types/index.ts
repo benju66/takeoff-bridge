@@ -1,4 +1,5 @@
 import type { Binding } from "@/lib/bindings/types";
+import type { EstimateSectionLine } from "./db";
 
 export interface TogalRowPayload {
   Classification: string;
@@ -311,6 +312,115 @@ export type WorkbookCommand =
   | SetBindingCommand
   | ClearBindingCommand;
 
+// ---------------------------------------------------------------------------
+// SectionGridCommand — the Step-2 / Step-3 (GC Personnel / Site Operations) grid
+// undo/redo payloads (B2 introduced it for GC; B3 generalized it for both).
+//
+// The section grids are backed by `EstimateSectionLine` rows, not
+// `ProcessedTakeoffRow`, so they carry their OWN command union rather than widening
+// WorkbookCommand with foreign-row-typed variants. Consumed by the shared
+// `useSectionLineGrid` core via the generic useCommandHistory<SectionGridCommand>.
+// Each command holds FULL inverse data (AGENTS.md compounding-history): both engines
+// are PURE from inputs, so a single prev/next input value is full-fidelity — every
+// derived qty/total recomputes from it, no cascade snapshot needed.
+//
+// NOTE: the per-line type-over (D3 / Phase A+1) is deliberately NOT a command — it
+// is an append-only `estimate_overrides` audit action with its own set/revert
+// affordance (B2-D2), so it never enters this undo stack.
+// ---------------------------------------------------------------------------
+
+/**
+ * A single section-grid input edit. For GC (Step 2): a utilization %, a staff rate
+ * override, an equipment lump sum, or a manual entry. For Site-Ops (Step 3): a typed
+ * quantity or a typed rate. `target` selects which calc-hook setter the section's
+ * `applyEdit` dispatcher drives (it is section-defined, so the type is an open
+ * `string`); `key` is the catalog config key (role/equipment/manual/line key) the
+ * setter expects. A `prevValue` of `undefined` for a GC `rate` edit means "no override
+ * existed" → undo calls `resetRate` (clears the override) rather than setting a number.
+ */
+export interface EditSectionCellCommand {
+  type: "EDIT_SECTION_CELL";
+  lineId: string;
+  target: string;
+  key: string;
+  prevValue: number | undefined;
+  nextValue: number | undefined;
+}
+
+/** Toggle a section-grid cell lock (in-session only for B2/B3 — not persisted). */
+export interface ToggleSectionCellLockCommand {
+  type: "TOGGLE_SECTION_CELL_LOCK";
+  cellKey: string;
+  prevLocked: boolean;
+  nextLocked: boolean;
+}
+
+/**
+ * Remove a catalog section line that doesn't apply (Phase B4 / D2). The active line set
+ * becomes a SUBSET — the line drops from the grid, the grand total, the linked-division
+ * bridge, and the export. `code` is what the calc hook's removed-codes set keys on; `line`
+ * is the full snapshot captured for inverse fidelity (AGENTS.md compounding-history). Undo
+ * restores the code (re-synthesizing the catalog seed with its preserved blob inputs).
+ */
+export interface RemoveSectionLineCommand {
+  type: "REMOVE_SECTION_LINE";
+  code: string;
+  line: EstimateSectionLine;
+}
+
+/**
+ * Re-add a previously-removed catalog line from the per-section picker (Phase B4 / D2). The
+ * inverse of REMOVE: the code leaves the removed-codes set and the catalog seed line returns
+ * (re-synthesized from the preserved blob inputs — so only `code` is needed). Only catalog
+ * lines are re-addable — bespoke structured lines are removable but NOT user-mintable (ID-4).
+ */
+export interface AddSectionLineCommand {
+  type: "ADD_SECTION_LINE";
+  code: string;
+}
+
+/**
+ * Add an estimator-authored ONE-OFF line (Phase B5 / D1) — a generic manual entry NOT in the
+ * catalog, routed through the existing manual-line evaluator (no new per-line math, ID-4). The
+ * full new line is carried so undo (remove it) / redo (re-add the identical line, preserving its
+ * id = code = engine key + typed inputs) is full-fidelity (AGENTS.md compounding-history).
+ */
+export interface AddOneOffLineCommand {
+  type: "ADD_ONE_OFF_LINE";
+  line: EstimateSectionLine;
+}
+
+/** Remove a one-off line (Phase B5 / D1) — the inverse of ADD_ONE_OFF_LINE; the full line
+ *  snapshot lets undo re-add it identically (with its assigned code + typed value preserved). */
+export interface RemoveOneOffLineCommand {
+  type: "REMOVE_ONE_OFF_LINE";
+  line: EstimateSectionLine;
+}
+
+/**
+ * Assign / re-assign a one-off's resolved Procore code + cost type (Phase B5 / D1 — the
+ * validated escape hatch). Carries prev/next code+type so undo restores the prior assignment
+ * (or the uncoded state). The code is validated against the Procore authority BEFORE this
+ * command is pushed, so an invalid code never reaches the undo stack.
+ */
+export interface AssignOneOffCodeCommand {
+  type: "ASSIGN_ONE_OFF_CODE";
+  id: string;
+  prevProcoreCode: string;
+  prevCostType: string;
+  nextProcoreCode: string;
+  nextCostType: string;
+}
+
+export type SectionGridCommand =
+  | EditSectionCellCommand
+  | ToggleSectionCellLockCommand
+  | RemoveSectionLineCommand
+  | AddSectionLineCommand
+  | AddOneOffLineCommand
+  | RemoveOneOffLineCommand
+  | AssignOneOffCodeCommand;
+
 export interface GridSelectionState {
   rowId: string | null;
   columnId: string | null;
@@ -319,40 +429,61 @@ export interface GridSelectionState {
 }
 
 // ---------------------------------------------------------------------------
-// TanStack Table Meta — Type augmentation for typed table.options.meta access
+// Grid host contract (B1b) — the generalized vocabulary every grid-host hook
+// exposes to the shared GridShell + decoration/Trust layer via table.options.meta.
+//
+// Step 4's useTakeoffWorkbook is the SOLE consumer today; Steps 2/3 will implement
+// this same shape with their own leaner state+command hooks (Track B). It generalizes
+// the former Step-4-specific TableMeta vocabulary: `keyof ProcessedTakeoffRow` → `keyof
+// TRow`, and the cell-edit literal union → the `TCellKind` parameter (paste excludes the
+// dropdown-only UOM kind). GridShell itself reads only `selection`, `setSelection`, and
+// `handleCustomKeyDown` from this; the rest is consumed by the host's own cell
+// renderers / context menu / keyboard hooks.
 // ---------------------------------------------------------------------------
 
 import type { RowData, Table } from '@tanstack/table-core';
 import type React from 'react';
 
+/** The cell-edit "kinds" Step 4's input components dispatch on. Steps 2/3 will define
+ *  their own when they implement {@link GridHostContract} (B2/B3). */
+export type GridCellKind = "code" | "desc" | "qty" | "price" | "uom";
+
+export interface GridHostContract<TRow extends RowData, TCellKind extends string = string> {
+  editingCellId: string | null;
+  editingValues: Record<string, string>;
+  setEditingCellId: React.Dispatch<React.SetStateAction<string | null>>;
+  setEditingValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  flushEditingBufferRef: React.MutableRefObject<() => void>;
+  focusedCellRef: React.MutableRefObject<{
+    rowId: string; field: string; initialValue: string | number | boolean;
+  } | null>;
+  focusedCustomCellRef: React.MutableRefObject<{
+    rowId: string; columnId: string; initialValue: string;
+  } | null>;
+  lockedCells: Record<string, boolean>;
+  handleCellEdit: (index: number, field: keyof TRow, value: string | number) => void;
+  commitCellEdit: (
+    rowId: string, field: keyof TRow,
+    prev: string | number | boolean, next: string | number | boolean
+  ) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: TCellKind, table: Table<TRow>) => void;
+  handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TRow>) => void;
+  handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: Exclude<TCellKind, "uom">) => void;
+  setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
+  deleteRow: (rowId: string) => void;
+  insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
+  handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
+  commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
+  selection: GridSelectionState;
+  setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
+}
+
+// TanStack Table Meta — typed `table.options.meta` access. The global augmentation IS the
+// Step-4 instantiation of the contract (Step 4 is the sole consumer), so `keyof TData` and
+// the GridCellKind union resolve exactly as the pre-B1b hand-written augmentation did.
 declare module '@tanstack/table-core' {
-  interface TableMeta<TData extends RowData> {
-    editingCellId: string | null;
-    editingValues: Record<string, string>;
-    setEditingCellId: React.Dispatch<React.SetStateAction<string | null>>;
-    setEditingValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-    flushEditingBufferRef: React.MutableRefObject<() => void>;
-    focusedCellRef: React.MutableRefObject<{
-      rowId: string; field: string; initialValue: string | number | boolean;
-    } | null>;
-    focusedCustomCellRef: React.MutableRefObject<{
-      rowId: string; columnId: string; initialValue: string;
-    } | null>;
-    lockedCells: Record<string, boolean>;
-    handleCellEdit: (index: number, field: keyof ProcessedTakeoffRow, value: string | number) => void;
-    commitCellEdit: (
-      rowId: string, field: keyof ProcessedTakeoffRow,
-      prev: string | number | boolean, next: string | number | boolean
-    ) => void;
-    handleKeyDown: (e: React.KeyboardEvent, rIdx: number, type: "code" | "desc" | "qty" | "price" | "uom", table: Table<TData>) => void;
-    handleCustomKeyDown: (e: React.KeyboardEvent, rIdx: number, colId: string, table: Table<TData>) => void;
-    handlePaste: (e: React.ClipboardEvent<HTMLInputElement>, startRowIdx: number, type: "code" | "desc" | "qty" | "price") => void;
-    setContextMenu: React.Dispatch<React.SetStateAction<ContextMenuState>>;
-    deleteRow: (rowId: string) => void;
-    insertManualRow: (direction: "above" | "below", targetIndex: number) => void;
-    handleCustomCellEdit: (rowIndex: number, columnId: string, value: string) => void;
-    commitCustomCellEdit: (rowId: string, columnId: string, prevValue: string, nextValue: string) => void;
-    selection: GridSelectionState;
-    setSelection: React.Dispatch<React.SetStateAction<GridSelectionState>>;
-  }
+  // Module augmentation must use `interface` (a type alias cannot augment a module), so the
+  // empty-extends form is intentional here — it pins TableMeta to the Step-4 contract.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {}
 }

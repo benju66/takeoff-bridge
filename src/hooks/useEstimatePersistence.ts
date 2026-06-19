@@ -33,11 +33,7 @@ export function useEstimatePersistence(
   rowVersion: number,
   takeoffSummary: TakeoffSummary,
   totalGCs: number,
-  gcUtilization: Record<string, number>,
-  gcEquipmentOverrides: Record<string, number>,
   siteOperationsTotal: number,
-  siteOpsQuantities: Record<string, number>,
-  siteOpsRates: Record<string, number>,
   /** Returns (and freezes-at-first-save) the per-project rate snapshot to persist
    *  (Rate-card Phase B). Idempotent once frozen — see useRateCardSnapshot. */
   freezeRateCardSnapshot: () => Record<string, number>,
@@ -45,23 +41,22 @@ export function useEstimatePersistence(
    *  the one-time "Estimate created" milestone snapshot on first save (Phase 4). */
   isNewEstimate: boolean = false,
   /**
-   * GC/Site-Ops Addressability dual-write: the GC + Site Ops section lines to
-   * persist alongside the legacy blobs, written via the independent
-   * `save_section_lines` RPC AFTER the primary save succeeds. The CALLER supplies
-   * the right lines per provenance — app-born synthesizes from the live blobs
-   * (Phase A3); imported synthesizes the frozen `imported_step23_lines` detail as
-   * lumpSum constants (Phase A4) — so this hook persists whatever it is given and
-   * needs no provenance flag. The write is fail-soft: nothing reads this table
-   * yet, so a section-line write failure must never flip the (successful) primary
-   * estimate save to an error. (Phase B6 makes the table authoritative and removes
-   * the fail-soft.)
+   * GC/Site-Ops Addressability: the GC + Site Ops section lines — the SOLE store for
+   * Step 2/3 inputs since Phase B6 (the four legacy blob columns were retired). Written
+   * via the independent `save_section_lines` RPC AFTER the primary save. The CALLER
+   * supplies the right lines per provenance — app-born synthesizes from the live inputs;
+   * imported synthesizes the frozen `imported_step23_lines` detail as lumpSum constants
+   * (D4) — so this hook persists whatever it is given and needs no provenance flag.
+   * Phase B6: the write is AUTHORITATIVE (no longer fail-soft) — a failure surfaces as a
+   * save error and the next debounced save retries.
    */
   sectionLines: EstimateSectionLine[] = []
 ): { saveStatus: SaveStatus; saveError: string | null } {
-  const gcUtilizationString = JSON.stringify(gcUtilization);
-  const gcEquipmentOverridesString = JSON.stringify(gcEquipmentOverrides);
-  const siteOpsQuantitiesString = JSON.stringify(siteOpsQuantities);
-  const siteOpsRatesString = JSON.stringify(siteOpsRates);
+  // Phase B6: a content key over the section lines — they carry every Step 2/3 input
+  // now (identity AND value), so stringifying them is the auto-save trigger for any GC /
+  // Site-Ops edit (replaces the retired blob-string keys; the id-only key missed in-line
+  // value edits).
+  const sectionLinesKey = JSON.stringify(sectionLines);
 
   // Save-status state machine
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -119,11 +114,7 @@ export function useEstimatePersistence(
           fee: takeoffSummary.fee,
           totalCost: takeoffSummary.totalEstimatedCost,
           generalConditionsTotal: totalGCs,
-          gcUtilization,
-          gcEquipmentOverrides,
           siteOperationsTotal,
-          siteOpsQuantities,
-          siteOpsRates,
           // Freeze-at-first-save: captures the live card on a new project's first
           // save, returns the existing frozen snapshot thereafter (idempotent).
           rateCardSnapshot: freezeRateCardSnapshot(),
@@ -131,22 +122,18 @@ export function useEstimatePersistence(
         rows
       );
 
+      // Phase B6: persist the section lines AUTHORITATIVELY (the sole store for Step 2/3
+      // inputs since the legacy blob columns were retired) via their independent RPC.
+      // No longer fail-soft — a failure throws into the catch below (save → 'error'), and
+      // the next debounced save retries with the latest lines. (App-born synthesizes from
+      // the live inputs; imported synthesizes the frozen detail as lumpSum constants, D4.)
+      if (sectionLines.length > 0) {
+        await saveSectionLines(projectId, sectionLines);
+      }
+
       if (!mountedRef.current) return;
       setSaveStatus('saved');
       setSaveError(null);
-
-      // Dual-write: persist the section lines (app-born synthesized from the live
-      // blobs, Phase A3; imported synthesized from the frozen detail, Phase A4) via
-      // their independent RPC. Fail-soft — the primary estimate save already
-      // committed (the legacy blobs / frozen detail are the authoritative source
-      // until a later phase), so a section-line write failure logs but never
-      // surfaces as an error. The next edit's debounced save retries with the
-      // latest lines.
-      if (sectionLines.length > 0) {
-        saveSectionLines(projectId, sectionLines).catch((err) => {
-          console.error('Section-line dual-write failed (primary estimate save committed):', err);
-        });
-      }
 
       // First-save milestone snapshot (Phase 4): a one-time "Estimate created"
       // checkpoint for a brand-new estimate. Fire-and-forget — snapshot loss must never
@@ -243,10 +230,7 @@ export function useEstimatePersistence(
     isLoaded,
     totalGCs,
     siteOperationsTotal,
-    gcUtilizationString,
-    gcEquipmentOverridesString,
-    siteOpsQuantitiesString,
-    siteOpsRatesString,
+    sectionLinesKey,
   ]);
 
   // Cleanup timers and mark unmounted on teardown

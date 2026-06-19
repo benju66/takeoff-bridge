@@ -27,7 +27,17 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-17 (GC/Site-Ops Addressability Phase A2: new
+-- Last updated: 2026-06-19 (GC/Site-Ops Addressability Phase B6: FINISH the
+-- migration — RETIRED the four legacy Step 2/3 input blob columns from
+-- project_estimates (gc_utilization, gc_equipment_overrides, site_ops_quantities,
+-- site_ops_rates) and removed them from the save_estimate RPC's upsert list. The
+-- estimate_section_lines table is now the SOLE store for Step 2/3 inputs; the
+-- strangler-fig dual-write/dual-read shim is gone. imported_step23_lines,
+-- rate_card_snapshot, general_conditions_total and site_operations_total REMAIN.
+-- A one-shot idempotent sweep (scripts/sweep-section-lines.ts, reusing
+-- synthesize.ts / imported.ts) synthesized section lines for every un-migrated
+-- project before the drop.
+-- Earlier — 2026-06-17 (GC/Site-Ops Addressability Phase A2: new
 -- estimate_section_lines table — one addressable row per GC Personnel (Step 2) /
 -- Site Operations (Step 3) line (plan ID-1). Stores line IDENTITY + estimator
 -- INPUTS only; NO authoritative total column (totals are recomputed by the calc
@@ -151,11 +161,13 @@ CREATE TABLE project_estimates (
   fee NUMERIC NOT NULL DEFAULT 0,
   total_cost NUMERIC NOT NULL DEFAULT 0,
   general_conditions_total NUMERIC DEFAULT 0,
-  gc_utilization JSONB DEFAULT '{}',
-  gc_equipment_overrides JSONB DEFAULT '{}',
   site_operations_total NUMERIC DEFAULT 0,
-  site_ops_quantities JSONB DEFAULT '{}',
-  site_ops_rates JSONB DEFAULT '{}',
+  -- NOTE: the four legacy Step 2/3 input blobs (gc_utilization,
+  -- gc_equipment_overrides, site_ops_quantities, site_ops_rates) were RETIRED in
+  -- GC/Site-Ops Addressability Phase B6 (2026-06-19). Step 2/3 inputs now live
+  -- SOLELY in estimate_section_lines (one addressable row per line). The two
+  -- NUMERIC section totals above remain as display caches; they are still derived
+  -- by the calc engine and written by save_estimate.
   -- Rate-card slice 1, Phase A: point-in-time snapshot of the company rate card
   -- in effect when this estimate was created (Record<line_code, rate>). Empty
   -- '{}' until Phase B wires freeze-at-first-save + backfill; nothing reads it
@@ -335,11 +347,14 @@ BEGIN
   END IF;
 
   -- Step 1: Upsert totals/markups (single row per project)
+  -- NOTE: the four legacy Step 2/3 input blobs were RETIRED in GC/Site-Ops
+  -- Addressability Phase B6 (2026-06-19) — they are no longer in this upsert.
+  -- Step 2/3 inputs are persisted SOLELY via the save_section_lines RPC. The two
+  -- NUMERIC section totals (general_conditions_total / site_operations_total) stay.
   INSERT INTO project_estimates (
     project_id, subtotal, construction_contingency, design_contingency,
     builders_risk, special_insurance, gl_insurance, bond, fee, total_cost,
-    general_conditions_total, gc_utilization, gc_equipment_overrides,
-    site_operations_total, site_ops_quantities, site_ops_rates,
+    general_conditions_total, site_operations_total,
     rate_card_snapshot, updated_at
   )
   VALUES (
@@ -354,11 +369,7 @@ BEGIN
     COALESCE((p_estimate->>'fee')::NUMERIC, 0),
     COALESCE((p_estimate->>'total_cost')::NUMERIC, 0),
     COALESCE((p_estimate->>'general_conditions_total')::NUMERIC, 0),
-    COALESCE(p_estimate->'gc_utilization', '{}'::JSONB),
-    COALESCE(p_estimate->'gc_equipment_overrides', '{}'::JSONB),
     COALESCE((p_estimate->>'site_operations_total')::NUMERIC, 0),
-    COALESCE(p_estimate->'site_ops_quantities', '{}'::JSONB),
-    COALESCE(p_estimate->'site_ops_rates', '{}'::JSONB),
     COALESCE(p_estimate->'rate_card_snapshot', '{}'::JSONB),
     now()
   )
@@ -373,11 +384,7 @@ BEGIN
     fee = EXCLUDED.fee,
     total_cost = EXCLUDED.total_cost,
     general_conditions_total = EXCLUDED.general_conditions_total,
-    gc_utilization = EXCLUDED.gc_utilization,
-    gc_equipment_overrides = EXCLUDED.gc_equipment_overrides,
     site_operations_total = EXCLUDED.site_operations_total,
-    site_ops_quantities = EXCLUDED.site_ops_quantities,
-    site_ops_rates = EXCLUDED.site_ops_rates,
     rate_card_snapshot = EXCLUDED.rate_card_snapshot,
     updated_at = EXCLUDED.updated_at;
 

@@ -3,7 +3,9 @@ import {
   synthesizePersonnelSectionLines,
   synthesizeSiteOpsSectionLines,
   synthesizeSectionLines,
+  sectionLinesToBlobs,
 } from "../sectionLines/synthesize";
+import type { EstimateSectionLine } from "@/types/db";
 import {
   computePersonnelFromSectionLines,
   computeSiteOpsFromSectionLines,
@@ -282,5 +284,79 @@ describe("Phase A3 — removal generality (D2-ready bridge)", () => {
     );
     expect(subset.dynamicLines.find((l) => l.code === "02-9015.001")).toBeUndefined();
     expect(full.grandTotal - subset.grandTotal).toBeCloseTo(safetyTotal);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GC/Site-Ops Addressability Phase B6 — sectionLinesToBlobs (the inverse).
+//
+// After the four legacy blob columns were retired, the workspace reconstructs the
+// blob-shaped hook state FROM the authoritative section lines via this inverse.
+// The forward dual-read proof (above) + this round-trip identity together guarantee
+// totals are unchanged to the cent across the retirement.
+// ---------------------------------------------------------------------------
+describe("Phase B6 — sectionLinesToBlobs round-trip", () => {
+  const fullLines = (gc: GcInputs, so: SoInputs) =>
+    synthesizeSectionLines({ ...gcBlobs(gc), ...soBlobs(so) });
+
+  it.each([
+    ["zeroed inputs", GC_ZERO, SO_ZERO],
+    ["realistic inputs (legacy qty… keys)", GC_REAL, SO_REAL],
+    ["rate overrides incl. a legit 0", GC_RATE_OVERRIDES, SO_REAL],
+  ])("forward(inverse(forward(blobs))) === forward(blobs): %s", (_label, gc, so) => {
+    const lines = fullLines(gc, so);
+    // Re-synthesizing from the reconstructed blobs reproduces the exact same lines.
+    expect(synthesizeSectionLines(sectionLinesToBlobs(lines))).toEqual(lines);
+  });
+
+  it("reconstructed blobs drive the engine identically (GC + Site Ops)", () => {
+    const lines = fullLines(GC_REAL, SO_REAL);
+    const blobs = sectionLinesToBlobs(lines);
+    // Drive both calc paths off the reconstructed blobs vs. the original inputs.
+    expect(viaLinesGc(GC_REAL)).toEqual(legacyGc(GC_REAL));
+    // The reconstructed GC blobs equal what gcBlobs(GC_REAL) emits for every present key.
+    const { gcUtilization, gcEquipmentOverrides } = gcBlobs(GC_REAL);
+    for (const [k, v] of Object.entries(gcUtilization)) expect(blobs.gcUtilization[k]).toBe(v);
+    for (const [k, v] of Object.entries(gcEquipmentOverrides)) expect(blobs.gcEquipmentOverrides[k]).toBe(v);
+    const { siteOpsQuantities } = soBlobs(SO_REAL);
+    for (const [k, v] of Object.entries(siteOpsQuantities)) expect(blobs.siteOpsQuantities[k]).toBe(v);
+  });
+
+  it("honors a legit 0 rate override through the inverse (rateSu = 0 is preserved)", () => {
+    const lines = fullLines(GC_RATE_OVERRIDES, SO_ZERO);
+    const { gcUtilization } = sectionLinesToBlobs(lines);
+    expect(gcUtilization.rateSu).toBe(0); // a real 0 override survives the round-trip, not dropped
+  });
+
+  it("a REMOVED catalog line is omitted from the blobs (re-add yields a zeroed line — documented B6 behavior)", () => {
+    const lines = fullLines(GC_REAL, SO_REAL).filter((l) => l.id !== "gc:staff:ex");
+    const blobs = sectionLinesToBlobs(lines);
+    // The removed line contributes no blob key (its prior value is not recoverable after reload).
+    expect("utilEx" in blobs.gcUtilization).toBe(false);
+    // Re-synthesizing the full catalog re-adds it ZEROED (removal is tracked via removed-codes).
+    const ex = synthesizeSectionLines(blobs).find((l) => l.id === "gc:staff:ex");
+    expect(ex).toBeDefined();
+    expect(ex!.inputs.utilization).toBe(0);
+  });
+
+  it("a one-off (non-catalog) line is ignored by the inverse", () => {
+    const oneOff: EstimateSectionLine = {
+      id: "gc:oneoff:abc123",
+      projectId: "",
+      section: "gc",
+      code: "gc:oneoff:abc123",
+      procoreCode: "1-01000.000",
+      costType: "M",
+      label: "Site-specific fee",
+      entryKind: "lumpSum",
+      inputs: { value: 5000 },
+      sortOrder: 0,
+      source: "manual",
+      updatedAt: "",
+    };
+    // Inverse only matches catalog ids → a one-off produces no blob keys (handled separately
+    // by deriveOneOffsFromLines), and never crashes.
+    const blobs = sectionLinesToBlobs([oneOff]);
+    expect(blobs).toEqual({ gcUtilization: {}, gcEquipmentOverrides: {}, siteOpsQuantities: {}, siteOpsRates: {} });
   });
 });

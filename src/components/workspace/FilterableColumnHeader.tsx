@@ -3,16 +3,17 @@
 import React, { memo, useMemo, useState } from "react";
 import { ListFilter } from "lucide-react";
 import type { Column, Table } from "@tanstack/react-table";
-import { ProcessedTakeoffRow } from "@/types";
 
-interface FilterableColumnHeaderProps {
-  column: Column<ProcessedTakeoffRow, unknown>;
-  table: Table<ProcessedTakeoffRow>;
+// Row-type-agnostic: this header only reads `column.id` + generic TanStack APIs, so it is
+// generic over the table's row type (B1b — GridShell<TRow> passes Column/Table<TRow>).
+interface FilterableColumnHeaderProps<TRow> {
+  column: Column<TRow, unknown>;
+  table: Table<TRow>;
   label: React.ReactNode;
   className?: string;
 }
 
-function FilterableColumnHeaderInner({ column, table, label, className = "" }: FilterableColumnHeaderProps) {
+function FilterableColumnHeaderInner<TRow>({ column, table, label, className = "" }: FilterableColumnHeaderProps<TRow>) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -174,4 +175,6 @@ function FilterableColumnHeaderInner({ column, table, label, className = "" }: F
   );
 }
 
-export const FilterableColumnHeader = memo(FilterableColumnHeaderInner);
+// `memo` erases the generic call signature; the cast restores it so callers can pass
+// Column/Table<TRow> for any row type while keeping the memoization at runtime.
+export const FilterableColumnHeader = memo(FilterableColumnHeaderInner) as typeof FilterableColumnHeaderInner;

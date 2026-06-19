@@ -19,10 +19,12 @@ page.tsx (ProjectWorkspace)
 │   ├── useExportHandlers() ← Excel/Procore export
 │   └── useCommandHistory() ← undo/redo stack
 │
-├── EstimateTable ← renders the virtualized grid
-│   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
-│   ├── @tanstack/react-virtual ← row virtualization
-│   ├── flexRender() ← renders cell functions from column defs
+├── EstimateTable ← Step 4 host: title bar, summary <tfoot>, status bar, Trust Inspector
+│   ├── GridShell<TRow> ← reusable grid surface (B1a extract, B1b generic): TanStack
+│   │   │                  plumbing + virtualized render, parameterized by GridShellConfig<TRow>
+│   │   ├── useGridKeyboard() ← single-container keyboard handler + focus safety net
+│   │   ├── @tanstack/react-virtual ← row virtualization
+│   │   └── flexRender() ← renders cell functions from column defs
 │   ├── ImportPreviewModal ← 3-stage import preview (rendered when pendingImport non-null)
 │   ├── SearchBar ← global filter input
 │   └── Status Bar ← row count, selection info
@@ -43,13 +45,26 @@ page.tsx (ProjectWorkspace)
 | `src/hooks/usePasteHandler.ts` | Multi-row/multi-col paste from clipboard |
 | `src/hooks/useCommandHistory.ts` | Undo/redo stack with `WorkbookCommand` payloads |
 | `src/hooks/useColumnDefinitions.ts` | Custom column CRUD, column ordering |
-| `src/components/workspace/EstimateTable.tsx` | Grid renderer with virtualization, click-outside, status bar |
+| `src/components/workspace/EstimateTable.tsx` | Step 4 host: title bar, summary `<tfoot>`, status bar, Trust Inspector, click-outside; renders `<GridShell config={…} footer={…}/>` |
+| `src/components/workspace/GridShell.tsx` | Reusable `GridShell<TRow>` grid surface (B1b): TanStack instance plumbing + virtualization + rendering, parameterized by a `GridShellConfig<TRow>` host projection (row id, group/divider derivation, flagged-row test, editable/center column sets, `renderCellOverlay` override-⚑ hook point). Consumers: Step 4 (`EstimateTable`), Step 2 (`GcPersonnelGridStep`, B2), and Step 3 (`SiteOpsGridStep`, B3). |
+| `src/hooks/useSectionLineGrid.tsx` | **Shared Step-2/Step-3 grid CORE (B3).** The section-agnostic mechanics extracted from B2's GC hook so Steps 2 + 3 render through ONE surface (plan ID-3): selection / context-menu / in-session cell-lock, `useCommandHistory<SectionGridCommand>`, the click-to-toggle cell renderers, keyboard nav, the `useReactTable<EstimateSectionLine>` instance + `meta` (`GridHostContract`), undo/redo, the per-line type-over (commit/revert → `estimate_overrides`, NOT on the undo stack), and the `GridShellConfig` (section dividers + override-⚑ overlay). Parameterized by a `SectionGridSpec` (rows, calc-by-`code` lookup, `applyEdit` setter dispatch, `buildColumns`, grouping, and — B4 — `catalog` + `applyRemove`/`applyRestore`). **B4 (D2) adds the REMOVE/ADD line pair:** `removeLine(line)` / `restoreLine(code)` push a `REMOVE_SECTION_LINE` / `ADD_SECTION_LINE` command (command pushed BEFORE the dispatch, the standard guardrail) and drive the calc hook's removed-codes set; undo/redo invert them; the derived `removedLines` (catalog − present) feeds the picker. **B5 (D1) adds the one-off triad:** `addOneOff(line)` / `removeOneOff(line)` / `assignOneOffCode(line, code, type)` push `ADD_ONE_OFF_LINE` / `REMOVE_ONE_OFF_LINE` / `ASSIGN_ONE_OFF_CODE` (full inverse data) and drive the calc hook's one-off setters; one-off value/rate edits reuse `EDIT_SECTION_CELL` via the `oneOffValue` / `oneOffRate` targets. Spec gains `applyAddOneOff`/`applyRemoveOneOff`/`applyAssignOneOffCode` + `onRequestAssign`; the column ctx exposes `requestAssign` (stable, ref-backed) so the Code cell opens the host's assign popover. |
+| `src/hooks/useGcPersonnelGrid.tsx` | Step 2 (GC Personnel) grid SPEC (B2; B3 onto the core): supplies the GC pieces to `useSectionLineGrid` — the 01.A–01.F rows, the calc lookup, the `applyEdit` setter dispatch (utilization / rate / equipment / manual), the GC columns, and the section grouping. A veneer over `usePersonnelCalculations` (rows = `personnel.sectionLines`; totals = `personnel.calcResult`). |
+| `src/components/workspace/GcPersonnelGridStep.tsx` | Step 2 host: title bar, undo/redo, summary `<tfoot>` (grand total), lock/unlock context menu, click-outside-deselect, step-local Ctrl+Z/Y listener; renders `<GridShell config={…} footer={…}/>`. |
+| `src/lib/sectionLines/gcGridModel.ts` | Pure (no-React) Step-2 grid model: the 01.A–01.F grouping/order, the calc-by-`code` join (`buildCalcLookup`), the `entry` value per kind, and the section-line → personnel-setter resolution (`resolveEntryTarget`/`resolveRoleKey`). Unit-tested in `gcGridModel.test.ts`. |
+| `src/hooks/useSiteOpsGrid.tsx` | Step 3 (Site Operations) grid SPEC (B3): the Site-Ops twin of `useGcPersonnelGrid` — supplies the 02.A–02.H rows, the calc lookup, the `applyEdit` setter dispatch (quantity / rate), the Site-Ops columns, and grouping to `useSectionLineGrid`. A veneer over `useInfrastructureCalculations`. Differs from GC in one way: a `qtyRate` manual line has an editable rate cell on top of the editable quantity cell. |
+| `src/components/workspace/SiteOpsGridStep.tsx` | Step 3 host (twin of `GcPersonnelGridStep`): title bar, undo/redo, summary `<tfoot>` (grand total), lock/unlock context menu, click-outside-deselect, step-local Ctrl+Z/Y listener; renders `<GridShell config={…} footer={…}/>`. |
+| `src/components/workspace/AddLinePicker.tsx` | **"+ Add line" picker (B4 / D2).** Shared by both step hosts: lists the grid's `removedLines` grouped by the same section dividers and re-adds one on click (`restoreLine`). Only catalog lines are re-addable (ID-4 — no structured-line minting). Dropdown dismiss uses the container-ref check, NOT `stopPropagation` (§8 #7). The hosts also gain a context-menu **"Remove line"** item (`removeLine(ctxLine)`). |
+| `src/lib/sectionLines/oneOff.ts` | **One-off line model (B5 / D1 — pure).** A one-off is a `source: 'manual'` section line with `id === code === engine manual-config key` (one generated marker). `isOneOffLine` (the single detector, shared by grid / synthesis split / load reconstruction), `newOneOffLine` (mints an UNCODED line; the estimator assigns the Procore code in the row), `oneOffToGcManualConfig`/`oneOffToSiteOpsManualConfig` + `oneOffValueInjection` (feed the EXISTING `buildXLineSet({ addManual })` — no new math, ID-4), and `validateOneOffCode` (resolve a free-entry Procore code via the authority + capture its cost type, D1). Unit-tested in `oneOffSectionLines.test.ts`. |
+| `src/components/workspace/AddOneOffLineForm.tsx` | **"+ One-off line" popover (B5 / D1).** Title-bar form on both step hosts: description / kind (Quantity × Rate \| Lump sum) / unit / value (+ rate) → mints an UNCODED one-off via `newOneOffLine` → the grid's undoable `addOneOff`. Dismiss = container-ref check (§8 #7). |
+| `src/components/workspace/OneOffCodeCell.tsx` | **One-off Code-cell affordance (B5 / D1) — DISPLAY + DISPATCH ONLY.** The Code column renders this for a one-off row: UNCODED → "⚠ Assign code" (`data-testid` `one-off-assign`); CODED → the code (`one-off-coded`, click to re-assign). Both dispatch `onRequestAssign(line, x, y)` to the STEP HOST. It holds **NO** open/text state — it lives in the virtualized body, where the boundary row mounts/unmounts as the virtualizer re-measures (proven via mount/unmount probes), so any per-cell state is wiped (the §2/§3 rule: interactive cell state lives in the host, never a transient per-cell component). An uncoded one-off is BLOCKED from export (`validateExportReadiness` pushes a `kind: 'oneOff'` blocker; `useExportHandlers` surfaces a clear, line-named message — the takeoff-row override modal can't fix it). |
+| `src/components/workspace/OneOffAssignPopover.tsx` | **Host-owned one-off assign popover (B5 / D1).** Rendered by `GcPersonnelGridStep` / `SiteOpsGridStep` (state in the host, like the context menu), NOT inside the grid → survives the virtualizer churn. Validates a free-entry Procore code (`validateOneOffCode`) → the grid's undoable `assignOneOffCode(line, code, costType)`. The Code cell's click flows `OneOffCodeCell.onRequestAssign` → `ctx.requestAssign` (stable, ref-backed in `useSectionLineGrid`) → the host's `setAssignTarget`. Dismiss = container-ref check (§8 #7) / Escape. |
+| `src/lib/sectionLines/siteOpsGridModel.ts` | Pure (no-React) Step-3 grid model: the 02.A–02.H grouping/order, the calc-by-`code` join (`buildSiteOpsCalcLookup`), the `entry` value per kind, and the section-line → infrastructure-setter resolution (`resolveQtyKey`/`resolveRateKey`). Unit-tested in `siteOpsGridModel.test.ts`. |
 | `src/components/workspace/ImportPreviewModal.tsx` | 3-stage import preview with UOM override dropdowns |
 | `src/components/workspace/StringCellInput.tsx` | Buffered text editor for string cells |
 | `src/components/workspace/NumberCellInput.tsx` | Buffered numeric editor with `parseFloat` commit |
 | `src/components/workspace/SelectCellInput.tsx` | Dropdown select editor for UOM cells |
 | `src/components/workspace/ContextMenuPortal.tsx` | Right-click menu: lock/insert/delete |
-| `src/types/index.ts` | `GridSelectionState`, `ProcessedTakeoffRow`, `ColumnDefinition`, TanStack meta augmentation |
+| `src/types/index.ts` | `GridSelectionState`, `ProcessedTakeoffRow`, `ColumnDefinition`, `GridHostContract<TRow, TCellKind>` (the generalized host vocabulary), and the TanStack meta augmentation (`TableMeta extends GridHostContract<TData, GridCellKind>`) |
 
 ---
 
@@ -236,6 +251,10 @@ Active row (matching `selection.rowId`): `bg-blue-50/60 dark:bg-blue-950/40` + `
 5. **Do NOT read selection from closure variables in cell functions** — Cell functions are defined inside `useMemo` and captured at memo time. Always read selection from `info.table.options.meta!.selection` which is updated via `useReactTable.setOptions` on every render.
 
 6. **Do NOT add `tabIndex` or `onKeyDown` to individual cell display divs** — Per-cell focus management is fragile: non-editable columns have no focusable elements, stale closures capture wrong coordinates, and focus is lost during virtualizer re-renders. Use the single-container pattern via `useGridKeyboard` instead.
+
+7. **Do NOT rely on a menu's `onMouseDown={e => e.stopPropagation()}` to keep an open context menu from dismissing** — a `document.addEventListener("mousedown", …)` outside-click dismiss handler still fires (React's synthetic `stopPropagation` does not reliably stop the native document listener), closing the menu on the button's `mousedown` so the `onClick` never lands. Dismiss instead by checking the event target against a **menu ref** (`if (menuRef.current?.contains(e.target)) return;`). The section-grid hosts (`GcPersonnelGridStep` / `SiteOpsGridStep`) use this for the "Override quantity" / lock menu.
+
+8. **Do NOT render a `renderCellOverlay` (the override ⚑) as an inline sibling after a `w-full h-full` cell `div`** — the full-size cell content obscures/overflows it and it is not clickable. Position the overlay `absolute` in the cell corner (the GridShell `<td>` is `relative`) so it sits above the content and the revert click works.
 
 ---
 
