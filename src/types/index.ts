@@ -192,6 +192,22 @@ export interface EditCustomCellCommand {
   nextValue: string;
 }
 
+/**
+ * Estimate Buyout Lens (Phase 3) — an undoable Vendor/Actual edit on the browser-local
+ * buyout side-ledger. The simplest command in the union: a single cell, no cascade, no
+ * registry, no DB. Undo/redo route ONLY to the localStorage-backed buyout store (never
+ * `rows`, the engine, or the export — L-5), so it can interleave on the shared undo stack
+ * with estimate edits while keeping every dollar untouched. `actual` carries `number | null`
+ * (null = cleared, reads as the Estimate per L-3); `vendor` carries a string.
+ */
+export interface EditBuyoutCellCommand {
+  type: "EDIT_BUYOUT_CELL";
+  rowId: string;
+  field: "vendor" | "actual";
+  prevValue: string | number | null;
+  nextValue: string | number | null;
+}
+
 export interface PasteCommand {
   type: "PASTE";
   /** Ordered list of atomic sub-edits grouped as a single undo unit */
@@ -302,6 +318,7 @@ export interface ClearBindingCommand {
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
+  | EditBuyoutCellCommand
   | PasteCommand
   | InsertRowCommand
   | DeleteRowCommand
@@ -493,5 +510,14 @@ declare module '@tanstack/table-core' {
      * never rows/DB/export.
      */
     buyout?: BuyoutStore;
+    /**
+     * Estimate Buyout Lens (Phase 3) — undoable commit for the Vendor cell. Reads the current
+     * stored value, pushes an EDIT_BUYOUT_CELL command, THEN writes the buyout store (so a
+     * single Ctrl+Z reverses it). Optional for the same reason as `buyout` (Steps 2/3 metas
+     * satisfy TableMeta without it). Cells + the keyboard Delete path commit through here.
+     */
+    commitBuyoutVendor?: (rowId: string, nextValue: string) => void;
+    /** Estimate Buyout Lens (Phase 3) — undoable commit for the Actual cell (`null` = cleared). */
+    commitBuyoutActual?: (rowId: string, nextValue: number | null) => void;
   }
 }

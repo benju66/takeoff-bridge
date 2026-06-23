@@ -90,6 +90,27 @@ export interface BuyoutStore {
   map: Record<string, BuyoutLine>;
 }
 
+/**
+ * Applies an EDIT_BUYOUT_CELL value to the buyout store — the shared core of the dispatcher's
+ * redo (pass `nextValue`) and undo (pass `prevValue`) (Phase 3). Pure routing: `vendor` → a
+ * string via `setVendor`, `actual` → a `number | null` via `setActual` (a cleared Actual stays
+ * `null`, reading as the Estimate per L-3). localStorage only — it NEVER touches rows, the
+ * engine, or the export, so an undo/redo can never move a dollar. Kept here (pure, store-typed)
+ * so it is unit-testable with a fake `BuyoutStore` and DRY across the forward/inverse cases.
+ */
+export function applyBuyoutCommandValue(
+  store: Pick<BuyoutStore, "setVendor" | "setActual">,
+  rowId: string,
+  field: "vendor" | "actual",
+  value: string | number | null,
+): void {
+  if (field === "vendor") {
+    store.setVendor(rowId, (value ?? "") as string);
+  } else {
+    store.setActual(rowId, value as number | null);
+  }
+}
+
 /** Per-line variance result, all in dollars except `variancePct` (a ratio, e.g. 0.1 = 10%). */
 export interface LineVariance {
   /** Actual when entered, else the Estimate (L-3) — what this line is projected to cost. */

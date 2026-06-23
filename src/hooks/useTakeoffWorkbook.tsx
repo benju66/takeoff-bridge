@@ -256,6 +256,25 @@ export function useTakeoffWorkbook(
   // hides the estimating-only columns; Estimate is the exact inverse. Fed to the table state.
   const columnVisibility = useMemo(() => buyoutColumnVisibility(lensView), [lensView]);
 
+  // Estimate Buyout Lens (Phase 3) — undoable Vendor/Actual commits. Each reads the CURRENT
+  // stored value as `prevValue`, pushes an EDIT_BUYOUT_CELL command BEFORE the store setter
+  // (AGENTS.md compounding-history), THEN writes the browser-local store. No-op edits
+  // (prev === next) are skipped so they never land on the undo stack. localStorage ONLY — never
+  // rows / engine / export / DB (L-5). Exposed on the table `meta` so the cells AND the keyboard
+  // Delete path share this single push-then-set path.
+  const commitBuyoutVendor = useCallback((rowId: string, nextValue: string) => {
+    const prevValue = buyout.getLine(rowId).vendor;
+    if (prevValue === nextValue) return;
+    commandHistory.pushCommand({ type: "EDIT_BUYOUT_CELL", rowId, field: "vendor", prevValue, nextValue });
+    buyout.setVendor(rowId, nextValue);
+  }, [buyout, commandHistory]);
+  const commitBuyoutActual = useCallback((rowId: string, nextValue: number | null) => {
+    const prevValue = buyout.getLine(rowId).actual;
+    if (prevValue === nextValue) return;
+    commandHistory.pushCommand({ type: "EDIT_BUYOUT_CELL", rowId, field: "actual", prevValue, nextValue });
+    buyout.setActual(rowId, nextValue);
+  }, [buyout, commandHistory]);
+
   // Stable refs — must be declared before hooks that consume them
   const rowsRef = useRef(rows);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
@@ -365,6 +384,7 @@ export function useTakeoffWorkbook(
     setRows, setUserRegistry, setGlobalRegistry,
     setColumnDefs, setLockedCells, setUnmappedTakeoffClassifications,
     globalRegistry, setBindings,
+    buyout, setLensView,
   );
 
   // ---------------------------------------------------------------------------
@@ -1549,7 +1569,7 @@ export function useTakeoffWorkbook(
                 id={`vendor-input-${index}`}
                 value={line.vendor}
                 className="w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-slate-100 font-medium"
-                onCommit={(newVal) => meta.buyout?.setVendor(row.id, newVal)}
+                onCommit={(newVal) => meta.commitBuyoutVendor?.(row.id, newVal)}
                 onKeyDown={(e) => meta.handleCustomKeyDown(e, index, "vendor", info.table)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1604,8 +1624,8 @@ export function useTakeoffWorkbook(
                 // it back to null so it reads as the Estimate (L-3) — not a $0 commit.
                 value={line.actual ?? 0}
                 className="w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-white"
-                onCommit={(numVal) => meta.buyout?.setActual(row.id, numVal)}
-                onCommitEmpty={() => meta.buyout?.setActual(row.id, null)}
+                onCommit={(numVal) => meta.commitBuyoutActual?.(row.id, numVal)}
+                onCommitEmpty={() => meta.commitBuyoutActual?.(row.id, null)}
                 onKeyDown={(e) => meta.handleCustomKeyDown(e, index, "actual", info.table)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1735,9 +1755,13 @@ export function useTakeoffWorkbook(
       commitCustomCellEdit,
       selection,
       setSelection,
-      // Estimate Buyout Lens (Phase 2) — the browser-local store the buyout cell renderers
-      // and the keyboard-nav Delete path commit through (localStorage only; never rows/DB).
+      // Estimate Buyout Lens (Phase 2) — the browser-local store the buyout cell renderers read
+      // through (getLine) and the rollup consumes (localStorage only; never rows/DB).
       buyout,
+      // Phase 3 — the undoable WRITE path: cells + the keyboard Delete path commit through these
+      // (push EDIT_BUYOUT_CELL, then set the store), NOT buyout.setVendor/setActual directly.
+      commitBuyoutVendor,
+      commitBuyoutActual,
     },
   });
 

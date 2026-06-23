@@ -264,12 +264,13 @@ export function useKeyboardNavigation(
           meta.handleCustomCellEdit(rIdx, columnId, "");
           meta.commitCustomCellEdit(rows[rIdx]?.original.id, columnId, String(rows[rIdx]?.original.customFields?.[columnId] ?? ""), "");
         } else if (isBuyoutColumn(columnId)) {
-          // Buyout cells live in the browser-local store, not the row — clear THERE, never via
-          // the row/DB edit path. Empty vendor = "", cleared actual = null (reads as estimate, L-3).
+          // Buyout cells live in the browser-local store, not the row — clear THERE via the
+          // undoable commit helpers (push EDIT_BUYOUT_CELL, then set), never the row/DB edit
+          // path. Empty vendor = "", cleared actual = null (reads as estimate, L-3).
           const rowId = rows[rIdx]?.original.id;
-          if (rowId && meta.buyout) {
-            if (columnId === "vendor") meta.buyout.setVendor(rowId, "");
-            else meta.buyout.setActual(rowId, null);
+          if (rowId) {
+            if (columnId === "vendor") meta.commitBuyoutVendor?.(rowId, "");
+            else meta.commitBuyoutActual?.(rowId, null);
           }
         } else {
           const prevVal = (rows[rIdx]?.original[columnId as keyof ProcessedTakeoffRow] ?? "") as string | number | boolean;
