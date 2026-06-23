@@ -1,7 +1,7 @@
 # Estimate Buyout Lens — Phase 4 closure + merge proposal
 
-_2026-06-23 · branch `estimate-buyout-lens` · Phase 4 commit `736bff5` (off Phase 3 `e075983`,
-off `main` @ `d47c231`)_
+_2026-06-23 · branch `estimate-buyout-lens` · Phase 4 commit `736bff5` + Projected Profit
+follow-on `a9b211e` (branch tip; off Phase 3 `e075983`, off `main` @ `d47c231`)_
 
 ## Status: WORKSTREAM COMPLETE — awaiting architect approval to merge to `main`
 
@@ -63,6 +63,25 @@ gate). Per CLAUDE.md Git Workflow, default is a direct `--no-ff` merge; a PR is 
 - `src/components/workspace/EstimateTable.tsx` — `BuyoutRollupFooter` (numbers + bar) +
   shared `money()` formatter; rendered only in the Buyout lens.
 - `src/lib/__tests__/buyout.test.ts` — `resolveLineEstimate` cases.
+
+## Phase 4 follow-on — Projected Profit footer (`a9b211e`, on the same branch)
+After inspecting the company template's **STEP 4 - ESTIMATE** sheet, we confirmed columns
+**O = Vendor** and **P = Actual** (`P = I` by default) — i.e. the spreadsheet's O/P ARE the
+Buyout columns — and the bottom rows are **TOTAL PROJECTED COST** (`P341 = SUM(P10:P340)`),
+**Projected Profit $** (`O347 = I341 − P341`) and **Projected Profit %** (`P347 = O347/P341`).
+Architect approved adding these to the footer (keeping the % committed bar). The footer now shows:
+- **Total Estimate (Bid)** = engine Total Estimated Cost (incl. modifiers + fee) → ties to `I341`.
+- **Total Projected Cost** = `bid − profit` → ties to `P341`.
+- **Projected Profit ($ + %)** = `fee + buyout savings`, % of projected cost → ties to `O347`/`P347`.
+- **% committed bar** kept (buyout PROGRESS, distinct from the margin %).
+
+Math is pure + tested (`computeBuyoutProfit` in `buyout.ts`): the Fee is in the bid but isn't a
+cost (template marks its Actual "NA"), so it falls straight to profit; every dollar under estimate
+(the data-line savings = `rollup.projectedVariance`) adds to it. Anchored on the **unfiltered**
+`fullTakeoffSummary` bid + fee so it's whole-estimate consistent with the rollup. Still
+display-only/browser-local — goldens still tie **$0.00**. Suite **1232** green, tsc/build clean,
+lint-clean, `/code-review` clean (one cosmetic `abs()` fix). This resolves the product note below
+(the footer "Estimate" was data-lines-only; "Total Estimate (Bid)" now shows the full bid).
 
 ## One product note for the architect (not a bug)
 The footer's **"Estimate total" is the sum of the buyout-able data lines only** — it excludes
