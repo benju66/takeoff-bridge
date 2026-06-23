@@ -1,4 +1,5 @@
 import type { Binding } from "@/lib/bindings/types";
+import type { BuyoutStore } from "@/lib/buyout";
 import type { EstimateSectionLine } from "./db";
 
 export interface TogalRowPayload {
@@ -482,8 +483,15 @@ export interface GridHostContract<TRow extends RowData, TCellKind extends string
 // Step-4 instantiation of the contract (Step 4 is the sole consumer), so `keyof TData` and
 // the GridCellKind union resolve exactly as the pre-B1b hand-written augmentation did.
 declare module '@tanstack/table-core' {
-  // Module augmentation must use `interface` (a type alias cannot augment a module), so the
-  // empty-extends form is intentional here — it pins TableMeta to the Step-4 contract.
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {}
+  // Module augmentation must use `interface` (a type alias cannot augment a module). It pins
+  // TableMeta to the Step-4 contract, plus the Step-4-only Buyout lens store below.
+  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {
+    /**
+     * Estimate Buyout Lens (Phase 2) — the browser-local Vendor/Actual side-ledger, owned by
+     * useTakeoffWorkbook. Optional because Steps 2/3 grid metas also satisfy TableMeta and do
+     * not provide it. Buyout cell renderers commit through this store ONLY (localStorage) —
+     * never rows/DB/export.
+     */
+    buyout?: BuyoutStore;
+  }
 }

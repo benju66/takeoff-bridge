@@ -14,7 +14,7 @@ import React, { useRef, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useReactTable } from "@tanstack/react-table";
 import type { Column } from "@tanstack/react-table";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2 } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2, Layers } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -28,6 +28,7 @@ import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
 import { buildFlagsModel } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
+import type { LensView } from "@/lib/buyout";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
@@ -46,8 +47,10 @@ const fmtUSD = (n: number) =>
 
 // Step-4 grid column sets fed to GridShell's host config (B1b). These were inline arrays
 // inside the shell before generalization; they live here now because they are Step-4-specific.
-const STEP4_EDITABLE_COLUMN_IDS = ["itemId", "description", "matchedQty", "unitPrice", "uom"] as const;
-const STEP4_CENTER_ALIGNED_COLUMN_IDS = ["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"] as const;
+// `vendor`/`actual` are the editable Buyout lens columns (Phase 2). `variance` is read-only
+// (omitted here) but center-aligned. They commit to the browser-local buyout store, not rows.
+const STEP4_EDITABLE_COLUMN_IDS = ["itemId", "description", "matchedQty", "unitPrice", "uom", "vendor", "actual"] as const;
+const STEP4_CENTER_ALIGNED_COLUMN_IDS = ["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit", "actual", "variance"] as const;
 
 /** A locked summary total cell: the formatted value plus a 🔍 trace affordance
  *  that opens the Trust Inspector focused on this value (Phase 5). When the field is
@@ -212,6 +215,11 @@ interface EstimateTableProps {
   globalFilter: string;
   setGlobalFilter: (value: string) => void;
 
+  // Estimate Buyout Lens (Phase 2) — the active grid lens + setter (persisted per browser).
+  // The toolbar toggle flips it; useTakeoffWorkbook derives the column SWAP from it.
+  lensView: LensView;
+  setLensView: (next: LensView) => void;
+
   scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
 
   // Import modal
@@ -277,6 +285,8 @@ export function EstimateTable({
   selection,
   globalFilter,
   setGlobalFilter,
+  lensView,
+  setLensView,
   scrollToRowRef,
   pendingImport,
   confirmImport,
@@ -776,6 +786,34 @@ export function EstimateTable({
 
           {/* Grid-manipulation controls — grouped with the table they act on */}
           <div className="flex flex-wrap items-center gap-3">
+            {/* Estimate | Buyout lens toggle (Phase 2) — swaps the visible columns; the
+                estimate math/export is unaffected (buyout lives in browser-local storage). */}
+            <div
+              className="inline-flex items-center rounded-lg border border-grid-border overflow-hidden select-none"
+              role="group"
+              aria-label="Grid lens"
+            >
+              <span className="pl-2.5 pr-1.5 text-slate-400 dark:text-slate-500 hidden sm:inline" aria-hidden="true">
+                <Layers size={13} />
+              </span>
+              {(["estimate", "buyout"] as const).map((lens) => (
+                <button
+                  key={lens}
+                  type="button"
+                  onClick={() => setLensView(lens)}
+                  aria-pressed={lensView === lens}
+                  title={lens === "estimate" ? "Estimating view" : "Buyout view — Vendor, Actual, Variance (saved in this browser only)"}
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                    lensView === lens
+                      ? "bg-blue-600 text-white"
+                      : "bg-card text-slate-600 dark:text-slate-400 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                  }`}
+                >
+                  {lens === "estimate" ? "Estimate" : "Buyout"}
+                </button>
+              ))}
+            </div>
+
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans font-semibold uppercase tracking-wider hidden lg:inline">
               ↑↓ navigate
             </span>

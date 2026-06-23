@@ -15,6 +15,12 @@ interface NumberCellInputProps {
   className?: string;
   /** Called on blur with the final numeric value if it changed. */
   onCommit: (newValue: number) => void;
+  /**
+   * Opt-in: called on blur when the buffer is empty, instead of coercing to 0. Lets a cell
+   * distinguish "blank" from a real 0 (the Buyout Actual cell: blank reads as the Estimate,
+   * L-3). Number cells that omit this keep the legacy empty→0 behavior (qty/price).
+   */
+  onCommitEmpty?: () => void;
   /** Called on every keystroke (e.g. for live totals preview). */
   onLiveChange?: (newValue: number) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -29,6 +35,7 @@ export const NumberCellInput = React.memo(function NumberCellInput({
   disabled = false,
   className = "",
   onCommit,
+  onCommitEmpty,
   onLiveChange,
   onKeyDown,
   onPaste,
@@ -70,6 +77,14 @@ export const NumberCellInput = React.memo(function NumberCellInput({
       return;
     }
     const trimmed = buffer.trim();
+    // Opt-in (onCommitEmpty): an empty buffer clears to "no value" rather than 0 — so a
+    // Buyout Actual the user blanks out reads as the Estimate (L-3), not a $0 commit. Cells
+    // without the callback keep the legacy empty→0 path below.
+    if (trimmed === "" && onCommitEmpty) {
+      setIsEditing(false);
+      onCommitEmpty();
+      return;
+    }
     let numVal: number;
     if (trimmed.startsWith("=") || /[+\-*/]/.test(trimmed)) {
       numVal = evaluateMathExpression(trimmed);
@@ -81,7 +96,7 @@ export const NumberCellInput = React.memo(function NumberCellInput({
     if (finalVal !== initialValueRef.current) {
       onCommit(finalVal);
     }
-  }, [buffer, onCommit]);
+  }, [buffer, onCommit, onCommitEmpty]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;

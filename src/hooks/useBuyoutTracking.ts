@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { BuyoutLine } from "@/lib/buyout";
+import { BuyoutLine, BuyoutStore } from "@/lib/buyout";
 
 // ---------------------------------------------------------------------------
 // useBuyoutTracking — the browser-local store for the Buyout lens (Phase 1).
@@ -107,13 +107,12 @@ export function setLineField<K extends keyof BuyoutLine>(
   return { ...map, [rowId]: { ...existing, [field]: value } };
 }
 
-export interface UseBuyoutTrackingReturn {
-  /** This line's annotation, or a blank one if never edited. Always defined. */
-  getLine: (rowId: string) => BuyoutLine;
-  /** Award (or re-award) a line to a vendor. Persists fail-soft + mirrors in memory. */
-  setVendor: (rowId: string, vendor: string) => void;
-  /** Record (or clear, via null) a line's actual cost. Persists fail-soft + mirrors. */
-  setActual: (rowId: string, actual: number | null) => void;
+/**
+ * The hook's return — structurally the {@link BuyoutStore} meta handle (extends it so the
+ * two can never drift). Persistence/mirroring is the hook's concern; the interface shape is
+ * shared so the grid's `meta.buyout` and the rollup both consume the same contract.
+ */
+export interface UseBuyoutTrackingReturn extends BuyoutStore {
   /** The whole project ledger — fed to computeBuyoutRollup for the footer. */
   map: BuyoutMap;
 }

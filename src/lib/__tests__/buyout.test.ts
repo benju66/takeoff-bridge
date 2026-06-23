@@ -14,6 +14,10 @@ import {
   isCommitted,
   computeBuyoutRollup,
   BuyoutRollupRow,
+  normalizeLensView,
+  buyoutColumnVisibility,
+  BUYOUT_LENS_COLUMN_IDS,
+  ESTIMATE_ONLY_COLUMN_IDS,
 } from "../buyout";
 
 describe("resolveActual", () => {
@@ -123,5 +127,48 @@ describe("computeBuyoutRollup", () => {
     const r = computeBuyoutRollup(rows);
     expect(r.percentCommitted).toBe(0);
     expect(Number.isFinite(r.percentCommitted)).toBe(true);
+  });
+});
+
+describe("normalizeLensView", () => {
+  it("defaults to 'estimate' for anything that is not exactly 'buyout' (D-D)", () => {
+    expect(normalizeLensView(null)).toBe("estimate");
+    expect(normalizeLensView(undefined)).toBe("estimate");
+    expect(normalizeLensView("")).toBe("estimate");
+    expect(normalizeLensView("Estimate")).toBe("estimate");
+    expect(normalizeLensView("garbage")).toBe("estimate");
+    expect(normalizeLensView(42)).toBe("estimate");
+  });
+
+  it("recognizes the stored 'buyout' value", () => {
+    expect(normalizeLensView("buyout")).toBe("buyout");
+  });
+});
+
+describe("buyoutColumnVisibility (the column SWAP, L-1)", () => {
+  it("Buyout lens shows the buyout columns and hides the estimating-only columns", () => {
+    const vis = buyoutColumnVisibility("buyout");
+    for (const id of BUYOUT_LENS_COLUMN_IDS) expect(vis[id]).toBe(true);
+    for (const id of ESTIMATE_ONLY_COLUMN_IDS) expect(vis[id]).toBe(false);
+  });
+
+  it("Estimate lens is the exact inverse (buyout columns hidden, estimating columns shown)", () => {
+    const vis = buyoutColumnVisibility("estimate");
+    for (const id of BUYOUT_LENS_COLUMN_IDS) expect(vis[id]).toBe(false);
+    for (const id of ESTIMATE_ONLY_COLUMN_IDS) expect(vis[id]).toBe(true);
+  });
+
+  it("only ever touches the swap columns — never Code/Description/Total/structural", () => {
+    const swapped = new Set<string>([...BUYOUT_LENS_COLUMN_IDS, ...ESTIMATE_ONLY_COLUMN_IDS]);
+    for (const lens of ["estimate", "buyout"] as const) {
+      const keys = Object.keys(buyoutColumnVisibility(lens));
+      expect(new Set(keys)).toEqual(swapped);
+      // No overlap between the two halves of the swap.
+      expect(keys.length).toBe(BUYOUT_LENS_COLUMN_IDS.length + ESTIMATE_ONLY_COLUMN_IDS.length);
+    }
+    // The two lists are disjoint (a column can't be both shown and hidden by the same lens).
+    for (const id of BUYOUT_LENS_COLUMN_IDS) {
+      expect(ESTIMATE_ONLY_COLUMN_IDS as readonly string[]).not.toContain(id);
+    }
   });
 });

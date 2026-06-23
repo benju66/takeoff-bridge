@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Trash, MessageSquare } from "lucide-react";
 import {
   useReactTable,
@@ -54,6 +54,8 @@ import {
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import { findBindingByTarget } from "@/lib/bindings/store";
 import type { Binding, BindingLine } from "@/lib/bindings/types";
+import { useBuyoutTracking, EMPTY_BUYOUT_LINE } from "./useBuyoutTracking";
+import { LensView, normalizeLensView, buyoutColumnVisibility, lineVariance } from "@/lib/buyout";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -70,6 +72,21 @@ import { useCopyHandler } from "./useCopyHandler";
 // Composes sub-hooks for cell editing, paste, file ingestion, export,
 // command dispatch, column definitions, keyboard navigation, and locked cells.
 // ---------------------------------------------------------------------------
+
+// Estimate Buyout Lens (Phase 2) — the lens choice is remembered per browser, mirroring
+// the existing `tb.estimate.*` flags in EstimateTable.tsx. Default = Estimate (D-D), so a
+// first-time / SSR render is byte-identical to before the lens existed.
+const LENS_STORAGE_KEY = "tb.estimate.lensView";
+
+/** Read the remembered lens fail-soft; `estimate` on the server or any storage error. */
+function loadLensView(): LensView {
+  if (typeof window === "undefined") return "estimate";
+  try {
+    return normalizeLensView(window.localStorage.getItem(LENS_STORAGE_KEY));
+  } catch {
+    return "estimate";
+  }
+}
 
 export interface UseTakeoffWorkbookReturn {
   // Core data
@@ -131,6 +148,11 @@ export interface UseTakeoffWorkbookReturn {
   handleExportExcelWorkbook: (overrideRows?: ProcessedTakeoffRow[]) => Promise<void>;
   handleUndo: () => void;
   handleRedo: () => void;
+
+  // Estimate Buyout Lens (Phase 2) — the active grid lens + its setter (persisted per
+  // browser). EstimateTable renders the toolbar toggle; the column SWAP is derived here.
+  lensView: LensView;
+  setLensView: (next: LensView) => void;
 
   // Linked Values Phase 5 — bindings in the grid (display + authoring lifecycle)
   /** Rows whose total is user-bound (read-only derived cell) — for the context menu. */
@@ -210,6 +232,29 @@ export function useTakeoffWorkbook(
 
   // Command Pattern history engine
   const commandHistory = useCommandHistory();
+
+  // Estimate Buyout Lens (Phase 2) — the browser-local Vendor/Actual side-ledger, owned here
+  // and exposed on the table `meta` so cell renderers (and the Phase 3 command dispatcher)
+  // can reach it. Never touches rows / the engine / the export / the DB (L-5).
+  const buyout = useBuyoutTracking(projectId);
+
+  // Active lens (Estimate | Buyout), remembered per browser (D-D). The setter persists
+  // fail-soft — a dropped write only forgets the preference, never blocks the toggle.
+  const [lensView, setLensViewState] = useState<LensView>(() => loadLensView());
+  const setLensView = useCallback((next: LensView) => {
+    setLensViewState(next);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(LENS_STORAGE_KEY, next);
+      } catch {
+        /* fail-soft: preference not persisted, but the live toggle still works */
+      }
+    }
+  }, []);
+
+  // Column SWAP (L-1) derived purely from the lens — Buyout shows Vendor/Actual/Variance and
+  // hides the estimating-only columns; Estimate is the exact inverse. Fed to the table state.
+  const columnVisibility = useMemo(() => buyoutColumnVisibility(lensView), [lensView]);
 
   // Stable refs — must be declared before hooks that consume them
   const rowsRef = useRef(rows);
@@ -774,6 +819,11 @@ export function useTakeoffWorkbook(
     notes:            { size: 55,  minSize: 55,  maxSize: 55  },
     costPerUnit: { size: 180, minSize: 30 },
     costPerSf:   { size: 180, minSize: 30 },
+    // Buyout lens columns (Phase 2). Their combined width (~580px) is less than the five
+    // estimating-only columns they replace (~830px), so the Buyout view never grows wider (L-1).
+    vendor:      { size: 220, minSize: 30 },
+    actual:      { size: 160, minSize: 30 },
+    variance:    { size: 200, minSize: 30 },
   };
 
   /** Resolve column size from ColumnDefinition overrides or DEFAULT_COLUMN_SIZES. */
@@ -785,7 +835,7 @@ export function useTakeoffWorkbook(
   };
 
   const columns = useMemo(() => {
-    return columnDefs.map((def) => {
+    const mapped = columnDefs.map((def) => {
       if (def.type === "custom") {
         // Custom Column
         return columnHelper.accessor((row) => row.customFields?.[def.id] ?? "", {
@@ -1471,8 +1521,171 @@ export function useTakeoffWorkbook(
           return columnHelper.display({ id: def.id, header: def.header, ...getSizeConfig(def), cell: () => null });
       }
     });
+
+    // ---------------------------------------------------------------------------
+    // Estimate Buyout Lens (Phase 2) — three SCREEN-ONLY columns. They are appended as
+    // TanStack columns only and deliberately kept OUT of `columnDefs`, because the
+    // Excel/Procore exporter iterates columnDefs (exporter.ts) — keeping them out is what
+    // guarantees the export stays byte-identical and the goldens tie $0.00 (L-5). They
+    // commit through `meta.buyout` (localStorage) ONLY — never rows, the DB, or an undo
+    // command (undo is Phase 3). Column visibility (the SWAP) is driven by `columnVisibility`.
+    // ---------------------------------------------------------------------------
+    const buyoutColumns = [
+      columnHelper.display({
+        id: "vendor",
+        header: "Vendor",
+        ...DEFAULT_COLUMN_SIZES.vendor,
+        cell: (info) => {
+          const index = info.row.index;
+          const row = info.row.original;
+          const meta = info.table.options.meta!;
+          const line = meta.buyout?.getLine(row.id) ?? EMPTY_BUYOUT_LINE;
+          const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "vendor";
+          const isEditing = isSelected && meta.selection.isEditing;
+
+          if (isEditing) {
+            return (
+              <StringCellInput
+                id={`vendor-input-${index}`}
+                value={line.vendor}
+                className="w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-left outline-none font-sans text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-slate-100 font-medium"
+                onCommit={(newVal) => meta.buyout?.setVendor(row.id, newVal)}
+                onKeyDown={(e) => meta.handleCustomKeyDown(e, index, "vendor", info.table)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "vendor" });
+                }}
+                initialEditChar={meta.selection.initialEditChar}
+              />
+            );
+          }
+
+          return (
+            <div
+              id={`cell-${row.id}-vendor`}
+              className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center text-left font-sans text-xs transition-all outline-none focus:outline-none ${
+                isSelected
+                  ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative font-medium text-slate-900 dark:text-slate-100"
+                  : "text-slate-900 dark:text-slate-100 font-medium"
+              }`}
+              onClick={() => {
+                meta.setSelection({ rowId: row.id, columnId: "vendor", isEditing: isSelected });
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                meta.setSelection({ rowId: row.id, columnId: "vendor", isEditing: false });
+                meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "vendor" });
+              }}
+            >
+              {line.vendor || <span className="text-slate-400 dark:text-slate-600">...</span>}
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "actual",
+        header: "Actual",
+        ...DEFAULT_COLUMN_SIZES.actual,
+        cell: (info) => {
+          const index = info.row.index;
+          const row = info.row.original;
+          const meta = info.table.options.meta!;
+          const line = meta.buyout?.getLine(row.id) ?? EMPTY_BUYOUT_LINE;
+          const isSelected = meta.selection.rowId === row.id && meta.selection.columnId === "actual";
+          const isEditing = isSelected && meta.selection.isEditing;
+
+          if (isEditing) {
+            return (
+              <NumberCellInput
+                id={`actual-input-${index}`}
+                // A blank Actual edits from 0; clearing the text (or Delete in nav mode) sets
+                // it back to null so it reads as the Estimate (L-3) — not a $0 commit.
+                value={line.actual ?? 0}
+                className="w-full h-full min-h-[36px] px-3 py-2 bg-transparent border-none rounded-none text-center font-bold outline-none font-mono text-xs transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:z-10 focus:bg-white dark:focus:bg-slate-900/40 text-slate-900 dark:text-white"
+                onCommit={(numVal) => meta.buyout?.setActual(row.id, numVal)}
+                onCommitEmpty={() => meta.buyout?.setActual(row.id, null)}
+                onKeyDown={(e) => meta.handleCustomKeyDown(e, index, "actual", info.table)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "actual" });
+                }}
+                initialEditChar={meta.selection.initialEditChar}
+              />
+            );
+          }
+
+          return (
+            <div
+              id={`cell-${row.id}-actual`}
+              className={`w-full h-full min-h-[36px] px-3 py-2 flex items-center justify-center text-center font-bold font-mono text-xs transition-all outline-none focus:outline-none ${
+                isSelected
+                  ? "outline outline-2 outline-blue-600 outline-offset-[-2px] bg-blue-50/10 dark:bg-blue-900/10 z-10 relative text-slate-900 dark:text-white"
+                  : "text-slate-900 dark:text-white"
+              }`}
+              onClick={() => {
+                meta.setSelection({ rowId: row.id, columnId: "actual", isEditing: isSelected });
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                meta.setSelection({ rowId: row.id, columnId: "actual", isEditing: false });
+                meta.setContextMenu({ visible: true, x: e.clientX, y: e.clientY, rowIndex: index, columnId: "actual" });
+              }}
+            >
+              {line.actual === null
+                ? <span className="text-slate-400 dark:text-slate-600">...</span>
+                : `$${line.actual.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </div>
+          );
+        },
+      }),
+      columnHelper.display({
+        id: "variance",
+        header: "Variance",
+        ...DEFAULT_COLUMN_SIZES.variance,
+        // Read-only derived display: Variance = Estimate − Actual (L-3). An un-entered Actual
+        // (null) reads as the Estimate → zero variance, shown as a muted dash (not "bought out
+        // yet") rather than a noisy $0.00. Color: green favorable (under), red unfavorable (over).
+        cell: (info) => {
+          const row = info.row.original;
+          const meta = info.table.options.meta!;
+          const line = meta.buyout?.getLine(row.id) ?? EMPTY_BUYOUT_LINE;
+          if (line.actual === null) {
+            return <div className="text-center font-mono text-slate-400 dark:text-slate-600">—</div>;
+          }
+          // Estimate = the line's displayed Total, incl. linked/bound rows' live value (D-E).
+          const linked = getLinkedRowState(row);
+          const estimate = linked ? (linked.stray ? 0 : linked.value) : row.total;
+          const { varianceDollars, variancePct } = lineVariance({ estimate, actual: line.actual });
+          const tone =
+            varianceDollars > 0
+              ? "text-emerald-600 dark:text-emerald-400"
+              : varianceDollars < 0
+              ? "text-red-600 dark:text-red-400"
+              : "text-slate-600 dark:text-slate-400";
+          const signStr = varianceDollars > 0 ? "+" : varianceDollars < 0 ? "-" : "";
+          const absDollars = Math.abs(varianceDollars).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          return (
+            <div className={`text-center font-bold font-mono ${tone}`}>
+              {signStr}${absDollars}
+              <span className="ml-1 text-[10px] opacity-80">({Math.abs(variancePct * 100).toFixed(1)}%)</span>
+            </div>
+          );
+        },
+      }),
+    ];
+
+    // Slot the buyout columns right after Total so the Buyout view reads
+    // Code · Description · Total(Estimate) · Vendor · Actual · Variance.
+    const totalIdx = mapped.findIndex((c) => c.id === "total");
+    const insertAt = totalIdx >= 0 ? totalIdx + 1 : mapped.length;
+    mapped.splice(insertAt, 0, ...buyoutColumns);
+    return mapped;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit, linkedTotalByItemId, boundRowState]); // selection intentionally excluded — cell renderers read meta.selection during parent re-render
+  }, [columnDefs, unitCount, squareFootage, handleCustomCellEdit, commitCustomCellEdit, linkedTotalByItemId, boundRowState]); // selection + buyout intentionally excluded — buyout cell renderers read meta.buyout / meta.selection live during parent re-render
 
   // Filter state (Phase 4)
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -1483,7 +1696,9 @@ export function useTakeoffWorkbook(
   const table = useReactTable({
     data: rows,
     columns,
-    state: { columnFilters, globalFilter },
+    // columnVisibility is controlled (the Buyout lens SWAP). No onColumnVisibilityChange:
+    // nothing in the UI toggles individual columns, so the table never mutates it itself.
+    state: { columnFilters, globalFilter, columnVisibility },
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     columnResizeMode: "onChange",
@@ -1520,6 +1735,9 @@ export function useTakeoffWorkbook(
       commitCustomCellEdit,
       selection,
       setSelection,
+      // Estimate Buyout Lens (Phase 2) — the browser-local store the buyout cell renderers
+      // and the keyboard-nav Delete path commit through (localStorage only; never rows/DB).
+      buyout,
     },
   });
 
@@ -1578,6 +1796,8 @@ export function useTakeoffWorkbook(
     handleExportExcelWorkbook,
     handleUndo,
     handleRedo,
+    lensView,
+    setLensView,
     boundRowIds,
     commitBinding,
     clearBindingForRow,
