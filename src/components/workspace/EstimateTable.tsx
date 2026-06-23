@@ -28,7 +28,7 @@ import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
 import { buildFlagsModel } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
-import type { LensView, BuyoutRollup } from "@/lib/buyout";
+import type { LensView, BuyoutRollup, BuyoutProfit } from "@/lib/buyout";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
@@ -141,24 +141,39 @@ function money(n: number): string {
 
 /**
  * Estimate Buyout Lens footer (Phase 4) — the at-a-glance "how's buyout going" read, shown
- * ONLY in the Buyout lens. A pure display over `buyoutRollup` (whole-estimate, browser-local):
- * Estimate total · Projected cost · Projected variance (green favorable / red over, matching
- * the Variance column's `> 0 = favorable` convention) and a "% of value committed" bar (L-4 —
- * Σ Estimate on lines with a Vendor ÷ Σ Estimate). It never persists a number and never enters
- * the engine/export — the rollup is derived live from the rows + the buyout ledger, so it
- * can't drift. `computeBuyoutRollup` is zero-guarded, so an all-zero estimate renders $0 / 0%,
- * never NaN/Infinity. When a filter is active the bar still reflects the WHOLE estimate (so a
- * hidden line's commitment still counts), with a note to that effect.
+ * ONLY in the Buyout lens. It mirrors the bottom of the company template's STEP 4 sheet:
+ *  • Total Estimate (Bid)  — the engine's grand Total Estimated Cost (ties to template I341
+ *    and to the grid's own "Total Estimated Cost" row).
+ *  • Total Projected Cost  — bid − profit (= Σ actual-or-estimate + contingency/insurance,
+ *    excl. fee; ties to template P341).
+ *  • Projected Profit ($ + %) — fee + buyout savings (green when making money / red when
+ *    underwater; ties to template O347 / P347). Profit is NOT a cost — the fee falls straight
+ *    to it, and every dollar a sub comes in under estimate adds to it.
+ *  • "% of value committed" bar (L-4 — Σ Estimate on lines with a Vendor ÷ Σ Estimate over the
+ *    awardable data lines) — a buyout-PROGRESS gauge, distinct from the profit margin %.
+ * Pure display: `profit` is derived live (engine bid + browser-local savings) and the rollup
+ * reads `buyout.map` — nothing here persists or enters the engine/export, so no dollar can move.
+ * Both helpers are zero-guarded → an empty estimate renders $0 / 0%, never NaN/Infinity. When a
+ * filter is active the numbers still reflect the WHOLE estimate (so a hidden line still counts),
+ * with a note to that effect.
  */
-function BuyoutRollupFooter({ rollup, isFiltered }: { rollup: BuyoutRollup; isFiltered: boolean }) {
-  const { estimateTotal, projectedCost, projectedVariance, committedEstimate, percentCommitted } = rollup;
+function BuyoutRollupFooter({
+  rollup,
+  profit,
+  isFiltered,
+}: {
+  rollup: BuyoutRollup;
+  profit: BuyoutProfit;
+  isFiltered: boolean;
+}) {
+  const { committedEstimate, estimateTotal, percentCommitted } = rollup;
   // committed is a subset of the total so percent is in [0,1]; clamp defensively for the bar width.
   const pct = Math.min(100, Math.max(0, percentCommitted * 100));
-  const favorable = projectedVariance > 0; // projected under the estimate
-  const over = projectedVariance < 0; // projected over the estimate
-  const varianceTone = favorable
+  const inProfit = profit.profit > 0; // making money (fee + savings positive)
+  const underwater = profit.profit < 0; // overruns have eaten through the fee
+  const profitTone = inProfit
     ? "text-emerald-600 dark:text-emerald-400"
-    : over
+    : underwater
     ? "text-red-600 dark:text-red-400"
     : "text-slate-500 dark:text-slate-400";
   return (
@@ -166,24 +181,22 @@ function BuyoutRollupFooter({ rollup, isFiltered }: { rollup: BuyoutRollup; isFi
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Buyout</span>
         <span className="text-slate-500 dark:text-slate-400">
-          Estimate <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(estimateTotal)}</span>
+          Total Estimate <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(profit.bid)}</span>
         </span>
         <span className="text-slate-500 dark:text-slate-400">
-          Projected <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(projectedCost)}</span>
+          Projected Cost <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(profit.projectedCost)}</span>
         </span>
         <span className="text-slate-500 dark:text-slate-400">
-          Variance
-          <span className={`ml-1 font-mono font-bold ${varianceTone}`}>
-            {favorable ? "+" : over ? "-" : ""}
-            {money(Math.abs(projectedVariance))}
-            <span className="ml-1 font-sans text-[9px] font-semibold uppercase tracking-wide">
-              {favorable ? "favorable" : over ? "over" : "on budget"}
-            </span>
+          Projected Profit
+          <span className={`ml-1 font-mono font-bold ${profitTone}`}>
+            {inProfit ? "+" : underwater ? "-" : ""}
+            {money(Math.abs(profit.profit))}
+            <span className="ml-1 font-sans text-[10px]">({Math.abs(profit.profitPct * 100).toFixed(2)}%)</span>
           </span>
         </span>
         {isFiltered && (
           <span className="text-[10px] italic text-amber-600 dark:text-amber-500">
-            Filter active — rollup reflects the whole estimate
+            Filter active — totals reflect the whole estimate
           </span>
         )}
       </div>
@@ -297,10 +310,14 @@ interface EstimateTableProps {
   // The toolbar toggle flips it; useTakeoffWorkbook derives the column SWAP from it.
   lensView: LensView;
   setLensView: (next: LensView) => void;
-  /** Phase 4 — the buyout footer rollup (Estimate total · projected cost · projected variance
-   *  · % committed) over the WHOLE estimate. Assembled in useTakeoffWorkbook from the same
-   *  per-line Estimate the Variance cells use, so the footer can't drift from the cells. */
+  /** Phase 4 — the buyout footer rollup (committed dollars + the awardable data-line estimate
+   *  base) over the WHOLE estimate. Assembled in useTakeoffWorkbook from the same per-line
+   *  Estimate the Variance cells use, so the footer can't drift from the cells. */
   buyoutRollup: BuyoutRollup;
+  /** Phase 4 follow-on — Projected Profit for the footer (Total Estimate/Bid · Total Projected
+   *  Cost · Projected Profit $/%), mirroring the template's STEP 4 bottom block. Derived from
+   *  the whole-estimate bid + the data-line savings; display-only. */
+  buyoutProfit: BuyoutProfit;
 
   scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
 
@@ -370,6 +387,7 @@ export function EstimateTable({
   lensView,
   setLensView,
   buyoutRollup,
+  buyoutProfit,
   scrollToRowRef,
   pendingImport,
   confirmImport,
@@ -1020,7 +1038,7 @@ export function EstimateTable({
             shows no footer). Pure display over the whole-estimate rollup; no dollar it shows
             ever enters the engine or the export. */}
         {lensView === "buyout" && rows.length > 0 && (
-          <BuyoutRollupFooter rollup={buyoutRollup} isFiltered={isFiltered} />
+          <BuyoutRollupFooter rollup={buyoutRollup} profit={buyoutProfit} isFiltered={isFiltered} />
         )}
 
         {/* Status Bar — Enterprise Excel-style footer info bar */}

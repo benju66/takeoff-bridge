@@ -14,6 +14,8 @@ import {
   lineVariance,
   isCommitted,
   computeBuyoutRollup,
+  computeBuyoutProfit,
+  BuyoutRollup,
   BuyoutRollupRow,
   normalizeLensView,
   buyoutColumnVisibility,
@@ -142,6 +144,62 @@ describe("computeBuyoutRollup", () => {
     const r = computeBuyoutRollup(rows);
     expect(r.percentCommitted).toBe(0);
     expect(Number.isFinite(r.percentCommitted)).toBe(true);
+  });
+});
+
+describe("computeBuyoutProfit (template P341 / O347 / P347)", () => {
+  // A helper to build a data-line rollup with a known savings (projectedVariance).
+  const rollupWith = (estimateTotal: number, projectedCost: number): BuyoutRollup => ({
+    estimateTotal,
+    projectedCost,
+    projectedVariance: estimateTotal - projectedCost,
+    committedEstimate: 0,
+    percentCommitted: 0,
+  });
+
+  it("nothing bought out ⇒ profit is exactly the fee, cost is bid − fee", () => {
+    // No savings (projectedCost === estimateTotal → variance 0).
+    const p = computeBuyoutProfit({ bid: 100000, fee: 5000, dataLineRollup: rollupWith(95000, 95000) });
+    expect(p.profit).toBe(5000); // = fee
+    expect(p.projectedCost).toBe(95000); // = bid − fee
+    expect(p.bid).toBe(100000);
+    expect(p.profitPct).toBeCloseTo(5000 / 95000, 10);
+  });
+
+  it("under-budget buyout adds the savings to the fee (profit grows, cost drops)", () => {
+    // $2,000 of data-line savings (estimate 95000 → projected 93000).
+    const p = computeBuyoutProfit({ bid: 100000, fee: 5000, dataLineRollup: rollupWith(95000, 93000) });
+    expect(p.profit).toBe(7000); // fee 5000 + savings 2000
+    expect(p.projectedCost).toBe(93000); // bid − profit
+    expect(p.bid).toBe(p.projectedCost + p.profit); // bid always reconciles
+  });
+
+  it("over-budget buyout eats into the fee (profit shrinks, cost rises)", () => {
+    // Actuals $3,000 OVER estimate → negative savings.
+    const p = computeBuyoutProfit({ bid: 100000, fee: 5000, dataLineRollup: rollupWith(95000, 98000) });
+    expect(p.profit).toBe(2000); // fee 5000 − overrun 3000
+    expect(p.projectedCost).toBe(98000);
+  });
+
+  it("guards a zero projected cost — no NaN/Infinity percent", () => {
+    const p = computeBuyoutProfit({ bid: 0, fee: 0, dataLineRollup: rollupWith(0, 0) });
+    expect(p.projectedCost).toBe(0);
+    expect(p.profitPct).toBe(0);
+    expect(Number.isFinite(p.profitPct)).toBe(true);
+  });
+
+  it("ties to the McKenna template bottom block (I341 / I339 / P341 / O347 / P347)", () => {
+    // Real template values: bid I341 = 117,388.51, fee I339 = 5,537.19, and one line came in
+    // $2.50 under estimate. The math depends only on bid, fee, and the data-line savings
+    // (= projectedVariance), so the rollup just needs a $2.50 favorable variance.
+    const p = computeBuyoutProfit({
+      bid: 117388.51414973334,
+      fee: 5537.194063666667,
+      dataLineRollup: rollupWith(2.5, 0), // projectedVariance = $2.50 savings
+    });
+    expect(p.projectedCost).toBeCloseTo(111848.82008606667, 6); // P341
+    expect(p.profit).toBeCloseTo(5539.694063666667, 6); // O347
+    expect(p.profitPct).toBeCloseTo(0.049528408609084, 10); // P347 ≈ 4.95%
   });
 });
 

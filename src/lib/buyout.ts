@@ -212,3 +212,48 @@ export function computeBuyoutRollup(rows: BuyoutRollupRow[]): BuyoutRollup {
     percentCommitted: estimateTotal === 0 ? 0 : committedEstimate / estimateTotal,
   };
 }
+
+/**
+ * The whole-job "how's buyout going" read, mirroring the bottom of the company template's
+ * STEP 4 - ESTIMATE sheet (cells P341 / O347 / P347): Total Projected Cost, Projected Profit
+ * ($ and %). `bid` is the engine's grand Total Estimated Cost (subtotal + every modifier +
+ * fee); `profit` is in dollars; `profitPct` is a ratio (e.g. 0.0495 = 4.95%).
+ */
+export interface BuyoutProfit {
+  /** Total Estimated Cost — the bid, incl. modifiers + fee (engine value; ties to template I341). */
+  bid: number;
+  /** Total Projected Cost = bid − profit; = Σ actual-or-estimate over lines + contingency/insurance, excl. fee (ties to template P341). */
+  projectedCost: number;
+  /** Projected Profit $ = fee + buyout savings = bid − projectedCost (ties to template O347). */
+  profit: number;
+  /** Projected Profit % = profit / projectedCost; 0 when projectedCost is 0 (guarded; ties to template P347). */
+  profitPct: number;
+}
+
+/**
+ * Projected profit, computed exactly the way the company template does (see the STEP 4 bottom
+ * block). The Fee is part of the bid but is NOT a cost you pay out (the template marks its
+ * Actual "NA"), so it falls straight to profit; every dollar a sub comes in under its estimate
+ * (the data-line buyout savings, = `dataLineRollup.projectedVariance`) adds to it. Hence:
+ *   profit        = fee + savings
+ *   projectedCost = bid − profit            (provably = subtotal-of-actuals + contingency/insurance = template P341)
+ *   profitPct     = profit / projectedCost  (zero-guarded)
+ * Anchoring on the engine `bid` (rather than re-summing rows) keeps "Total Estimate (Bid)" and
+ * "Total Projected Cost" on one basis, so the footer ties to both the grid total and the template.
+ * Pure/display-only — it never moves a bid dollar; the savings come from the browser-local ledger.
+ */
+export function computeBuyoutProfit(args: {
+  bid: number;
+  fee: number;
+  dataLineRollup: BuyoutRollup;
+}): BuyoutProfit {
+  const savings = args.dataLineRollup.projectedVariance; // Σ (estimate − actual) on data lines
+  const profit = args.fee + savings;
+  const projectedCost = args.bid - profit;
+  return {
+    bid: args.bid,
+    projectedCost,
+    profit,
+    profitPct: projectedCost === 0 ? 0 : profit / projectedCost,
+  };
+}
