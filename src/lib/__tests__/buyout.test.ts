@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveActual,
+  resolveLineEstimate,
   lineVariance,
   isCommitted,
   computeBuyoutRollup,
@@ -31,6 +32,20 @@ describe("resolveActual", () => {
 
   it("honors an explicit 0 Actual (not treated as blank)", () => {
     expect(resolveActual(1000, 0)).toBe(0);
+  });
+});
+
+describe("resolveLineEstimate (the shared cell↔footer Estimate source, D-E)", () => {
+  it("a plain row reads its own Total", () => {
+    expect(resolveLineEstimate(null, 1500)).toBe(1500);
+  });
+
+  it("a linked/bound row reads its live linked value, not the row's own number", () => {
+    expect(resolveLineEstimate({ value: 4200, stray: false }, 999)).toBe(4200);
+  });
+
+  it("a stray linked row reads as 0 (its typed dollars are excluded from every total)", () => {
+    expect(resolveLineEstimate({ value: 4200, stray: true }, 999)).toBe(0);
   });
 });
 

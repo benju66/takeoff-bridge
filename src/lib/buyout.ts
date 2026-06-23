@@ -142,6 +142,29 @@ export interface BuyoutRollupRow extends BuyoutLine {
 }
 
 /**
+ * The read-only derived state a row's Total may carry (a structural subset of
+ * `getLinkedRowState`'s shape in useTakeoffWorkbook). `null` = a normal row whose Total is
+ * just its own number; non-null = a linked-division or user-bound row showing a live value.
+ */
+export interface LinkedEstimateState {
+  /** The linked/bound live value driving the row's displayed Total. */
+  value: number;
+  /** A linked-division row carrying stray typed dollars — excluded from every total (reads 0). */
+  stray: boolean;
+}
+
+/**
+ * Resolves the Estimate a buyout line is measured against — the row's *displayed* Total (D-E),
+ * including linked/bound rows' live value. A stray linked row reads as 0 (its typed dollars are
+ * excluded from every total, matching the grid); a plain row reads as its own `rowTotal`. This
+ * is the SINGLE source the Variance cell and the footer rollup both call, so the per-cell
+ * variance and the footer's Estimate total can never drift apart.
+ */
+export function resolveLineEstimate(linked: LinkedEstimateState | null, rowTotal: number): number {
+  return linked ? (linked.stray ? 0 : linked.value) : rowTotal;
+}
+
+/**
  * Resolves an Actual against its Estimate. A blank Actual (`null`) reads as the Estimate
  * (L-3), so it never shows a phantom variance and contributes its Estimate to projected cost.
  */

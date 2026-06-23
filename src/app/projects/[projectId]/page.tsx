@@ -202,7 +202,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     rowVersion,
     globalFilter, setGlobalFilter,
     columnFilters,
-    lensView, setLensView,
+    lensView, setLensView, buyoutRollup,
     scrollToRowRef,
     selection,
     boundRowIds, commitBinding, clearBindingForRow,
@@ -658,6 +658,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             setGlobalFilter={setGlobalFilter}
             lensView={lensView}
             setLensView={setLensView}
+            buyoutRollup={buyoutRollup}
             selection={selection}
             scrollToRowRef={scrollToRowRef}
             pendingImport={pendingImport}

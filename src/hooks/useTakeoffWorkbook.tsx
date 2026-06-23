@@ -55,7 +55,16 @@ import { lineFieldNodeId } from "@/lib/bindings/compile";
 import { findBindingByTarget } from "@/lib/bindings/store";
 import type { Binding, BindingLine } from "@/lib/bindings/types";
 import { useBuyoutTracking, EMPTY_BUYOUT_LINE } from "./useBuyoutTracking";
-import { LensView, normalizeLensView, buyoutColumnVisibility, lineVariance } from "@/lib/buyout";
+import {
+  LensView,
+  normalizeLensView,
+  buyoutColumnVisibility,
+  lineVariance,
+  resolveLineEstimate,
+  computeBuyoutRollup,
+  BuyoutRollup,
+  BuyoutRollupRow,
+} from "@/lib/buyout";
 import { useCommandHistory } from "./useCommandHistory";
 import { useLockedCells } from "./useLockedCells";
 import { useColumnDefinitions } from "./useColumnDefinitions";
@@ -153,6 +162,9 @@ export interface UseTakeoffWorkbookReturn {
   // browser). EstimateTable renders the toolbar toggle; the column SWAP is derived here.
   lensView: LensView;
   setLensView: (next: LensView) => void;
+  /** Phase 4 — the buyout footer rollup over the WHOLE estimate (Estimate total, projected
+   *  cost, projected variance, % committed). Display-only; ties to the per-cell Variance. */
+  buyoutRollup: BuyoutRollup;
 
   // Linked Values Phase 5 — bindings in the grid (display + authoring lifecycle)
   /** Rows whose total is user-bound (read-only derived cell) — for the context menu. */
@@ -756,6 +768,31 @@ export function useTakeoffWorkbook(
     }
     return null;
   };
+
+  // ---------------------------------------------------------------------------
+  // Estimate Buyout Lens (Phase 4) — the footer rollup, assembled HERE so the footer and
+  // the per-cell Variance share ONE Estimate source (resolveLineEstimate) and can never
+  // drift. Scope = the WHOLE estimate (all `rows`), not the filtered view: a line hidden by
+  // a search/filter still counts toward "% committed" (the footer notes when a filter is
+  // active). Structural rows (division dividers/subtotals, the modifier + Total-Estimated-Cost
+  // summary rows) are rendered by GridShell/the tfoot and are NOT in `rows`, so they're
+  // excluded by construction — every entry in `rows` is a buyout-able data line (D-C).
+  // Pure/display-only: reads `buyout.map` (localStorage mirror) — never rows/engine/export/DB.
+  // computeBuyoutRollup([]) is all-zero & zero-guarded, so an empty estimate yields a clean
+  // $0 / 0% footer, never NaN/Infinity.
+  const buyoutRollup = useMemo<BuyoutRollup>(() => {
+    const rollupRows: BuyoutRollupRow[] = rows.map((row) => {
+      const line = buyout.map[row.id] ?? EMPTY_BUYOUT_LINE;
+      // Same Estimate the Variance cell shows (D-E): linked/bound live value, stray → 0, else Total.
+      const estimate = resolveLineEstimate(getLinkedRowState(row), row.total);
+      return { estimate, vendor: line.vendor, actual: line.actual };
+    });
+    return computeBuyoutRollup(rollupRows);
+    // getLinkedRowState is a render-scoped closure over these deps (linkedTotalByItemId /
+    // boundRowState / project?.isImported) — list them, not the function, mirroring the
+    // `columns` memo below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, buyout.map, linkedTotalByItemId, boundRowState, project?.isImported]);
 
   // ---------------------------------------------------------------------------
   // Linked Values Phase 5 — SET_BINDING / CLEAR_BINDING creators (undoable).
@@ -1677,8 +1714,8 @@ export function useTakeoffWorkbook(
             return <div className="text-center font-mono text-slate-400 dark:text-slate-600">—</div>;
           }
           // Estimate = the line's displayed Total, incl. linked/bound rows' live value (D-E).
-          const linked = getLinkedRowState(row);
-          const estimate = linked ? (linked.stray ? 0 : linked.value) : row.total;
+          // resolveLineEstimate is the SAME source the footer rollup uses → cells ↔ footer tie.
+          const estimate = resolveLineEstimate(getLinkedRowState(row), row.total);
           const { varianceDollars, variancePct } = lineVariance({ estimate, actual: line.actual });
           const tone =
             varianceDollars > 0
@@ -1822,6 +1859,7 @@ export function useTakeoffWorkbook(
     handleRedo,
     lensView,
     setLensView,
+    buyoutRollup,
     boundRowIds,
     commitBinding,
     clearBindingForRow,
