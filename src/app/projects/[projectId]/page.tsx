@@ -29,6 +29,7 @@ import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLER
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
+import { computeBuyoutProfit } from "@/lib/buyout";
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace";
 import { usePersonnelCalculations } from "@/hooks/usePersonnelCalculations";
 import { useInfrastructureCalculations } from "@/hooks/useInfrastructureCalculations";
@@ -202,6 +203,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     rowVersion,
     globalFilter, setGlobalFilter,
     columnFilters,
+    lensView, setLensView, buyoutRollup,
     scrollToRowRef,
     selection,
     boundRowIds, commitBinding, clearBindingForRow,
@@ -284,6 +286,20 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides)
       : takeoffSummary,
     [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, takeoffSummary]
+  );
+
+  // Estimate Buyout Lens (Phase 4 follow-on) — Projected Profit for the buyout footer,
+  // mirroring the template's STEP 4 bottom block (P341 / O347 / P347). Anchored on the
+  // WHOLE-estimate bid + fee (fullTakeoffSummary, never the filtered partial) so it stays
+  // consistent with the whole-estimate buyoutRollup. Display-only; profit is derived live
+  // from the engine bid + the browser-local data-line savings, never stored.
+  const buyoutProfit = React.useMemo(
+    () => computeBuyoutProfit({
+      bid: fullTakeoffSummary.totalEstimatedCost,
+      fee: fullTakeoffSummary.fee,
+      dataLineRollup: buyoutRollup,
+    }),
+    [fullTakeoffSummary.totalEstimatedCost, fullTakeoffSummary.fee, buyoutRollup]
   );
 
   // Single source with the export gate: the same validateExportReadiness, surfaced
@@ -655,6 +671,10 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             strayLinkedRows={strayLinkedRows}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
+            lensView={lensView}
+            setLensView={setLensView}
+            buyoutRollup={buyoutRollup}
+            buyoutProfit={buyoutProfit}
             selection={selection}
             scrollToRowRef={scrollToRowRef}
             pendingImport={pendingImport}

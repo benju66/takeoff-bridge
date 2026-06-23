@@ -1,4 +1,5 @@
 import type { Binding } from "@/lib/bindings/types";
+import type { BuyoutStore } from "@/lib/buyout";
 import type { EstimateSectionLine } from "./db";
 
 export interface TogalRowPayload {
@@ -191,6 +192,22 @@ export interface EditCustomCellCommand {
   nextValue: string;
 }
 
+/**
+ * Estimate Buyout Lens (Phase 3) — an undoable Vendor/Actual edit on the browser-local
+ * buyout side-ledger. The simplest command in the union: a single cell, no cascade, no
+ * registry, no DB. Undo/redo route ONLY to the localStorage-backed buyout store (never
+ * `rows`, the engine, or the export — L-5), so it can interleave on the shared undo stack
+ * with estimate edits while keeping every dollar untouched. `actual` carries `number | null`
+ * (null = cleared, reads as the Estimate per L-3); `vendor` carries a string.
+ */
+export interface EditBuyoutCellCommand {
+  type: "EDIT_BUYOUT_CELL";
+  rowId: string;
+  field: "vendor" | "actual";
+  prevValue: string | number | null;
+  nextValue: string | number | null;
+}
+
 export interface PasteCommand {
   type: "PASTE";
   /** Ordered list of atomic sub-edits grouped as a single undo unit */
@@ -301,6 +318,7 @@ export interface ClearBindingCommand {
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
+  | EditBuyoutCellCommand
   | PasteCommand
   | InsertRowCommand
   | DeleteRowCommand
@@ -482,8 +500,24 @@ export interface GridHostContract<TRow extends RowData, TCellKind extends string
 // Step-4 instantiation of the contract (Step 4 is the sole consumer), so `keyof TData` and
 // the GridCellKind union resolve exactly as the pre-B1b hand-written augmentation did.
 declare module '@tanstack/table-core' {
-  // Module augmentation must use `interface` (a type alias cannot augment a module), so the
-  // empty-extends form is intentional here — it pins TableMeta to the Step-4 contract.
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {}
+  // Module augmentation must use `interface` (a type alias cannot augment a module). It pins
+  // TableMeta to the Step-4 contract, plus the Step-4-only Buyout lens store below.
+  interface TableMeta<TData extends RowData> extends GridHostContract<TData, GridCellKind> {
+    /**
+     * Estimate Buyout Lens (Phase 2) — the browser-local Vendor/Actual side-ledger, owned by
+     * useTakeoffWorkbook. Optional because Steps 2/3 grid metas also satisfy TableMeta and do
+     * not provide it. Buyout cell renderers commit through this store ONLY (localStorage) —
+     * never rows/DB/export.
+     */
+    buyout?: BuyoutStore;
+    /**
+     * Estimate Buyout Lens (Phase 3) — undoable commit for the Vendor cell. Reads the current
+     * stored value, pushes an EDIT_BUYOUT_CELL command, THEN writes the buyout store (so a
+     * single Ctrl+Z reverses it). Optional for the same reason as `buyout` (Steps 2/3 metas
+     * satisfy TableMeta without it). Cells + the keyboard Delete path commit through here.
+     */
+    commitBuyoutVendor?: (rowId: string, nextValue: string) => void;
+    /** Estimate Buyout Lens (Phase 3) — undoable commit for the Actual cell (`null` = cleared). */
+    commitBuyoutActual?: (rowId: string, nextValue: number | null) => void;
+  }
 }

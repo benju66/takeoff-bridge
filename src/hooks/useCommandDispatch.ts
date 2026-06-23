@@ -13,6 +13,7 @@ import { evaluateDataFidelity } from "@/lib/calculations";
 import { applyMergeForward, applyMergeInverse } from "@/lib/mergeTakeoff";
 import type { Binding } from "@/lib/bindings/types";
 import { upsertBinding, removeBinding } from "@/lib/bindings/store";
+import { applyBuyoutCommandValue, type BuyoutStore, type LensView } from "@/lib/buyout";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -41,6 +42,10 @@ export function useCommandDispatch(
   globalRegistry: Record<string, string>,
   // Linked Values Phase 4: optimistic binding state for SET_BINDING / CLEAR_BINDING.
   setBindings: React.Dispatch<React.SetStateAction<Binding[]>>,
+  // Estimate Buyout Lens Phase 3: the browser-local store EDIT_BUYOUT_CELL undo/redo writes to
+  // (localStorage only — never rows/DB), plus the lens setter for the D-A auto-flip.
+  buyout: BuyoutStore,
+  setLensView: (next: LensView) => void,
 ): UseCommandDispatchReturn {
 
   // Persist a binding write (fire-and-forget, mirrors the registry-delta pattern):
@@ -144,6 +149,12 @@ export function useCommandDispatch(
         });
         break;
       }
+      case "EDIT_BUYOUT_CELL": {
+        // Redo → write the NEXT value to the browser-local buyout store. No setRows, no DB —
+        // just the localStorage-backed setter (L-5). Goldens cannot move (Phase 3).
+        applyBuyoutCommandValue(buyout, cmd.rowId, cmd.field, cmd.nextValue);
+        break;
+      }
       case "PASTE": {
         setRows((prev) => {
           const updated = [...prev];
@@ -230,7 +241,7 @@ export function useCommandDispatch(
         break;
       }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -317,6 +328,11 @@ export function useCommandDispatch(
           updated[idx] = row;
           return updated;
         });
+        break;
+      }
+      case "EDIT_BUYOUT_CELL": {
+        // Undo → restore the PREV value to the browser-local buyout store (localStorage only).
+        applyBuyoutCommandValue(buyout, cmd.rowId, cmd.field, cmd.prevValue);
         break;
       }
       case "PASTE": {
@@ -430,7 +446,14 @@ export function useCommandDispatch(
         break;
       }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout]);
+
+  // A buyout edit reverted/replayed while the Estimate lens is active targets a hidden cell —
+  // flip to the Buyout lens so the change is visible (D-A). Browser-local; never touches the DB.
+  // Setting the lens it's already on is a harmless no-op (React bails out on an unchanged value).
+  const flipToBuyoutIfNeeded = useCallback((cmd: WorkbookCommand) => {
+    if (cmd.type === "EDIT_BUYOUT_CELL") setLensView("buyout");
+  }, [setLensView]);
 
   // ---------------------------------------------------------------------------
   // handleUndo — Pop from undo stack and apply inverse
@@ -438,8 +461,9 @@ export function useCommandDispatch(
   const handleUndo = useCallback(() => {
     const cmd = commandHistory.undo();
     if (!cmd) return;
+    flipToBuyoutIfNeeded(cmd);
     applyCommandInverse(cmd);
-  }, [commandHistory, applyCommandInverse]);
+  }, [commandHistory, applyCommandInverse, flipToBuyoutIfNeeded]);
 
   // ---------------------------------------------------------------------------
   // handleRedo — Pop from redo stack and apply forward
@@ -447,8 +471,9 @@ export function useCommandDispatch(
   const handleRedo = useCallback(() => {
     const cmd = commandHistory.redo();
     if (!cmd) return;
+    flipToBuyoutIfNeeded(cmd);
     applyCommandForward(cmd);
-  }, [commandHistory, applyCommandForward]);
+  }, [commandHistory, applyCommandForward, flipToBuyoutIfNeeded]);
 
   return {
     applyCommandForward,

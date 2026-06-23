@@ -69,9 +69,13 @@ export function useKeyboardNavigation(
     const visibleCols = table.getVisibleFlatColumns().map((c) => c.id);
     const colIdx = visibleCols.indexOf(columnId);
 
+    // Buyout lens columns (Phase 2) — editable, but they commit to the browser-local buyout
+    // store (meta.buyout), NEVER the row/DB edit path. See the Delete/Backspace branch below.
+    const isBuyoutColumn = (colId: string) => colId === "vendor" || colId === "actual";
+
     // List of editable columns
     const isColumnEditable = (colId: string) => {
-      return colId.startsWith("custom-") || ["itemId", "description", "matchedQty", "unitPrice", "uom"].includes(colId);
+      return colId.startsWith("custom-") || isBuyoutColumn(colId) || ["itemId", "description", "matchedQty", "unitPrice", "uom"].includes(colId);
     };
 
     // Helper to find column input ID
@@ -82,6 +86,8 @@ export function useKeyboardNavigation(
       if (cId === "matchedQty") return `qty-input-${index}`;
       if (cId === "unitPrice") return `price-input-${index}`;
       if (cId === "uom") return `uom-select-${index}`;
+      if (cId === "vendor") return `vendor-input-${index}`;
+      if (cId === "actual") return `actual-input-${index}`;
       return `cell-${rows[index]?.original.id}-${cId}`;
     };
 
@@ -257,6 +263,15 @@ export function useKeyboardNavigation(
         if (columnId.startsWith("custom-")) {
           meta.handleCustomCellEdit(rIdx, columnId, "");
           meta.commitCustomCellEdit(rows[rIdx]?.original.id, columnId, String(rows[rIdx]?.original.customFields?.[columnId] ?? ""), "");
+        } else if (isBuyoutColumn(columnId)) {
+          // Buyout cells live in the browser-local store, not the row — clear THERE via the
+          // undoable commit helpers (push EDIT_BUYOUT_CELL, then set), never the row/DB edit
+          // path. Empty vendor = "", cleared actual = null (reads as estimate, L-3).
+          const rowId = rows[rIdx]?.original.id;
+          if (rowId) {
+            if (columnId === "vendor") meta.commitBuyoutVendor?.(rowId, "");
+            else meta.commitBuyoutActual?.(rowId, null);
+          }
         } else {
           const prevVal = (rows[rIdx]?.original[columnId as keyof ProcessedTakeoffRow] ?? "") as string | number | boolean;
           meta.handleCellEdit(rIdx, columnId as keyof ProcessedTakeoffRow, "");

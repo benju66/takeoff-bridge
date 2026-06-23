@@ -14,7 +14,7 @@ import React, { useRef, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useReactTable } from "@tanstack/react-table";
 import type { Column } from "@tanstack/react-table";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2 } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2, Layers } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
 import { Project, DivisionLayout } from "@/types/db";
@@ -28,6 +28,7 @@ import { TrustInspector } from "./TrustInspector";
 import type { ReconciliationModel, TrustTab, OverridePair } from "@/lib/trustInspector";
 import { buildFlagsModel } from "@/lib/trustInspector";
 import type { Binding } from "@/lib/bindings/types";
+import type { LensView, BuyoutRollup, BuyoutProfit } from "@/lib/buyout";
 import { lineFieldNodeId } from "@/lib/bindings/compile";
 import type { OverridePayload } from "@/lib/overrideSetter";
 import { DivisionAggregation, CostTypeAggregation } from "@/types";
@@ -46,8 +47,10 @@ const fmtUSD = (n: number) =>
 
 // Step-4 grid column sets fed to GridShell's host config (B1b). These were inline arrays
 // inside the shell before generalization; they live here now because they are Step-4-specific.
-const STEP4_EDITABLE_COLUMN_IDS = ["itemId", "description", "matchedQty", "unitPrice", "uom"] as const;
-const STEP4_CENTER_ALIGNED_COLUMN_IDS = ["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit"] as const;
+// `vendor`/`actual` are the editable Buyout lens columns (Phase 2). `variance` is read-only
+// (omitted here) but center-aligned. They commit to the browser-local buyout store, not rows.
+const STEP4_EDITABLE_COLUMN_IDS = ["itemId", "description", "matchedQty", "unitPrice", "uom", "vendor", "actual"] as const;
+const STEP4_CENTER_ALIGNED_COLUMN_IDS = ["costType", "uom", "itemId", "matchedQty", "unitPrice", "total", "costPerSf", "costPerUnit", "actual", "variance"] as const;
 
 /** A locked summary total cell: the formatted value plus a 🔍 trace affordance
  *  that opens the Trust Inspector focused on this value (Phase 5). When the field is
@@ -128,6 +131,97 @@ function ReconChip({ reconciliation, onOpen }: { reconciliation: ReconciliationM
     >
       {label}
     </button>
+  );
+}
+
+/** Format a dollar amount the same way every total in this grid is formatted. */
+function money(n: number): string {
+  return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Estimate Buyout Lens footer (Phase 4) — the at-a-glance "how's buyout going" read, shown
+ * ONLY in the Buyout lens. It mirrors the bottom of the company template's STEP 4 sheet:
+ *  • Total Estimate (Bid)  — the engine's grand Total Estimated Cost (ties to template I341
+ *    and to the grid's own "Total Estimated Cost" row).
+ *  • Total Projected Cost  — bid − profit (= Σ actual-or-estimate + contingency/insurance,
+ *    excl. fee; ties to template P341).
+ *  • Projected Profit ($ + %) — fee + buyout savings (green when making money / red when
+ *    underwater; ties to template O347 / P347). Profit is NOT a cost — the fee falls straight
+ *    to it, and every dollar a sub comes in under estimate adds to it.
+ *  • "% of value committed" bar (L-4 — Σ Estimate on lines with a Vendor ÷ Σ Estimate over the
+ *    awardable data lines) — a buyout-PROGRESS gauge, distinct from the profit margin %.
+ * Pure display: `profit` is derived live (engine bid + browser-local savings) and the rollup
+ * reads `buyout.map` — nothing here persists or enters the engine/export, so no dollar can move.
+ * Both helpers are zero-guarded → an empty estimate renders $0 / 0%, never NaN/Infinity. When a
+ * filter is active the numbers still reflect the WHOLE estimate (so a hidden line still counts),
+ * with a note to that effect.
+ */
+function BuyoutRollupFooter({
+  rollup,
+  profit,
+  isFiltered,
+}: {
+  rollup: BuyoutRollup;
+  profit: BuyoutProfit;
+  isFiltered: boolean;
+}) {
+  const { committedEstimate, estimateTotal, percentCommitted } = rollup;
+  // committed is a subset of the total so percent is in [0,1]; clamp defensively for the bar width.
+  const pct = Math.min(100, Math.max(0, percentCommitted * 100));
+  const inProfit = profit.profit > 0; // making money (fee + savings positive)
+  const underwater = profit.profit < 0; // overruns have eaten through the fee
+  const profitTone = inProfit
+    ? "text-emerald-600 dark:text-emerald-400"
+    : underwater
+    ? "text-red-600 dark:text-red-400"
+    : "text-slate-500 dark:text-slate-400";
+  return (
+    <div className="buyout-rollup border-t border-grid-border px-4 py-2.5 select-none text-[11px] font-sans">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Buyout</span>
+        <span className="text-slate-500 dark:text-slate-400">
+          Total Estimate <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(profit.bid)}</span>
+        </span>
+        <span className="text-slate-500 dark:text-slate-400">
+          Projected Cost <span className="ml-1 font-mono font-semibold text-foreground dark:text-slate-200">{money(profit.projectedCost)}</span>
+        </span>
+        <span className="text-slate-500 dark:text-slate-400">
+          Projected Profit
+          <span className={`ml-1 font-mono font-bold ${profitTone}`}>
+            {inProfit ? "+" : underwater ? "-" : ""}
+            {money(Math.abs(profit.profit))}
+            <span className="ml-1 font-sans text-[10px]">({Math.abs(profit.profitPct * 100).toFixed(2)}%)</span>
+          </span>
+        </span>
+        {isFiltered && (
+          <span className="text-[10px] italic text-amber-600 dark:text-amber-500">
+            Filter active — totals reflect the whole estimate
+          </span>
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-3">
+        <div
+          className="relative h-2 w-full max-w-md overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+          role="progressbar"
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Percent of estimate value committed"
+        >
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-blue-500 transition-[width] duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="whitespace-nowrap font-mono text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="font-bold text-blue-600 dark:text-blue-400">{pct.toFixed(1)}%</span> committed
+          <span className="ml-2 text-slate-400 dark:text-slate-500">
+            {money(committedEstimate)} of {money(estimateTotal)}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -212,6 +306,19 @@ interface EstimateTableProps {
   globalFilter: string;
   setGlobalFilter: (value: string) => void;
 
+  // Estimate Buyout Lens (Phase 2) — the active grid lens + setter (persisted per browser).
+  // The toolbar toggle flips it; useTakeoffWorkbook derives the column SWAP from it.
+  lensView: LensView;
+  setLensView: (next: LensView) => void;
+  /** Phase 4 — the buyout footer rollup (committed dollars + the awardable data-line estimate
+   *  base) over the WHOLE estimate. Assembled in useTakeoffWorkbook from the same per-line
+   *  Estimate the Variance cells use, so the footer can't drift from the cells. */
+  buyoutRollup: BuyoutRollup;
+  /** Phase 4 follow-on — Projected Profit for the footer (Total Estimate/Bid · Total Projected
+   *  Cost · Projected Profit $/%), mirroring the template's STEP 4 bottom block. Derived from
+   *  the whole-estimate bid + the data-line savings; display-only. */
+  buyoutProfit: BuyoutProfit;
+
   scrollToRowRef?: React.MutableRefObject<((index: number) => void) | undefined>;
 
   // Import modal
@@ -277,6 +384,10 @@ export function EstimateTable({
   selection,
   globalFilter,
   setGlobalFilter,
+  lensView,
+  setLensView,
+  buyoutRollup,
+  buyoutProfit,
   scrollToRowRef,
   pendingImport,
   confirmImport,
@@ -776,6 +887,34 @@ export function EstimateTable({
 
           {/* Grid-manipulation controls — grouped with the table they act on */}
           <div className="flex flex-wrap items-center gap-3">
+            {/* Estimate | Buyout lens toggle (Phase 2) — swaps the visible columns; the
+                estimate math/export is unaffected (buyout lives in browser-local storage). */}
+            <div
+              className="inline-flex items-center rounded-lg border border-grid-border overflow-hidden select-none"
+              role="group"
+              aria-label="Grid lens"
+            >
+              <span className="pl-2.5 pr-1.5 text-slate-400 dark:text-slate-500 hidden sm:inline" aria-hidden="true">
+                <Layers size={13} />
+              </span>
+              {(["estimate", "buyout"] as const).map((lens) => (
+                <button
+                  key={lens}
+                  type="button"
+                  onClick={() => setLensView(lens)}
+                  aria-pressed={lensView === lens}
+                  title={lens === "estimate" ? "Estimating view" : "Buyout view — Vendor, Actual, Variance (saved in this browser only)"}
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                    lensView === lens
+                      ? "bg-blue-600 text-white"
+                      : "bg-card text-slate-600 dark:text-slate-400 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                  }`}
+                >
+                  {lens === "estimate" ? "Estimate" : "Buyout"}
+                </button>
+              ))}
+            </div>
+
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-sans font-semibold uppercase tracking-wider hidden lg:inline">
               ↑↓ navigate
             </span>
@@ -893,6 +1032,14 @@ export function EstimateTable({
             ) : null
           }
         />
+
+        {/* Estimate Buyout Lens rollup footer (Phase 4) — shown only in the Buyout lens, and
+            only with data rows present (mirrors the status-bar gate so a brand-new estimate
+            shows no footer). Pure display over the whole-estimate rollup; no dollar it shows
+            ever enters the engine or the export. */}
+        {lensView === "buyout" && rows.length > 0 && (
+          <BuyoutRollupFooter rollup={buyoutRollup} profit={buyoutProfit} isFiltered={isFiltered} />
+        )}
 
         {/* Status Bar — Enterprise Excel-style footer info bar */}
         {rows.length > 0 && (
