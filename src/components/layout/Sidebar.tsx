@@ -21,7 +21,9 @@ import {
   Boxes,
   GitBranch,
   HeartPulse,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Calculator,
+  Target
 } from "lucide-react";
 import { getProject, getSession, signOut } from "@/lib/db";
 import { Project } from "@/types/db";
@@ -272,6 +274,42 @@ export default function Sidebar({ sidebarState, setSidebarState }: SidebarProps)
               <DollarSign size={16} className="shrink-0" />
               <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${isCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-xs"}`}>
                 Company Rate Card
+              </span>
+            </Link>
+
+            {/* Concept Pricing Link */}
+            <Link
+              href="/concept-pricing"
+              className={`flex items-center rounded-lg font-bold text-xs uppercase tracking-wider transition-all duration-200 ${
+                isCollapsed ? "p-2.5 justify-center" : "gap-3 px-3.5 py-2.5"
+              } ${
+                pathname === "/concept-pricing"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/10"
+                  : "hover:bg-slate-900 hover:text-slate-100 text-slate-400"
+              }`}
+              title={isCollapsed ? "Concept Pricing" : undefined}
+            >
+              <Calculator size={16} className="shrink-0" />
+              <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${isCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-xs"}`}>
+                Concept Pricing
+              </span>
+            </Link>
+
+            {/* Buyout Accuracy Link */}
+            <Link
+              href="/buyout-accuracy"
+              className={`flex items-center rounded-lg font-bold text-xs uppercase tracking-wider transition-all duration-200 ${
+                isCollapsed ? "p-2.5 justify-center" : "gap-3 px-3.5 py-2.5"
+              } ${
+                pathname === "/buyout-accuracy"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/10"
+                  : "hover:bg-slate-900 hover:text-slate-100 text-slate-400"
+              }`}
+              title={isCollapsed ? "Buyout Accuracy" : undefined}
+            >
+              <Target size={16} className="shrink-0" />
+              <span className={`whitespace-nowrap transition-all duration-300 overflow-hidden ${isCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-xs"}`}>
+                Buyout Accuracy
               </span>
             </Link>
 

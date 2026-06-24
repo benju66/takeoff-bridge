@@ -6,17 +6,22 @@
 -- All schema changes MUST be made here first, then applied to the
 -- Supabase Dashboard SQL Editor.
 --
--- Tables: 22 (added estimate_section_lines — GC/Site-Ops Addressability Phase A2)
--- RPC Functions: 5 (save_estimate_line_items, save_estimate, save_section_lines,
---   create_estimate_version, submit_estimate_version)
--- Trigger Functions: 8 (custom_step23_line_defs lifecycle guard + updated_at touch
+-- Tables: 25 (added budget_snapshots / budget_snapshot_actuals /
+--   budget_snapshot_allocations — Actuals Cost-History Phase 2)
+-- RPC Functions: 7 (save_estimate_line_items, save_estimate, save_section_lines,
+--   create_estimate_version, submit_estimate_version, save_budget_snapshot,
+--   finalize_budget_snapshot)
+-- Trigger Functions: 11 (custom_step23_line_defs lifecycle guard + updated_at touch
 --   — Catalog Manager Phase 2; catalog_additions updated_at touch — Phase 6;
 --   estimate_versions freeze guard — Estimate Versioning; procore_cost_codes
 --   lifecycle guard + updated_at touch — Procore Cost Codes Phase 1;
 --   catalog_cost_type_overrides updated_at touch — Reconciliation Phase 2;
---   estimate_bindings updated_at touch — Linked Values System Phase 3)
--- RLS Policies: 40 (added estimate_section_lines FOR ALL tenant policy —
---   GC/Site-Ops Addressability Phase A2)
+--   estimate_bindings updated_at touch — Linked Values System Phase 3;
+--   budget_snapshots freeze guard; budget_snapshot_allocations freeze guard +
+--   updated_at touch — Actuals Cost-History Phase 2)
+-- RLS Policies: 46 (added budget_snapshots select/insert/update +
+--   budget_snapshot_actuals select/insert + budget_snapshot_allocations FOR ALL
+--   tenant policy — Actuals Cost-History Phase 2)
 -- Storage buckets: 1 ('templates', private — Phase 3b)
 --
 -- TENANT POLICY FORM: the tenant-isolation policies inline the lookup as
@@ -27,7 +32,22 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-19 (GC/Site-Ops Addressability Phase B6: FINISH the
+-- Last updated: 2026-06-24 (Actuals Cost-History & Project Budget Snapshots
+-- Phase 2 — storage spine: three new tables modeled on estimate_versions. Tables
+-- 23/24/25 = budget_snapshots (immutable header; freeze-guard trigger lets only the
+-- is_final/finalized_at promotion pair change; partial-unique "one FINAL per
+-- project" index), budget_snapshot_actuals (frozen per code+costType rows shaped to
+-- the Phase 1 CodeActual — no UPDATE/DELETE policy), budget_snapshot_allocations
+-- (MUTABLE Phase-4 overlay for manual rollup allocation; open-enum `kind` + JSONB
+-- `detail` like estimate_section_lines.entry_kind; a freeze-on-final guard makes it
+-- read-only once the snapshot is FINAL). Two RPCs: save_budget_snapshot (atomic
+-- header+actuals insert, MAX+1 numbering — mirrors save_estimate) and
+-- finalize_budget_snapshot (one-FINAL-per-project promotion — mirrors
+-- submit_estimate_version). Tenant-scoped via the projects join; the actuals/
+-- allocations tables use a two-hop snapshots→projects join. NO consumer UI yet
+-- (db.ts gateway only). Grand totals copied verbatim from the calc engine; nothing
+-- in the DB derives a dollar.
+-- Earlier — 2026-06-19 (GC/Site-Ops Addressability Phase B6: FINISH the
 -- migration — RETIRED the four legacy Step 2/3 input blob columns from
 -- project_estimates (gc_utilization, gc_equipment_overrides, site_ops_quantities,
 -- site_ops_rates) and removed them from the save_estimate RPC's upsert list. The
@@ -1915,5 +1935,447 @@ BEGIN
     COALESCE(line->>'source', 'template'),
     now()
   FROM jsonb_array_elements(p_lines) AS line;
+END;
+$$;
+
+-- ═════════════════════════════════════════════════════════════════════
+-- Tables 23–25: Actuals Cost-History & Project Budget Snapshots (Phase 2)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- The storage spine for the Actuals workstream (plan
+-- docs/plans/2026-06-23-actuals-cost-history-and-budget-snapshots.md). A
+-- "snapshot" is an immutable point-in-time capture of a project's Procore Budget
+-- Detail (+ change-event exports) AFTER the Phase 1 parse + normalization engine
+-- (src/lib/actuals/, computeNormalizedActuals). Modeled on estimate_versions:
+-- frozen at creation, with a freeze-guard trigger + an is_final promotion flag +
+-- a partial-unique "one FINAL per project" index. Marking a snapshot FINAL is the
+-- doorway that later makes its normalized actuals eligible for the pricing pool
+-- (mirrors submit_estimate_version → "doorway into cost history").
+--
+-- This is the workstream's ONLY DDL phase by design — later phases (ingestion UI,
+-- estimate↔code reconciliation, promote-to-FINAL, pricing-pool read, dashboard)
+-- reuse this schema. Shaped up front for both downstream consumers (Phase 4
+-- reconciliation, Phase 8 dashboard) to minimise a second DDL gate.
+--
+-- The calc/normalization engine is the SOLE financial authority: every dollar here
+-- is copied verbatim from computeNormalizedActuals (AGENTS.md "No AI Autonomy Over
+-- Financials"). Stored derived values are a baseline — later phases recompute
+-- normalized figures from the frozen raw + human overrides (codebase ethos:
+-- bindings / section-lines recompute on load, never trust a frozen derived value).
+
+-- ─────────────────────────────────────────────────
+-- Table 23: budget_snapshots (immutable header — Actuals Phase 2)
+-- ─────────────────────────────────────────────────
+--
+-- One row per uploaded snapshot. snapshot_number is a per-project sequence assigned
+-- atomically by save_budget_snapshot (mirrors estimate_versions.version_number). The
+-- four grand_* columns are the engine's grand totals copied verbatim (explicit
+-- NUMERIC columns — not a JSONB blob — so the Phase 8 budget-vs-EAC dashboard reads
+-- them cheaply). events (ClassifiedChangeEvent[]) + diagnostics (ActualsDiagnostics)
+-- are frozen JSONB audit payloads the engine emits; Phase 5 surfaces the auto-read
+-- Scope/Type/Reason from events and the diagnostics are never silently dropped.
+--
+-- IMMUTABILITY: the freeze-guard trigger below rejects any UPDATE that touches
+-- anything besides the promotion pair (is_final, finalized_at) — the only mutable
+-- state. No DELETE policy → snapshots are never removed by clients. The partial-
+-- unique index is THE single-FINAL-per-project invariant (mirrors
+-- idx_estimate_versions_one_submitted).
+CREATE TABLE budget_snapshots (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id              TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  snapshot_number         INTEGER NOT NULL,            -- per-project, assigned by save_budget_snapshot
+  label                   TEXT NOT NULL DEFAULT '',
+  source_kind             TEXT NOT NULL DEFAULT 'csv', -- ActualsSource.kind ('csv' | 'procore-api')
+  grand_total_actual      NUMERIC NOT NULL DEFAULT 0,  -- engine grand totals, copied verbatim
+  grand_normalized_actual NUMERIC NOT NULL DEFAULT 0,
+  burden_total_actual     NUMERIC NOT NULL DEFAULT 0,
+  direct_total_actual     NUMERIC NOT NULL DEFAULT 0,
+  events                  JSONB NOT NULL DEFAULT '[]', -- frozen ClassifiedChangeEvent[] (Phase 5 reads)
+  diagnostics             JSONB NOT NULL DEFAULT '{}', -- frozen ActualsDiagnostics (never silently dropped)
+  metadata                JSONB NOT NULL DEFAULT '{}', -- embedded project token / file names / source notes
+  is_final                BOOLEAN NOT NULL DEFAULT false,
+  finalized_at            TIMESTAMPTZ,
+  created_by              UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, snapshot_number),
+  CONSTRAINT budget_snapshots_final_consistency CHECK (
+    (is_final AND finalized_at IS NOT NULL)
+    OR (NOT is_final AND finalized_at IS NULL))
+);
+
+-- THE single-FINAL-per-project invariant: at most one FINAL snapshot per project.
+CREATE UNIQUE INDEX idx_budget_snapshots_one_final
+  ON budget_snapshots (project_id) WHERE is_final;
+CREATE INDEX idx_budget_snapshots_project
+  ON budget_snapshots (project_id, snapshot_number DESC);
+
+ALTER TABLE budget_snapshots ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped via the projects join (mirrors estimate_versions). SELECT + INSERT +
+-- UPDATE only; UPDATE exists solely for the promotion flip and is confined to it by
+-- the freeze-guard trigger. No DELETE policy. Tenant predicate inlined as
+-- (SELECT tenant_id FROM users WHERE id = auth.uid()) to match the deployed form.
+CREATE POLICY "budget_snapshots_select_policy" ON budget_snapshots
+  FOR SELECT
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = budget_snapshots.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+CREATE POLICY "budget_snapshots_insert_policy" ON budget_snapshots
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = budget_snapshots.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+CREATE POLICY "budget_snapshots_update_policy" ON budget_snapshots
+  FOR UPDATE
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = budget_snapshots.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM projects p
+    WHERE p.id = budget_snapshots.project_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+-- Freeze guard (BEFORE UPDATE): a snapshot's payload is immutable — only the
+-- promotion pair (is_final, finalized_at) may change. Mirrors the
+-- estimate_versions_freeze_guard pattern: the trigger, not the policy predicate, is
+-- the authority no client bug can bypass. SET search_path = '' pins schema
+-- resolution (only pg_catalog/NEW/OLD referenced). SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION budget_snapshots_freeze_guard()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.project_id IS DISTINCT FROM OLD.project_id
+     OR NEW.snapshot_number IS DISTINCT FROM OLD.snapshot_number
+     OR NEW.label IS DISTINCT FROM OLD.label
+     OR NEW.source_kind IS DISTINCT FROM OLD.source_kind
+     OR NEW.grand_total_actual IS DISTINCT FROM OLD.grand_total_actual
+     OR NEW.grand_normalized_actual IS DISTINCT FROM OLD.grand_normalized_actual
+     OR NEW.burden_total_actual IS DISTINCT FROM OLD.burden_total_actual
+     OR NEW.direct_total_actual IS DISTINCT FROM OLD.direct_total_actual
+     OR NEW.events IS DISTINCT FROM OLD.events
+     OR NEW.diagnostics IS DISTINCT FROM OLD.diagnostics
+     OR NEW.metadata IS DISTINCT FROM OLD.metadata
+     OR NEW.created_by IS DISTINCT FROM OLD.created_by
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'budget_snapshots rows are frozen: only the promotion flag (is_final, finalized_at) may change.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER budget_snapshots_freeze_guard_trg
+  BEFORE UPDATE ON budget_snapshots
+  FOR EACH ROW
+  EXECUTE FUNCTION budget_snapshots_freeze_guard();
+
+-- ─────────────────────────────────────────────────
+-- Table 24: budget_snapshot_actuals (per code+costType — Actuals Phase 2)
+-- ─────────────────────────────────────────────────
+--
+-- One row per `code+costType` grain key (e.g. '1-10320.000.Labor') — the resolution
+-- ceiling of any Procore-sourced history. Shape mirrors the Phase 1 CodeActual:
+-- budget_code (grain key), cost_code, cost_type (ActualsCostType as open TEXT — no
+-- CHECK, mirroring procore_cost_codes), description, original_budget (estimate
+-- baseline), total_actual (raw EAC), normalized_actual (EAC minus normalized-out CO
+-- contributions), is_burden (Fee 60-604000.000 / GL 60-602020.000), and
+-- normalized_out_contributions (CodeChangeContribution[] as JSONB — the audit of
+-- what was subtracted). Frozen with the snapshot: NO UPDATE/DELETE policy; the
+-- ON DELETE CASCADE removes these rows only when the parent snapshot is deleted.
+CREATE TABLE budget_snapshot_actuals (
+  snapshot_id                  UUID NOT NULL REFERENCES budget_snapshots(id) ON DELETE CASCADE,
+  budget_code                  TEXT NOT NULL,                  -- grain key, e.g. '1-10320.000.Labor'
+  cost_code                    TEXT NOT NULL DEFAULT '',       -- '1-10320.000'
+  cost_type                    TEXT NOT NULL DEFAULT 'Other',  -- ActualsCostType (open TEXT; no CHECK)
+  description                  TEXT NOT NULL DEFAULT '',
+  original_budget              NUMERIC NOT NULL DEFAULT 0,
+  total_actual                 NUMERIC NOT NULL DEFAULT 0,
+  normalized_actual            NUMERIC NOT NULL DEFAULT 0,
+  is_burden                    BOOLEAN NOT NULL DEFAULT false,
+  normalized_out_contributions JSONB NOT NULL DEFAULT '[]',    -- CodeChangeContribution[]
+  PRIMARY KEY (snapshot_id, budget_code)
+);
+
+ALTER TABLE budget_snapshot_actuals ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped via a two-hop snapshots→projects join. SELECT + INSERT only
+-- (immutable — no UPDATE/DELETE policy). The INSERT policy gates the
+-- save_budget_snapshot RPC (SECURITY INVOKER → the caller's RLS applies).
+CREATE POLICY "budget_snapshot_actuals_select_policy" ON budget_snapshot_actuals
+  FOR SELECT
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM budget_snapshots s
+    JOIN projects p ON p.id = s.project_id
+    WHERE s.id = budget_snapshot_actuals.snapshot_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+CREATE POLICY "budget_snapshot_actuals_insert_policy" ON budget_snapshot_actuals
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM budget_snapshots s
+    JOIN projects p ON p.id = s.project_id
+    WHERE s.id = budget_snapshot_actuals.snapshot_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+-- ─────────────────────────────────────────────────
+-- Table 25: budget_snapshot_allocations (mutable Phase-4 overlay — Actuals Phase 2)
+-- ─────────────────────────────────────────────────
+--
+-- The optional per-line manual allocations that recover the estimate's finer-than-
+-- Procore granularity where one Procore code rolls up many estimate lines (Phase 4
+-- "staging ground"). UNLIKE the frozen header/actuals, this overlay is MUTABLE
+-- (FOR ALL policy) while the parent snapshot is not FINAL — humans add/edit/clear
+-- allocations until promotion. A freeze-on-final guard then makes it read-only
+-- (the FINAL snapshot's overlay is frozen with its actuals).
+--
+--   budget_code           — the grain key this row draws from ('' = snapshot-level).
+--   estimate_line_item_id — the receiving estimate line ('' = code-level: an
+--                           "enter-all" or a pure disposition row).
+--   kind                  — FREE TEXT / OPEN enum (no CHECK; mirrors
+--                           estimate_section_lines.entry_kind). Phase 4/5 grow the
+--                           vocabulary (allocation / verify / enter_all / declined /
+--                           classification override) with ZERO schema change.
+--   detail                — JSONB structured payload for the kind (e.g. a Phase 5
+--                           classification override's fields).
+-- allocated_total / allocated_normalized are human-entered dollars (AGENTS.md "No AI
+-- Autonomy Over Financials" — nothing here is guessed by the agent).
+CREATE TABLE budget_snapshot_allocations (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  snapshot_id           UUID NOT NULL REFERENCES budget_snapshots(id) ON DELETE CASCADE,
+  budget_code           TEXT NOT NULL DEFAULT '',           -- grain key this row concerns
+  estimate_line_item_id TEXT NOT NULL DEFAULT '',           -- '' = code-level (enter-all / disposition)
+  kind                  TEXT NOT NULL DEFAULT 'allocation', -- FREE TEXT open enum (mirrors entry_kind)
+  allocated_total       NUMERIC NOT NULL DEFAULT 0,
+  allocated_normalized  NUMERIC NOT NULL DEFAULT 0,
+  detail                JSONB NOT NULL DEFAULT '{}',        -- structured Phase 4/5 payload
+  note                  TEXT NOT NULL DEFAULT '',
+  created_by            UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_budget_snapshot_allocations_snapshot
+  ON budget_snapshot_allocations (snapshot_id, budget_code);
+
+ALTER TABLE budget_snapshot_allocations ENABLE ROW LEVEL SECURITY;
+
+-- Tenant-scoped, MUTABLE: a single FOR ALL policy (SELECT/INSERT/UPDATE/DELETE)
+-- gated by the two-hop snapshots→projects join — mirrors estimate_bindings_tenant_
+-- policy (a real tenant predicate, not USING(true), so no rls_policy_always_true
+-- advisor). The freeze-on-final guard below is what enforces post-FINAL immutability.
+CREATE POLICY "budget_snapshot_allocations_tenant_policy" ON budget_snapshot_allocations
+  FOR ALL
+  TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM budget_snapshots s
+    JOIN projects p ON p.id = s.project_id
+    WHERE s.id = budget_snapshot_allocations.snapshot_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ))
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM budget_snapshots s
+    JOIN projects p ON p.id = s.project_id
+    WHERE s.id = budget_snapshot_allocations.snapshot_id
+    AND p.tenant_id = (SELECT tenant_id FROM users WHERE id = auth.uid())
+  ));
+
+-- Freeze-on-final guard (BEFORE INSERT/UPDATE/DELETE): no allocation write when
+-- EITHER the row's current owner (OLD) or its target (NEW) snapshot is FINAL — the
+-- promoted snapshot's overlay freezes with its actuals, and a write can never move
+-- an allocation off a FINAL snapshot either. References public.budget_snapshots, so
+-- search_path is pinned to '' and the table is schema-qualified. OLD/NEW are NULL on
+-- INSERT/DELETE respectively (PL/pgSQL yields NULL for their fields, harmless in the
+-- IN list); on a cascade delete the parent is already gone → no row → NULL → allowed.
+-- RETURN COALESCE(NEW, OLD) handles all three operations. SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION budget_snapshot_allocations_freeze_guard()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+DECLARE
+  v_is_final BOOLEAN;
+BEGIN
+  SELECT bool_or(is_final) INTO v_is_final
+    FROM public.budget_snapshots
+   WHERE id IN (OLD.snapshot_id, NEW.snapshot_id);
+  IF v_is_final THEN
+    RAISE EXCEPTION 'budget_snapshot_allocations are frozen once the snapshot is FINAL.';
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+CREATE TRIGGER budget_snapshot_allocations_freeze_guard_trg
+  BEFORE INSERT OR UPDATE OR DELETE ON budget_snapshot_allocations
+  FOR EACH ROW
+  EXECUTE FUNCTION budget_snapshot_allocations_freeze_guard();
+
+-- updated_at touch (BEFORE UPDATE). Fires AFTER the freeze guard (trigger names fire
+-- alphabetically: ..._freeze_guard_trg < ..._touch_updated_at_trg). Mirrors the
+-- estimate_bindings touch pattern; SET search_path = ''. SECURITY INVOKER (default).
+CREATE OR REPLACE FUNCTION touch_budget_snapshot_allocations_updated_at()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path = ''
+AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER budget_snapshot_allocations_touch_updated_at_trg
+  BEFORE UPDATE ON budget_snapshot_allocations
+  FOR EACH ROW
+  EXECUTE FUNCTION touch_budget_snapshot_allocations_updated_at();
+
+-- ═════════════════════════════════════════════════════════════════════
+-- RPC: Atomic Budget-Snapshot Save (header + per-code actuals in one txn)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Inserts the immutable header AND its per-code actuals rows in a single
+-- transaction (mirrors save_estimate / create_estimate_version). snapshot_number is
+-- assigned MAX(snapshot_number)+1 atomically — two saves can never mint the same
+-- number silently (the UNIQUE constraint is the same-moment-race backstop). The
+-- JSONB blobs (events, diagnostics, normalized_out_contributions) round-trip as the
+-- engine's camelCase JSON — the DB never reshapes them.
+--
+-- SECURITY INVOKER (default — no SECURITY DEFINER clause) so the caller's RLS on
+-- budget_snapshots + budget_snapshot_actuals still applies; search_path pinned to
+-- public. Called via: supabase.rpc('save_budget_snapshot', { p_snapshot, p_actuals })
+-- ═════════════════════════════════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION save_budget_snapshot(
+  p_snapshot JSONB,
+  p_actuals JSONB
+)
+RETURNS budget_snapshots
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_project_id TEXT := p_snapshot->>'project_id';
+  v_row budget_snapshots;
+BEGIN
+  IF v_project_id IS NULL OR v_project_id = '' THEN
+    RAISE EXCEPTION 'save_budget_snapshot: p_snapshot.project_id is required';
+  END IF;
+
+  -- Step 1: insert the immutable header, assigning the next per-project number.
+  INSERT INTO budget_snapshots (
+    project_id, snapshot_number, label, source_kind,
+    grand_total_actual, grand_normalized_actual, burden_total_actual, direct_total_actual,
+    events, diagnostics, metadata, created_by
+  )
+  VALUES (
+    v_project_id,
+    COALESCE(
+      (SELECT MAX(snapshot_number) FROM budget_snapshots WHERE project_id = v_project_id),
+      0
+    ) + 1,
+    COALESCE(p_snapshot->>'label', ''),
+    COALESCE(p_snapshot->>'source_kind', 'csv'),
+    COALESCE((p_snapshot->>'grand_total_actual')::NUMERIC, 0),
+    COALESCE((p_snapshot->>'grand_normalized_actual')::NUMERIC, 0),
+    COALESCE((p_snapshot->>'burden_total_actual')::NUMERIC, 0),
+    COALESCE((p_snapshot->>'direct_total_actual')::NUMERIC, 0),
+    COALESCE(p_snapshot->'events', '[]'::JSONB),
+    COALESCE(p_snapshot->'diagnostics', '{}'::JSONB),
+    COALESCE(p_snapshot->'metadata', '{}'::JSONB),
+    auth.uid()
+  )
+  RETURNING * INTO v_row;
+
+  -- Step 2: bulk-insert the per-code actuals rows under the new snapshot id.
+  INSERT INTO budget_snapshot_actuals (
+    snapshot_id, budget_code, cost_code, cost_type, description,
+    original_budget, total_actual, normalized_actual, is_burden, normalized_out_contributions
+  )
+  SELECT
+    v_row.id,
+    a->>'budget_code',
+    COALESCE(a->>'cost_code', ''),
+    COALESCE(a->>'cost_type', 'Other'),
+    COALESCE(a->>'description', ''),
+    COALESCE((a->>'original_budget')::NUMERIC, 0),
+    COALESCE((a->>'total_actual')::NUMERIC, 0),
+    COALESCE((a->>'normalized_actual')::NUMERIC, 0),
+    COALESCE((a->>'is_burden')::BOOLEAN, false),
+    COALESCE(a->'normalized_out_contributions', '[]'::JSONB)
+  FROM jsonb_array_elements(p_actuals) AS a;
+
+  RETURN v_row;
+END;
+$$;
+
+-- ═════════════════════════════════════════════════════════════════════
+-- RPC: Finalize Budget Snapshot (the doorway into the pricing pool)
+-- ═════════════════════════════════════════════════════════════════════
+--
+-- Marks one snapshot as the project's FINAL/closeout in a single transaction:
+-- clears the currently-FINAL snapshot (if any, and not the target itself), then
+-- sets the target. Either both flips land or neither does — combined with the
+-- partial-unique index, a project can never carry two FINAL snapshots. Re-finalizing
+-- the already-FINAL snapshot is a clean no-op. Mirrors submit_estimate_version.
+--
+-- SECURITY INVOKER (default) — the caller's UPDATE policy still applies, and the
+-- freeze-guard trigger confines both UPDATEs to the promotion pair. search_path
+-- pinned. Called via: supabase.rpc('finalize_budget_snapshot', { ... })
+
+CREATE OR REPLACE FUNCTION finalize_budget_snapshot(
+  p_project_id TEXT,
+  p_snapshot_id UUID
+)
+RETURNS void
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  -- Step 1: withdraw the current FINAL closeout, if it isn't the target itself.
+  UPDATE budget_snapshots
+     SET is_final = false, finalized_at = NULL
+   WHERE project_id = p_project_id
+     AND is_final
+     AND id <> p_snapshot_id;
+
+  -- Step 2: mark the target as FINAL.
+  UPDATE budget_snapshots
+     SET is_final = true, finalized_at = now()
+   WHERE id = p_snapshot_id
+     AND project_id = p_project_id
+     AND NOT is_final;
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+
+  IF v_count = 0 THEN
+    -- Already FINAL → no-op. Anything else → the target doesn't exist under this
+    -- project (or this tenant's RLS view): fail loudly.
+    IF NOT EXISTS (
+      SELECT 1 FROM budget_snapshots
+       WHERE id = p_snapshot_id AND project_id = p_project_id AND is_final
+    ) THEN
+      RAISE EXCEPTION 'finalize_budget_snapshot: snapshot % not found for project %',
+        p_snapshot_id, p_project_id;
+    END IF;
+  END IF;
 END;
 $$;

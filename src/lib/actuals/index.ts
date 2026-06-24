@@ -1,0 +1,156 @@
+/**
+ * Actuals Cost-History — Phase 1 public surface (pure parse + normalization).
+ *
+ * No DB, no UI: this barrel exposes the swappable source, the parsers, the
+ * classification helpers, and the normalization engine for later phases (the
+ * storage spine, ingestion UI, reconciliation, and pricing-pool read pipeline)
+ * to build on.
+ */
+
+export * from "./types";
+export {
+  parseActualsCurrency,
+  normalizeEventId,
+  parseCostCode,
+  parseCostCodeDescription,
+  parseCostType,
+  buildGrainKey,
+} from "./currency";
+export {
+  canonicalizeScope,
+  canonicalizeType,
+  canonicalizeReason,
+  classifyChangeEvent,
+  type EventDisposition,
+} from "./classify";
+export {
+  parseBudgetDetail,
+  parseChangeEventSummary,
+  parseChangeEventDetail,
+  parsePotentialChangeOrders,
+  parsePrimeContractChangeOrders,
+  parseSubcontractorCommitments,
+} from "./parseExports";
+export {
+  computeNormalizedActuals,
+  isBurdenCode,
+  FEE_CODE,
+  GL_INSURANCE_CODE,
+} from "./normalize";
+export { CsvActualsSource, type ActualsCsvPayloads } from "./csvSource";
+export {
+  classifyActualsCsv,
+  extractEmbeddedProjectToken,
+  suggestProjectMatch,
+  type ActualsExportKind,
+  type EmbeddedProjectToken,
+  type ProjectLike,
+  type ProjectMatchCandidate,
+} from "./ingest";
+export {
+  buildBudgetSnapshotPayload,
+  type BudgetSnapshotPayload,
+  type BudgetSnapshotHeaderPayload,
+  type BudgetSnapshotActualPayload,
+  type BuildBudgetSnapshotOptions,
+} from "./snapshotPayload";
+export {
+  buildReconciliationModel,
+  buildVerifyAllocation,
+  buildLineAllocation,
+  buildDeclineAllocation,
+  ALLOCATION_KIND,
+  DEFAULT_RECONCILIATION_THRESHOLDS,
+  type AllocationKind,
+  type EstimateLineLike,
+  type AllocationLike,
+  type ReconciliationBucket,
+  type ReconciliationStatus,
+  type ReconciliationThresholds,
+  type CodeTypeActual,
+  type CodeReconciliation,
+  type ReconciliationModel,
+  type BuildReconciliationInput,
+  type AllocationWriteInput,
+} from "./reconcile";
+export {
+  EVENT_CLASSIFICATION_KIND,
+  parseEventOverride,
+  collectEventOverrides,
+  buildEventOverrideAllocation,
+  resolveEffectiveDisposition,
+  applyEventClassificationOverrides,
+  type EventClassificationOverride,
+  type OverlayRowLike,
+  type EffectiveEventDisposition,
+  type EffectiveChangeEvent,
+  type ApplyEventOverridesInput,
+  type EffectiveActualsResult,
+} from "./eventReview";
+export {
+  buildActualCostObservations,
+  aggregateActualCostHistory,
+  scoreActualStrength,
+  RECENCY_FRESH_MONTHS,
+  RECENCY_STALE_MONTHS,
+  STRENGTH_WEIGHTS,
+  ACTUAL_PROVENANCE_FLOOR,
+  STRENGTH_STRONG,
+  STRENGTH_MODERATE,
+  type FinalSnapshotInput,
+  type ActualCostObservation,
+  type ActualCostStat,
+  type ActualStrength,
+  type ActualStrengthSignals,
+  type StrengthScorable,
+  type StrengthTier,
+} from "./pricingPool";
+export {
+  aggregateConceptPricing,
+  buildCodeParametrics,
+  buildDivisionParametrics,
+  parseProcoreDivision,
+  CONCEPT_METRICS,
+  DIVISION_GRAIN_CODE,
+  type ConceptMetric,
+  type ParametricObservation,
+  type ConceptPricingStat,
+  type ConceptPricingModel,
+} from "./conceptPricing";
+export {
+  buildProjectVariance,
+  buildTimeline,
+  buildCodeVariance,
+  buildDivisionVariance,
+  computeVarianceStat,
+  ON_BUDGET_TOLERANCE_PCT,
+  ON_BUDGET_TOLERANCE_ABS,
+  type BudgetStatus,
+  type VarianceOptions,
+  type VarianceStat,
+  type ProjectSnapshotInput,
+  type CodeVariance,
+  type DivisionVariance,
+  type SnapshotVariancePoint,
+  type VarianceKpis,
+  type ProjectVarianceModel,
+} from "./variance";
+export {
+  buildBuyoutDraws,
+  scoreBuyoutAccuracy,
+  buildBuyoutAccuracy,
+  aggregateBuyoutAccuracy,
+  BUYOUT_TOLERANCE_PCT,
+  BUYOUT_TOLERANCE_ABS,
+  type BuyoutAccuracyStatus,
+  type BuyoutAccuracyOptions,
+  type BuyoutAccuracyInput,
+  type BuyoutDrawCode,
+  type BuyoutDrawDivision,
+  type BuyoutDrawEvent,
+  type BuyoutDrawBreakdown,
+  type BuyoutAccuracyStat,
+  type ProjectBuyoutAccuracy,
+  type BuyoutAccuracyTotals,
+  type BuyoutAccuracyPortfolio,
+} from "./buyoutAccuracy";

@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   History,
   PackagePlus,
+  Coins,
 } from "lucide-react";
 import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
@@ -23,11 +24,18 @@ import {
   getCustomStep23LineDefs,
   getCatalogAdditions,
   getCatalogCostTypeOverrides,
+  getActualCostHistory,
+  getCostCodeMap,
 } from "@/lib/db";
 import { step23Observations } from "@/lib/step23Normalization";
 import { primeRateCard } from "@/lib/rateResolver";
 import { primeCatalogAdditionOverlays } from "@/lib/catalogAdditionOverlays";
 import { primeCatalogCostTypeOverrides } from "@/lib/catalog";
+import {
+  primeCostCodeResolver,
+  primeCostCodeResolverFromCatalog,
+  resolveProcoreCode,
+} from "@/lib/costCodeResolver";
 import {
   groupRateCardRows,
   parseRateInput,
@@ -38,6 +46,10 @@ import {
   canonicalUom,
   type TrustedHistoryStat,
 } from "@/lib/historyTrust";
+import {
+  aggregateActualCostHistory,
+  type ActualCostStat,
+} from "@/lib/actuals";
 import { RateCardEntry, CustomStep23LineDef, CatalogAddition } from "@/types/db";
 
 // ---------------------------------------------------------------------------
@@ -150,6 +162,52 @@ function HistoryStatLine({
   );
 }
 
+/** Strength-tier badge styling (strong / moderate / thin) for an actuals line. */
+const STRENGTH_TIER_CLASSES: Record<ActualCostStat["strength"]["tier"], string> = {
+  strong:
+    "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50",
+  moderate:
+    "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/50",
+  thin: "bg-slate-100 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700",
+};
+
+/**
+ * One actuals-pool line under a rate (Actuals Cost-History Phase 6) — the
+ * closed-job normalized cost for the WHOLE Procore code this rate line rolls
+ * into, with its strength/confidence tier. A SEPARATE pool from the as-bid
+ * history (different color, `Coins` icon): `actual` provenance is never blended
+ * with as-bid. REPORT-only — actuals are dollars, not a unit rate, so there is
+ * deliberately NO adopt button (no UOM to adopt into).
+ */
+function ActualCostStatLine({ stat }: { stat: ActualCostStat }) {
+  const groupLabel = stat.marketSector ? ` · ${stat.marketSector}` : "";
+  const detail = stat.observations
+    .map(
+      (o) =>
+        `${o.projectName || "Unnamed"} (${o.finalizedAt ? o.finalizedAt.slice(0, 10) : "no date"}): normalized ${currency.format(o.normalizedActual)} of ${currency.format(o.totalActual)} EAC`,
+    )
+    .join("\n");
+  return (
+    <div
+      className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-teal-700 dark:text-teal-300"
+      title={`Actual closed-job cost for Procore code ${stat.costCode} — WHOLE code (cost types summed), not a unit rate. Normalized = original-scope cost (owner extras / allowances / net-zero reclasses removed). Strength: ${stat.strength.label}.\n${detail}`}
+    >
+      <Coins size={10} className="shrink-0" />
+      <span className="font-mono">
+        {stat.count} job{stat.count === 1 ? "" : "s"} actual{groupLabel}
+        {` · whole-code med ${currency.format(stat.medianNormalized)}`}
+        {stat.count > 1 && ` · ${currency.format(stat.minNormalized)}–${currency.format(stat.maxNormalized)}`}
+      </span>
+      <span
+        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${STRENGTH_TIER_CLASSES[stat.strength.tier]}`}
+        title={`Confidence: ${stat.strength.label}`}
+      >
+        {stat.strength.tier}
+      </span>
+    </div>
+  );
+}
+
 export default function RateCardDashboard() {
   const [entries, setEntries] = useState<RateCardEntry[] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -178,6 +236,21 @@ export default function RateCardDashboard() {
    * Fail-soft, same as the catalog report.
    */
   const [step23History, setStep23History] = useState<Map<string, TrustedHistoryStat[]>>(new Map());
+  /**
+   * Actuals pricing pool keyed by Procore cost code (Actuals Cost-History Phase
+   * 6) — closed-job normalized cost per WHOLE Procore code, from FINAL budget
+   * snapshots. A SEPARATE `actual`-provenance pool, never blended with the as-bid
+   * maps above (actuals are dollars-only, no UOM). A rate row joins via
+   * resolveProcoreCode(lineCode). Fail-soft: an outage leaves it empty and the
+   * page fully functional without the report.
+   */
+  const [actualHistory, setActualHistory] = useState<Map<string, ActualCostStat[]>>(new Map());
+  /**
+   * True once the cost-code resolver is primed. Priming mutates a module-level
+   * cache (no React re-render), so this flag forces the lineCode→Procore-code
+   * join to recompute once the resolver is ready.
+   */
+  const [resolverReady, setResolverReady] = useState(false);
   /**
    * Custom (user-minted) GC/Site-Ops defs (Catalog Manager Phase 4). A PROMOTED
    * custom code has a rate_card row but NO built-in line def, so the card join
@@ -257,8 +330,43 @@ export default function RateCardDashboard() {
         console.error("Failed to load imported STEP 2/3 rate history (report skipped):", err);
       }
     })();
+    // Actuals pricing pool (Phase 6) — same fail-soft independence. Closed-job
+    // normalized cost per Procore code from FINAL snapshots, honoring Phase-5
+    // classification overrides (the recompute lives in buildActualCostObservations,
+    // db.ts side). Kept SEPARATE from the as-bid maps — actuals are never blended.
+    (async () => {
+      try {
+        const actualObs = await getActualCostHistory();
+        if (!cancelled) setActualHistory(aggregateActualCostHistory(actualObs));
+      } catch (err) {
+        console.error("Failed to load actuals pricing pool (report skipped):", err);
+      }
+    })();
     return () => { cancelled = true; };
   }, [loadCard]);
+
+  // Prime the cost-code resolver fail-soft (Phase 6) so each rate row's lineCode
+  // resolves to its granular Procore code — the join key into the actuals pool.
+  // Exactly the workbook / snapshot-page prime: cost_code_map wins, static catalog
+  // is the degraded fallback. An outage leaves resolveProcoreCode returning "" and
+  // the actuals lines simply absent (the page stays fully functional).
+  useEffect(() => {
+    let cancelled = false;
+    getCostCodeMap(MASTER_TEMPLATE_NAME)
+      .then((map) => {
+        if (cancelled) return;
+        if (map.length > 0) primeCostCodeResolver(map);
+        else primeCostCodeResolverFromCatalog();
+      })
+      .catch((err) => {
+        console.error("Failed to prime cost-code resolver for actuals (catalog fallback):", err);
+        if (!cancelled) primeCostCodeResolverFromCatalog();
+      })
+      .finally(() => {
+        if (!cancelled) setResolverReady(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Load + prime the catalog-additions overlay independently (fail-soft). The
   // prime keeps the in-session resolvers consistent; the list drives the
@@ -412,6 +520,26 @@ export default function RateCardDashboard() {
     [filteredEntries, customDefs],
   );
 
+  /**
+   * Actuals pool joined to each rate row by its resolved Procore code (Phase 6).
+   * Keyed by lineCode so the render is a direct lookup. Recomputes once the
+   * resolver is primed (resolverReady) — resolveProcoreCode reads a module cache,
+   * so without that flag the first render would miss every code. GC/Site-Ops rate
+   * codes are absent from cost_code_map and resolve to "" (no actuals shown) — a
+   * known, fail-soft gap; catalog itemId rows resolve and surface.
+   */
+  const actualByLineCode = useMemo(() => {
+    const m = new Map<string, ActualCostStat[]>();
+    if (!resolverReady || actualHistory.size === 0 || !entries) return m;
+    for (const e of entries) {
+      const code = resolveProcoreCode(e.lineCode);
+      if (!code) continue;
+      const stats = actualHistory.get(code);
+      if (stats && stats.length > 0) m.set(e.lineCode, stats);
+    }
+    return m;
+  }, [entries, actualHistory, resolverReady]);
+
   // Read-only additions, search-filtered with the same query as the card.
   const filteredAdditions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -473,6 +601,12 @@ export default function RateCardDashboard() {
             catalog unit price freezes on the line item the moment a row is saved. A per-project staff rate override still
             wins on top of the card. Catalog deduction lines may be negative. Edits are stamped MANUAL and are never
             overwritten by a re-seed.
+          </p>
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mt-2">
+            Below a rate you may see two kinds of history. <span className="font-semibold text-violet-700 dark:text-violet-300">As-bid</span> lines
+            are unit prices from past bids and can be adopted when the units match. The <span className="font-semibold text-teal-700 dark:text-teal-300">actual</span> line
+            (with a strength badge) is the closed-job <em>normalized</em> cost for the WHOLE Procore code this line rolls into — dollars from FINAL
+            budget snapshots, not a unit rate. It is a separate, report-only signal and is never adopted into the card.
           </p>
         </div>
       </div>
@@ -659,6 +793,16 @@ export default function RateCardDashboard() {
                                     sourceNote="As-bid GC/Site-Ops rates"
                                     disabled={isSaving}
                                     onAdopt={(s) => handleAdopt(entry, s)}
+                                  />
+                                ))}
+                                {/* Actuals pricing pool (Phase 6) — whole-code
+                                    closed-job normalized cost for the Procore code
+                                    this line resolves to. SEPARATE pool, report-only,
+                                    no ADOPT (dollars, not a unit rate). */}
+                                {(actualByLineCode.get(entry.lineCode) ?? []).map((stat) => (
+                                  <ActualCostStatLine
+                                    key={`actual-${stat.costCode}-${stat.marketSector || "(none)"}`}
+                                    stat={stat}
                                   />
                                 ))}
                               </td>

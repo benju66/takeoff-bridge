@@ -1,4 +1,15 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine, BudgetSnapshotMeta, BudgetSnapshotDetail, BudgetSnapshotAllocation } from "@/types/db";
+import { buildBudgetSnapshotPayload, buildActualCostObservations } from "./actuals";
+import type {
+  NormalizedActuals,
+  CodeActual,
+  ClassifiedChangeEvent,
+  ActualsDiagnostics,
+  FinalSnapshotInput,
+  ActualCostObservation,
+  ProjectSnapshotInput,
+  BuyoutAccuracyInput,
+} from "./actuals";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -925,9 +936,21 @@ export async function getClassificationHistoryBulk(
  */
 function mapObservationProjectContext(
   projects: unknown
-): { name?: string; bid_date?: string; market_sector?: string } | null {
+): {
+  name?: string;
+  bid_date?: string;
+  market_sector?: string;
+  square_footage?: number;
+  unit_count?: number;
+} | null {
   return (Array.isArray(projects) ? projects[0] : projects) as
-    | { name?: string; bid_date?: string; market_sector?: string }
+    | {
+        name?: string;
+        bid_date?: string;
+        market_sector?: string;
+        square_footage?: number;
+        unit_count?: number;
+      }
     | null;
 }
 
@@ -1342,6 +1365,584 @@ export async function getBidPriceHistory(): Promise<PriceObservation[]> {
   }
 
   return observations;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Budget Snapshots (Actuals Cost-History — Phase 2 storage spine)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Immutable point-in-time captures of a project's Procore Budget Detail (+
+// change-event exports) after the Phase 1 normalization engine. Modeled on the
+// Estimate Versions section above: the header + per-code actuals are frozen at
+// creation (DB freeze-guard trigger), the only mutable header state is the
+// promotion pair, and at most ONE snapshot per project is FINAL (partial-unique
+// index). The per-line allocations table is a MUTABLE overlay (Phase 4) that
+// freezes once its snapshot is FINAL. NO consumer wires these yet — Phase 2 lays
+// the gateway (precedent: getProcoreCostCodes landed unwired); Phases 3/4/5/8 use
+// it. The calc/normalization engine stays the sole financial authority.
+
+const BUDGET_SNAPSHOT_META_COLUMNS =
+  "id, project_id, snapshot_number, label, source_kind, grand_total_actual, grand_normalized_actual, burden_total_actual, direct_total_actual, metadata, is_final, finalized_at, created_at, created_by";
+
+const BUDGET_SNAPSHOT_ACTUAL_COLUMNS =
+  "budget_code, cost_code, cost_type, description, original_budget, total_actual, normalized_actual, is_burden, normalized_out_contributions";
+
+function mapBudgetSnapshotMetaFromRow(row: Record<string, unknown>): BudgetSnapshotMeta {
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    snapshotNumber: Number(row.snapshot_number) || 0,
+    label: (row.label as string) || "",
+    sourceKind: (row.source_kind as string) || "csv",
+    grandTotalActual: Number(row.grand_total_actual) || 0,
+    grandNormalizedActual: Number(row.grand_normalized_actual) || 0,
+    burdenTotalActual: Number(row.burden_total_actual) || 0,
+    directTotalActual: Number(row.direct_total_actual) || 0,
+    metadata: (row.metadata != null && typeof row.metadata === "object" && !Array.isArray(row.metadata))
+      ? (row.metadata as Record<string, unknown>)
+      : {},
+    isFinal: row.is_final === true,
+    finalizedAt: (row.finalized_at as string | null) ?? null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    createdBy: (row.created_by as string | null) ?? null,
+  };
+}
+
+// The per-code row maps straight back to the engine's CodeActual (the stored shape
+// IS the engine output — no drift). normalized_out_contributions is JSONB carrying
+// the engine's camelCase CodeChangeContribution[] verbatim.
+function mapBudgetSnapshotActualFromRow(row: Record<string, unknown>): CodeActual {
+  return {
+    budgetCode: (row.budget_code as string) || "",
+    costCode: (row.cost_code as string) || "",
+    costType: (row.cost_type as CodeActual["costType"]) || "Other",
+    description: (row.description as string) || "",
+    originalBudget: Number(row.original_budget) || 0,
+    totalActual: Number(row.total_actual) || 0,
+    normalizedActual: Number(row.normalized_actual) || 0,
+    isBurden: row.is_burden === true,
+    normalizedOutContributions: Array.isArray(row.normalized_out_contributions)
+      ? (row.normalized_out_contributions as CodeActual["normalizedOutContributions"])
+      : [],
+  };
+}
+
+function mapBudgetSnapshotAllocationFromRow(row: Record<string, unknown>): BudgetSnapshotAllocation {
+  return {
+    id: row.id as string,
+    snapshotId: row.snapshot_id as string,
+    budgetCode: (row.budget_code as string) || "",
+    estimateLineItemId: (row.estimate_line_item_id as string) || "",
+    kind: (row.kind as string) || "allocation",
+    allocatedTotal: Number(row.allocated_total) || 0,
+    allocatedNormalized: Number(row.allocated_normalized) || 0,
+    detail: (row.detail != null && typeof row.detail === "object" && !Array.isArray(row.detail))
+      ? (row.detail as Record<string, unknown>)
+      : {},
+    note: (row.note as string) || "",
+    createdBy: (row.created_by as string | null) ?? null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    updatedAt: (row.updated_at as string) || new Date().toISOString(),
+  };
+}
+
+// Rebuilds a type-safe ActualsDiagnostics from the stored JSONB (defaults every
+// field so a legacy/empty '{}' never yields an undefined array).
+function mapSnapshotDiagnosticsFromJson(v: unknown): ActualsDiagnostics {
+  const o = (v != null && typeof v === "object" && !Array.isArray(v))
+    ? (v as Record<string, unknown>)
+    : {};
+  return {
+    unjoinedDetailEventIds: Array.isArray(o.unjoinedDetailEventIds) ? (o.unjoinedDetailEventIds as string[]) : [],
+    summaryOnlyEventIds: Array.isArray(o.summaryOnlyEventIds) ? (o.summaryOnlyEventIds as string[]) : [],
+    duplicateEventGroups: Array.isArray(o.duplicateEventGroups)
+      ? (o.duplicateEventGroups as ActualsDiagnostics["duplicateEventGroups"]) : [],
+    unattributedDetailLineCount: Number(o.unattributedDetailLineCount) || 0,
+    internalNonZeroEventIds: Array.isArray(o.internalNonZeroEventIds) ? (o.internalNonZeroEventIds as string[]) : [],
+    unclassifiedEvents: Array.isArray(o.unclassifiedEvents)
+      ? (o.unclassifiedEvents as ActualsDiagnostics["unclassifiedEvents"]) : [],
+  };
+}
+
+/**
+ * Persists a parsed {@link NormalizedActuals} result as a new (un-promoted)
+ * snapshot via the atomic save_budget_snapshot RPC — header + per-code actuals in
+ * one transaction, with the per-project snapshot_number assigned server-side. The
+ * payload is shaped by the pure buildBudgetSnapshotPayload (engine numbers copied
+ * verbatim). A user-facing action: THROWS on failure.
+ */
+export async function saveBudgetSnapshot(input: {
+  projectId: string;
+  normalized: NormalizedActuals;
+  label?: string;
+  sourceKind?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<BudgetSnapshotMeta> {
+  const { snapshot, actuals } = buildBudgetSnapshotPayload(input.normalized, {
+    projectId: input.projectId,
+    label: input.label,
+    sourceKind: input.sourceKind,
+    metadata: input.metadata,
+  });
+
+  const { data, error } = await supabase.rpc("save_budget_snapshot", {
+    p_snapshot: snapshot,
+    p_actuals: actuals,
+  });
+
+  if (error || !data) {
+    console.error(`Failed to save budget snapshot for project ${input.projectId}:`, error);
+    throw new Error(`Failed to save budget snapshot: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapBudgetSnapshotMetaFromRow(data as Record<string, unknown>);
+}
+
+/**
+ * Lightweight snapshot list for a project (no events/actuals/allocations — use
+ * getBudgetSnapshotDetail for those), newest snapshot first.
+ */
+export async function getBudgetSnapshots(projectId: string): Promise<BudgetSnapshotMeta[]> {
+  const { data, error } = await supabase
+    .from("budget_snapshots")
+    .select(BUDGET_SNAPSHOT_META_COLUMNS)
+    .eq("project_id", projectId)
+    .order("snapshot_number", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch budget snapshots for project ${projectId}`, error);
+    throw new Error(`Failed to fetch budget snapshots: ${error.message}`);
+  }
+
+  return (data || []).map(mapBudgetSnapshotMetaFromRow);
+}
+
+/**
+ * One snapshot's full detail: header + frozen change events + diagnostics + the
+ * per-code+costType actuals + any manual allocations. Returns null when the
+ * snapshot id does not exist (or is outside the caller's tenant RLS view).
+ */
+export async function getBudgetSnapshotDetail(
+  snapshotId: string
+): Promise<BudgetSnapshotDetail | null> {
+  const { data: header, error: headerError } = await supabase
+    .from("budget_snapshots")
+    .select(`${BUDGET_SNAPSHOT_META_COLUMNS}, events, diagnostics`)
+    .eq("id", snapshotId)
+    .maybeSingle();
+
+  if (headerError) {
+    console.error(`Failed to fetch budget snapshot ${snapshotId}`, headerError);
+    throw new Error(`Failed to fetch budget snapshot: ${headerError.message}`);
+  }
+  if (!header) return null;
+
+  const [actuals, allocations] = await Promise.all([
+    (async () => {
+      const { data, error } = await supabase
+        .from("budget_snapshot_actuals")
+        .select(BUDGET_SNAPSHOT_ACTUAL_COLUMNS)
+        .eq("snapshot_id", snapshotId);
+      if (error) {
+        console.error(`Failed to fetch actuals for snapshot ${snapshotId}`, error);
+        throw new Error(`Failed to fetch snapshot actuals: ${error.message}`);
+      }
+      return (data || []).map(mapBudgetSnapshotActualFromRow);
+    })(),
+    getBudgetSnapshotAllocations(snapshotId),
+  ]);
+
+  return {
+    ...mapBudgetSnapshotMetaFromRow(header),
+    events: Array.isArray(header.events) ? (header.events as ClassifiedChangeEvent[]) : [],
+    diagnostics: mapSnapshotDiagnosticsFromJson(header.diagnostics),
+    actuals,
+    allocations,
+  };
+}
+
+/**
+ * Marks one snapshot as the project's FINAL/closeout — the one doorway that makes
+ * its normalized actuals eligible for the pricing pool (Phase 6). The
+ * finalize_budget_snapshot RPC withdraws the prior FINAL (if any) and sets the
+ * target in a single transaction, so the partial-unique invariant always holds.
+ * THROWS on failure.
+ */
+export async function finalizeBudgetSnapshot(
+  projectId: string,
+  snapshotId: string
+): Promise<void> {
+  const { error } = await supabase.rpc("finalize_budget_snapshot", {
+    p_project_id: projectId,
+    p_snapshot_id: snapshotId,
+  });
+
+  if (error) {
+    console.error(`Failed to finalize budget snapshot ${snapshotId} for project ${projectId}:`, error);
+    throw new Error(`Failed to finalize budget snapshot: ${error.message}`);
+  }
+}
+
+/**
+ * Withdraws the project's FINAL snapshot with no replacement (e.g. the wrong
+ * closeout was promoted): the project has no FINAL record until something else is
+ * finalized. A single flag flip — the DB freeze-guard confines it to the promotion
+ * pair. A no-op when nothing is FINAL. THROWS on failure.
+ */
+export async function withdrawFinalSnapshot(projectId: string): Promise<void> {
+  const { error } = await supabase
+    .from("budget_snapshots")
+    .update({ is_final: false, finalized_at: null })
+    .eq("project_id", projectId)
+    .eq("is_final", true);
+
+  if (error) {
+    console.error(`Failed to withdraw final snapshot for project ${projectId}:`, error);
+    throw new Error(`Failed to withdraw final snapshot: ${error.message}`);
+  }
+}
+
+/**
+ * Reads a snapshot's manual allocations (the Phase-4 overlay), oldest first.
+ */
+export async function getBudgetSnapshotAllocations(
+  snapshotId: string
+): Promise<BudgetSnapshotAllocation[]> {
+  const { data, error } = await supabase
+    .from("budget_snapshot_allocations")
+    .select("*")
+    .eq("snapshot_id", snapshotId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch allocations for snapshot ${snapshotId}`, error);
+    throw new Error(`Failed to fetch snapshot allocations: ${error.message}`);
+  }
+
+  return (data || []).map(mapBudgetSnapshotAllocationFromRow);
+}
+
+/**
+ * Inserts a new manual allocation, or updates one in place when `id` is supplied
+ * (Phase-4 reconciliation editing). On CREATE, created_by is stamped from the
+ * session; on EDIT it is preserved (the updated_at touch trigger bumps the
+ * timestamp). The DB freeze-on-final guard rejects either once the snapshot is
+ * FINAL. THROWS on failure.
+ */
+export async function saveBudgetSnapshotAllocation(input: {
+  id?: string;
+  snapshotId: string;
+  budgetCode?: string;
+  estimateLineItemId?: string;
+  kind?: string;
+  allocatedTotal?: number;
+  allocatedNormalized?: number;
+  detail?: Record<string, unknown>;
+  note?: string;
+}): Promise<BudgetSnapshotAllocation> {
+  const row: Record<string, unknown> = {
+    snapshot_id: input.snapshotId,
+    budget_code: input.budgetCode ?? "",
+    estimate_line_item_id: input.estimateLineItemId ?? "",
+    kind: input.kind ?? "allocation",
+    allocated_total: input.allocatedTotal ?? 0,
+    allocated_normalized: input.allocatedNormalized ?? 0,
+    detail: input.detail ?? {},
+    note: input.note ?? "",
+  };
+
+  let data: Record<string, unknown> | null;
+  let error: { message: string } | null;
+
+  if (input.id) {
+    ({ data, error } = await supabase
+      .from("budget_snapshot_allocations")
+      .update(row)
+      .eq("id", input.id)
+      .select("*")
+      .maybeSingle());
+  } else {
+    const { data: { session } } = await supabase.auth.getSession();
+    ({ data, error } = await supabase
+      .from("budget_snapshot_allocations")
+      .insert({ ...row, created_by: session?.user?.id ?? null })
+      .select("*")
+      .maybeSingle());
+  }
+
+  if (error || !data) {
+    console.error(`Failed to save allocation for snapshot ${input.snapshotId}:`, error);
+    throw new Error(`Failed to save snapshot allocation: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapBudgetSnapshotAllocationFromRow(data);
+}
+
+/**
+ * Deletes one manual allocation by id (Phase-4 editing — e.g. clearing a declined
+ * rollup). The DB freeze-on-final guard rejects this once the snapshot is FINAL.
+ * THROWS on failure.
+ */
+export async function deleteBudgetSnapshotAllocation(allocationId: string): Promise<void> {
+  const { error } = await supabase
+    .from("budget_snapshot_allocations")
+    .delete()
+    .eq("id", allocationId);
+
+  if (error) {
+    console.error(`Failed to delete snapshot allocation ${allocationId}:`, error);
+    throw new Error(`Failed to delete snapshot allocation: ${error.message}`);
+  }
+}
+
+/**
+ * The actuals pricing pool reader (Actuals Cost-History Phase 6) — the FIRST
+ * downstream consumer of FINAL budget snapshots. Returns per-(FINAL snapshot,
+ * Procore code) actual-cost observations across ALL of the caller's projects,
+ * tagged `actual` provenance and kept SEPARATE from the as-bid pool
+ * (getBidPriceHistory). REPORT-only; the calc/normalization engine stays the
+ * sole financial authority (this copies engine output, fabricates nothing).
+ *
+ * CRITICAL contract (plan Phase 6 + Phase-5 handoff Non-obvious #1): the
+ * pricing-relevant per-code normalized actual is the EFFECTIVE one — the pure
+ * buildActualCostObservations runs applyEventClassificationOverrides over each
+ * snapshot's frozen actuals + events + its `event_classification` overlay rows,
+ * so every Phase-5 human classification correction is honored. The frozen
+ * `normalizedActual` is NEVER read directly.
+ *
+ * Reads only FINAL snapshots (is_final = true; at most one per project, RLS
+ * tenant-scoped via the projects join — no read-perf index needed).
+ */
+export async function getActualCostHistory(): Promise<ActualCostObservation[]> {
+  // 1. All FINAL snapshots with project context (mirrors getBidPriceHistory's
+  //    projects(...) join). RLS confines this to the caller's tenant.
+  // Phase 7 carries each project's SF / unit count for parametric ($/SF, $/unit)
+  // concept pricing — the metric columns already exist; this only widens the join.
+  const { data: finals, error } = await supabase
+    .from("budget_snapshots")
+    .select("id, project_id, label, finalized_at, projects(name, market_sector, square_footage, unit_count)")
+    .eq("is_final", true);
+
+  if (error) {
+    console.error("Failed to fetch FINAL budget snapshots for the pricing pool:", error);
+    throw new Error(`Failed to fetch FINAL budget snapshots: ${error.message}`);
+  }
+
+  const finalRows = finals || [];
+  if (finalRows.length === 0) return [];
+
+  // 2. Pull each FINAL snapshot's frozen actuals + events + overlay rows.
+  const details = await Promise.all(
+    finalRows.map((row) => getBudgetSnapshotDetail(row.id as string)),
+  );
+
+  // 3. Assemble the pure builder's input (skipping any snapshot that vanished
+  //    between the list and the detail read), then derive the EFFECTIVE pool.
+  const inputs: FinalSnapshotInput[] = [];
+  for (let i = 0; i < finalRows.length; i += 1) {
+    const detail = details[i];
+    if (!detail) continue;
+    const row = finalRows[i];
+    const project = mapObservationProjectContext(row.projects);
+    inputs.push({
+      projectId: detail.projectId,
+      projectName: project?.name ?? "",
+      snapshotId: detail.id,
+      snapshotLabel: detail.label,
+      finalizedAt: (row.finalized_at as string | null) ?? detail.finalizedAt ?? "",
+      marketSector: project?.market_sector ?? "",
+      // Parametric denominators (Phase 7) — 0 when the project never captured the
+      // metric; buildCodeParametrics then yields no $/SF (or $/unit) datum for it.
+      squareFootage: Number(project?.square_footage) || 0,
+      unitCount: Number(project?.unit_count) || 0,
+      actuals: detail.actuals,
+      events: detail.events,
+      overlayRows: detail.allocations,
+    });
+  }
+
+  return buildActualCostObservations(inputs);
+}
+
+/**
+ * The active-project variance reader (Actuals Cost-History Phase 8) — the SECOND
+ * downstream consumer of budget snapshots and the mirror image of
+ * getActualCostHistory. Returns ALL of a project's snapshots (FINAL or not),
+ * capture-ordered, each with its frozen per-code actuals, for the pure
+ * buildProjectVariance engine to turn into budget-vs-EAC + snapshot-over-snapshot
+ * variance. REPORT-only.
+ *
+ * CONTRAST with getActualCostHistory: that reader is FINAL-only and pool-bound
+ * (forward pricing). This one is full-history and **never touches the pricing
+ * pool** — the active-job financial read is the raw budget-vs-EAC ledger, not the
+ * EFFECTIVE normalized recompute. It also works for a project that was never
+ * estimated in this app (it reads only the Procore-sourced snapshot data).
+ *
+ * Two reads, no N+1: the snapshot headers for the project, then every snapshot's
+ * per-code actuals in one `IN (...)` query. RLS confines both to the caller's
+ * tenant (the actuals via the two-hop snapshots→projects policy). Returns `[]`
+ * when the project has no snapshots.
+ */
+export async function getProjectBudgetVariance(
+  projectId: string,
+): Promise<ProjectSnapshotInput[]> {
+  // 1. The project's snapshot headers (the four grand_* columns exist so this
+  //    stays cheap), oldest capture first.
+  const { data: snaps, error: snapsError } = await supabase
+    .from("budget_snapshots")
+    .select("id, snapshot_number, label, is_final, finalized_at, created_at")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: true });
+
+  if (snapsError) {
+    console.error(`Failed to fetch budget snapshots for variance (project ${projectId}):`, snapsError);
+    throw new Error(`Failed to fetch budget snapshots: ${snapsError.message}`);
+  }
+
+  const snapRows = snaps || [];
+  if (snapRows.length === 0) return [];
+
+  // 2. Every snapshot's per-code actuals across the project, grouped back by
+  //    snapshot_id below. PAGED so a project with many snapshots × codes can never
+  //    silently truncate at PostgREST's max-rows cap — a truncated page would drop
+  //    cost rows and understate the variance with NO error. One page covers the
+  //    common case; the stable (snapshot_id, budget_code) order = the PK so paging
+  //    is deterministic.
+  const ids = snapRows.map((s) => s.id as string);
+  const PAGE_SIZE = 1000;
+  const actualRows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error: actualsError } = await supabase
+      .from("budget_snapshot_actuals")
+      .select(`snapshot_id, ${BUDGET_SNAPSHOT_ACTUAL_COLUMNS}`)
+      .in("snapshot_id", ids)
+      .order("snapshot_id", { ascending: true })
+      .order("budget_code", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (actualsError) {
+      console.error(`Failed to fetch snapshot actuals for variance (project ${projectId}):`, actualsError);
+      throw new Error(`Failed to fetch snapshot actuals: ${actualsError.message}`);
+    }
+
+    const batch = (data || []) as Record<string, unknown>[];
+    actualRows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+  }
+
+  const codesBySnapshot = new Map<string, CodeActual[]>();
+  for (const row of actualRows) {
+    const snapshotId = row.snapshot_id as string;
+    const list = codesBySnapshot.get(snapshotId) ?? [];
+    list.push(mapBudgetSnapshotActualFromRow(row));
+    codesBySnapshot.set(snapshotId, list);
+  }
+
+  return snapRows.map((s) => ({
+    snapshotId: s.id as string,
+    snapshotNumber: Number(s.snapshot_number) || 0,
+    label: (s.label as string) || "",
+    isFinal: s.is_final === true,
+    capturedAt: (s.created_at as string) || "",
+    finalizedAt: (s.finalized_at as string | null) ?? "",
+    codes: codesBySnapshot.get(s.id as string) ?? [],
+  }));
+}
+
+/**
+ * The buyout-accuracy reader (Actuals Cost-History Phase 9) — the THIRD downstream
+ * consumer of FINAL budget snapshots and the only one that couples to the estimate
+ * side. Returns per-FINAL-snapshot buyout-accuracy inputs across ALL of the
+ * caller's projects: each FINAL snapshot's frozen change events + overlay rows (so
+ * the pure buildBuyoutAccuracy can derive the EFFECTIVE fp_buyout draw), paired
+ * with that project's SUBMITTED-estimate contingency budget
+ * (constructionContingency + designContingency, frozen on the submitted version's
+ * summary at bid time). REPORT-only; the calc/normalization engine stays the sole
+ * financial authority (this copies engine output, fabricates nothing).
+ *
+ * Reuses the getActualCostHistory FINAL-snapshot path (is_final = true; one per
+ * project, RLS tenant-scoped via the projects join). The contingency budgets are
+ * fetched in ONE batched query over the involved projects (no N+1). A project with
+ * no submitted estimate version yields contingencyBudget = null — scored
+ * "unbudgeted" downstream, never fabricated (this estimate coupling is why P9 was
+ * deferred). The per-code actuals are deliberately NOT read here: fp_buyout is a
+ * change-event signal, so events + overlay suffice.
+ */
+export async function getBuyoutAccuracyInputs(): Promise<BuyoutAccuracyInput[]> {
+  // 1. All FINAL snapshots with project context + the frozen `events` JSONB (the
+  //    fp_buyout signal). RLS confines this to the caller's tenant. The per-code
+  //    actuals are deliberately NOT selected — fp_buyout is a change-event signal.
+  const { data: finals, error } = await supabase
+    .from("budget_snapshots")
+    .select("id, project_id, label, finalized_at, events, projects(name, market_sector)")
+    .eq("is_final", true);
+
+  if (error) {
+    console.error("Failed to fetch FINAL budget snapshots for buyout accuracy:", error);
+    throw new Error(`Failed to fetch FINAL budget snapshots: ${error.message}`);
+  }
+
+  const finalRows = finals || [];
+  if (finalRows.length === 0) return [];
+
+  // 2. Each FINAL snapshot's mutable overlay rows (the Phase-5 classification
+  //    corrections), one read per snapshot in parallel — far lighter than
+  //    getBudgetSnapshotDetail, which would also re-read the header and pull the
+  //    full per-code actuals only to discard them.
+  const overlaysBySnapshot = await Promise.all(
+    finalRows.map((row) => getBudgetSnapshotAllocations(row.id as string)),
+  );
+
+  // 3. The submitted-estimate contingency budget per involved project, in ONE
+  //    batched query: constructionContingency + designContingency off the frozen
+  //    summary. A project missing from the result has no submitted bid → null
+  //    budget below. (A submitted bid with zero contingency maps to 0, NOT null —
+  //    a real zero budget, distinct from "no yardstick"; the Map.has check keeps
+  //    them apart.)
+  const projectIds = Array.from(new Set(finalRows.map((r) => r.project_id as string)));
+  const budgetByProject = new Map<string, number>();
+  const { data: submitted, error: submittedError } = await supabase
+    .from("estimate_versions")
+    .select("project_id, summary")
+    .eq("is_submitted", true)
+    .in("project_id", projectIds);
+
+  if (submittedError) {
+    console.error("Failed to fetch submitted-version contingency budgets:", submittedError);
+    throw new Error(`Failed to fetch submitted contingency budgets: ${submittedError.message}`);
+  }
+
+  for (const row of submitted || []) {
+    const summary =
+      row.summary != null && typeof row.summary === "object" && !Array.isArray(row.summary)
+        ? (row.summary as Record<string, unknown>)
+        : {};
+    const cc = Number(summary.constructionContingency) || 0;
+    const dc = Number(summary.designContingency) || 0;
+    budgetByProject.set(row.project_id as string, cc + dc);
+  }
+
+  // 4. Assemble the pure builder's input. `?? null` preserves a real 0 budget
+  //    while mapping an absent project to the unbudgeted case.
+  const inputs: BuyoutAccuracyInput[] = [];
+  for (let i = 0; i < finalRows.length; i += 1) {
+    const row = finalRows[i];
+    const project = mapObservationProjectContext(row.projects);
+    const projectId = row.project_id as string;
+    inputs.push({
+      projectId,
+      projectName: project?.name ?? "",
+      snapshotId: row.id as string,
+      snapshotLabel: (row.label as string) ?? "",
+      finalizedAt: (row.finalized_at as string | null) ?? "",
+      marketSector: project?.market_sector ?? "",
+      contingencyBudget: budgetByProject.get(projectId) ?? null,
+      events: Array.isArray(row.events) ? (row.events as ClassifiedChangeEvent[]) : [],
+      overlayRows: overlaysBySnapshot[i],
+    });
+  }
+
+  return inputs;
 }
 
 // ═══════════════════════════════════════════════════════════════════

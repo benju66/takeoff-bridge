@@ -1,5 +1,6 @@
 import { ProcessedTakeoffRow, ColumnDefinition } from "./index";
 import type { CatalogLifecycleStatus } from "@/lib/catalogLifecycle";
+import type { CodeActual, ClassifiedChangeEvent, ActualsDiagnostics } from "@/lib/actuals";
 
 /**
  * Database fidelity Phase 1: did the company win this bid?
@@ -442,6 +443,75 @@ export interface EstimateVersionMeta {
 /** A version's full frozen payload: meta plus the frozen line items. */
 export interface EstimateVersionDetail extends EstimateVersionMeta {
   lineItems: ProcessedTakeoffRow[];
+}
+
+/**
+ * One uploaded Procore budget snapshot (budget_snapshots table, Actuals
+ * Cost-History Phase 2) — list-view shape WITHOUT the per-code actuals, change
+ * events, or manual allocations (use BudgetSnapshotDetail for those). An immutable
+ * point-in-time capture of a project's Budget Detail + change-event exports after
+ * the Phase 1 normalization engine. At most ONE snapshot per project has
+ * isFinal=true (partial-unique index) — that FINAL snapshot is the closeout whose
+ * normalized actuals later become eligible for the pricing pool.
+ */
+export interface BudgetSnapshotMeta {
+  id: string;
+  projectId: string;
+  /** Per-project sequence (1, 2, 3…) assigned by the save RPC. */
+  snapshotNumber: number;
+  label: string;
+  /** The ActualsSource kind that produced it ('csv' | 'procore-api'). */
+  sourceKind: string;
+  /** Engine grand totals, copied verbatim (calc engine is the sole authority). */
+  grandTotalActual: number;
+  grandNormalizedActual: number;
+  burdenTotalActual: number;
+  directTotalActual: number;
+  /** Free-form notes (embedded project token, file names, source provenance). */
+  metadata: Record<string, unknown>;
+  isFinal: boolean;
+  /** ISO timestamp; null unless isFinal. */
+  finalizedAt: string | null;
+  createdAt: string;
+  /** auth.uid() of who uploaded it; null if that user was later removed. */
+  createdBy: string | null;
+}
+
+/**
+ * One row of the mutable Phase-4 overlay (budget_snapshot_allocations) — an
+ * optional manual allocation recovering the estimate's finer-than-Procore
+ * granularity where one Procore code rolls up many estimate lines. Editable while
+ * the parent snapshot is not FINAL; frozen once it is (DB freeze-on-final guard).
+ */
+export interface BudgetSnapshotAllocation {
+  id: string;
+  snapshotId: string;
+  /** The grain key this allocation draws from ('' = snapshot-level). */
+  budgetCode: string;
+  /** The receiving estimate line ('' = code-level: enter-all / disposition only). */
+  estimateLineItemId: string;
+  /** FREE TEXT open enum (allocation / verify / enter_all / declined / …). */
+  kind: string;
+  allocatedTotal: number;
+  allocatedNormalized: number;
+  /** Structured payload for the kind (e.g. a Phase 5 classification override). */
+  detail: Record<string, unknown>;
+  note: string;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A snapshot's full detail: meta plus the frozen change events, diagnostics, the
+ * per-code+costType actuals (the Phase 1 CodeActual shape, reused so the stored
+ * rows can't drift from the engine), and any manual allocations.
+ */
+export interface BudgetSnapshotDetail extends BudgetSnapshotMeta {
+  events: ClassifiedChangeEvent[];
+  diagnostics: ActualsDiagnostics;
+  actuals: CodeActual[];
+  allocations: BudgetSnapshotAllocation[];
 }
 
 export interface CustomStep23LineDef {
