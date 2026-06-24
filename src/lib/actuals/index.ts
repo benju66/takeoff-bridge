@@ -117,3 +117,21 @@ export {
   type ConceptPricingStat,
   type ConceptPricingModel,
 } from "./conceptPricing";
+export {
+  buildProjectVariance,
+  buildTimeline,
+  buildCodeVariance,
+  buildDivisionVariance,
+  computeVarianceStat,
+  ON_BUDGET_TOLERANCE_PCT,
+  ON_BUDGET_TOLERANCE_ABS,
+  type BudgetStatus,
+  type VarianceOptions,
+  type VarianceStat,
+  type ProjectSnapshotInput,
+  type CodeVariance,
+  type DivisionVariance,
+  type SnapshotVariancePoint,
+  type VarianceKpis,
+  type ProjectVarianceModel,
+} from "./variance";

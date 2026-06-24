@@ -9,7 +9,8 @@ import {
   MapPin,
   Calendar,
   Menu,
-  Database
+  Database,
+  Gauge
 } from "lucide-react";
 import {
   computeTakeoffSummary,
@@ -551,13 +552,22 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           </div>
         </div>
 
-        <Link
-          href={`/projects/${projectId}/snapshots`}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors flex-shrink-0"
-          title="Procore actuals snapshots & reconciliation"
-        >
-          <Database size={14} className="text-blue-600 dark:text-blue-400" /> Actuals snapshots
-        </Link>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Link
+            href={`/projects/${projectId}/variance`}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors"
+            title="Budget-vs-EAC variance & KPI dashboard"
+          >
+            <Gauge size={14} className="text-blue-600 dark:text-blue-400" /> Budget variance
+          </Link>
+          <Link
+            href={`/projects/${projectId}/snapshots`}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors"
+            title="Procore actuals snapshots & reconciliation"
+          >
+            <Database size={14} className="text-blue-600 dark:text-blue-400" /> Actuals snapshots
+          </Link>
+        </div>
       </header>
 
       {/* Data Health strip (fidelity Phase 4) — the company audit filtered to

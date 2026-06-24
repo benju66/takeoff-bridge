@@ -3,7 +3,7 @@
 import React, { use, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Database, ArrowLeft, Loader2, AlertTriangle, Upload, Lock, ScrollText,
+  Database, ArrowLeft, Loader2, AlertTriangle, Upload, Lock, ScrollText, Gauge,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { getProject, getBudgetSnapshots } from "@/lib/db";
@@ -50,12 +50,21 @@ function SnapshotsInner({ projectId }: { projectId: string }) {
             <h1 className="text-2xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
               <Database className="text-blue-600 dark:text-blue-400" size={26} /> Actuals Snapshots
             </h1>
-            <Link
-              href="/projects/import-actuals"
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all"
-            >
-              <Upload size={14} /> Import actuals
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/projects/${projectId}/variance`}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors"
+                title="Budget-vs-EAC variance & KPI dashboard"
+              >
+                <Gauge size={14} className="text-blue-600 dark:text-blue-400" /> Budget variance
+              </Link>
+              <Link
+                href="/projects/import-actuals"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all"
+              >
+                <Upload size={14} /> Import actuals
+              </Link>
+            </div>
           </div>
           {project && (
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">

@@ -7,6 +7,7 @@ import type {
   ActualsDiagnostics,
   FinalSnapshotInput,
   ActualCostObservation,
+  ProjectSnapshotInput,
 } from "./actuals";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
@@ -1760,6 +1761,76 @@ export async function getActualCostHistory(): Promise<ActualCostObservation[]> {
   }
 
   return buildActualCostObservations(inputs);
+}
+
+/**
+ * The active-project variance reader (Actuals Cost-History Phase 8) — the SECOND
+ * downstream consumer of budget snapshots and the mirror image of
+ * getActualCostHistory. Returns ALL of a project's snapshots (FINAL or not),
+ * capture-ordered, each with its frozen per-code actuals, for the pure
+ * buildProjectVariance engine to turn into budget-vs-EAC + snapshot-over-snapshot
+ * variance. REPORT-only.
+ *
+ * CONTRAST with getActualCostHistory: that reader is FINAL-only and pool-bound
+ * (forward pricing). This one is full-history and **never touches the pricing
+ * pool** — the active-job financial read is the raw budget-vs-EAC ledger, not the
+ * EFFECTIVE normalized recompute. It also works for a project that was never
+ * estimated in this app (it reads only the Procore-sourced snapshot data).
+ *
+ * Two reads, no N+1: the snapshot headers for the project, then every snapshot's
+ * per-code actuals in one `IN (...)` query. RLS confines both to the caller's
+ * tenant (the actuals via the two-hop snapshots→projects policy). Returns `[]`
+ * when the project has no snapshots.
+ */
+export async function getProjectBudgetVariance(
+  projectId: string,
+): Promise<ProjectSnapshotInput[]> {
+  // 1. The project's snapshot headers (the four grand_* columns exist so this
+  //    stays cheap), oldest capture first.
+  const { data: snaps, error: snapsError } = await supabase
+    .from("budget_snapshots")
+    .select("id, snapshot_number, label, is_final, finalized_at, created_at")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: true });
+
+  if (snapsError) {
+    console.error(`Failed to fetch budget snapshots for variance (project ${projectId}):`, snapsError);
+    throw new Error(`Failed to fetch budget snapshots: ${snapsError.message}`);
+  }
+
+  const snapRows = snaps || [];
+  if (snapRows.length === 0) return [];
+
+  // 2. Every snapshot's per-code actuals in one query (snapshot_id prefixed onto
+  //    the shared column list), grouped back by snapshot_id below.
+  const ids = snapRows.map((s) => s.id as string);
+  const { data: actuals, error: actualsError } = await supabase
+    .from("budget_snapshot_actuals")
+    .select(`snapshot_id, ${BUDGET_SNAPSHOT_ACTUAL_COLUMNS}`)
+    .in("snapshot_id", ids);
+
+  if (actualsError) {
+    console.error(`Failed to fetch snapshot actuals for variance (project ${projectId}):`, actualsError);
+    throw new Error(`Failed to fetch snapshot actuals: ${actualsError.message}`);
+  }
+
+  const codesBySnapshot = new Map<string, CodeActual[]>();
+  for (const row of actuals || []) {
+    const snapshotId = (row as Record<string, unknown>).snapshot_id as string;
+    const list = codesBySnapshot.get(snapshotId) ?? [];
+    list.push(mapBudgetSnapshotActualFromRow(row as Record<string, unknown>));
+    codesBySnapshot.set(snapshotId, list);
+  }
+
+  return snapRows.map((s) => ({
+    snapshotId: s.id as string,
+    snapshotNumber: Number(s.snapshot_number) || 0,
+    label: (s.label as string) || "",
+    isFinal: s.is_final === true,
+    capturedAt: (s.created_at as string) || "",
+    finalizedAt: (s.finalized_at as string | null) ?? "",
+    codes: codesBySnapshot.get(s.id as string) ?? [],
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════════════
