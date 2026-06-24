@@ -74,6 +74,16 @@ export interface FinalSnapshotInput {
   finalizedAt: string;
   /** Project market sector ("" = legacy unset — its own honest group). */
   marketSector: string;
+  /**
+   * Project gross square footage (0 = unknown). Carried for Phase-7 parametric
+   * ($/SF) concept pricing; the dollars pool itself never divides by it.
+   */
+  squareFootage: number;
+  /**
+   * Project unit / key count (0 = unknown). Carried for Phase-7 parametric
+   * ($/unit) concept pricing; the dollars pool itself never divides by it.
+   */
+  unitCount: number;
   /** The snapshot's frozen per code+type actuals. */
   actuals: CodeActual[];
   /** The snapshot's frozen classified change events. */
@@ -114,6 +124,14 @@ export interface ActualCostObservation {
   /** ISO finalize date ("" when unset). */
   finalizedAt: string;
   marketSector: string;
+  /**
+   * Project gross square footage (0 = unknown) — the $/SF denominator for
+   * Phase-7 concept pricing. Carried verbatim from the snapshot's project; the
+   * dollars pool ignores it (a 0 simply yields no parametric datum downstream).
+   */
+  squareFootage: number;
+  /** Project unit / key count (0 = unknown) — the $/unit denominator (Phase 7). */
+  unitCount: number;
 }
 
 /**
@@ -189,6 +207,8 @@ export function buildActualCostObservations(
         snapshotLabel: snap.snapshotLabel,
         finalizedAt: snap.finalizedAt,
         marketSector: snap.marketSector,
+        squareFootage: snap.squareFootage,
+        unitCount: snap.unitCount,
       });
     }
   }
@@ -257,6 +277,19 @@ export interface ActualStrengthSignals {
   spreadTightness: number;
 }
 
+/**
+ * The minimal observation shape {@link scoreActualStrength} actually reads. The
+ * dollars pool passes full {@link ActualCostObservation}s; Phase-7 concept pricing
+ * passes a parametric group whose `normalizedActual` carries the **$/metric**
+ * value, so the spread dimension reflects $/SF (or $/unit) tightness while every
+ * other dimension (count, CO-cleanliness, recency) and the tier/label vocabulary
+ * stay identical to `/rates`.
+ */
+export type StrengthScorable = Pick<
+  ActualCostObservation,
+  "normalizedActual" | "coAdjustmentShare" | "finalizedAt"
+>;
+
 /** A group's strength/confidence verdict. */
 export interface ActualStrength {
   /** 0..1 composite (≥ ACTUAL_PROVENANCE_FLOOR for any actual-backed group). */
@@ -292,7 +325,7 @@ function coefficientOfVariation(values: readonly number[]): number | null {
  * from `historyTrust`) — one clean job is real, but never "strong".
  */
 export function scoreActualStrength(
-  observations: readonly ActualCostObservation[],
+  observations: readonly StrengthScorable[],
   options?: { now?: Date },
 ): ActualStrength {
   const now = options?.now ?? new Date();

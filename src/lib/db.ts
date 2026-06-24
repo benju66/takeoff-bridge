@@ -934,9 +934,21 @@ export async function getClassificationHistoryBulk(
  */
 function mapObservationProjectContext(
   projects: unknown
-): { name?: string; bid_date?: string; market_sector?: string } | null {
+): {
+  name?: string;
+  bid_date?: string;
+  market_sector?: string;
+  square_footage?: number;
+  unit_count?: number;
+} | null {
   return (Array.isArray(projects) ? projects[0] : projects) as
-    | { name?: string; bid_date?: string; market_sector?: string }
+    | {
+        name?: string;
+        bid_date?: string;
+        market_sector?: string;
+        square_footage?: number;
+        unit_count?: number;
+      }
     | null;
 }
 
@@ -1702,9 +1714,11 @@ export async function deleteBudgetSnapshotAllocation(allocationId: string): Prom
 export async function getActualCostHistory(): Promise<ActualCostObservation[]> {
   // 1. All FINAL snapshots with project context (mirrors getBidPriceHistory's
   //    projects(...) join). RLS confines this to the caller's tenant.
+  // Phase 7 carries each project's SF / unit count for parametric ($/SF, $/unit)
+  // concept pricing — the metric columns already exist; this only widens the join.
   const { data: finals, error } = await supabase
     .from("budget_snapshots")
-    .select("id, project_id, label, finalized_at, projects(name, market_sector)")
+    .select("id, project_id, label, finalized_at, projects(name, market_sector, square_footage, unit_count)")
     .eq("is_final", true);
 
   if (error) {
@@ -1735,6 +1749,10 @@ export async function getActualCostHistory(): Promise<ActualCostObservation[]> {
       snapshotLabel: detail.label,
       finalizedAt: (row.finalized_at as string | null) ?? detail.finalizedAt ?? "",
       marketSector: project?.market_sector ?? "",
+      // Parametric denominators (Phase 7) — 0 when the project never captured the
+      // metric; buildCodeParametrics then yields no $/SF (or $/unit) datum for it.
+      squareFootage: Number(project?.square_footage) || 0,
+      unitCount: Number(project?.unit_count) || 0,
       actuals: detail.actuals,
       events: detail.events,
       overlayRows: detail.allocations,

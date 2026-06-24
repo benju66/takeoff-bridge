@@ -104,6 +104,8 @@ function snap(opts: Partial<FinalSnapshotInput> = {}): FinalSnapshotInput {
     snapshotLabel: opts.snapshotLabel ?? "Closeout",
     finalizedAt: opts.finalizedAt ?? "2026-01-01T00:00:00Z",
     marketSector: opts.marketSector ?? "",
+    squareFootage: opts.squareFootage ?? 0,
+    unitCount: opts.unitCount ?? 0,
     actuals: opts.actuals ?? [],
     events: opts.events ?? [],
     overlayRows: opts.overlayRows ?? [],
@@ -136,6 +138,8 @@ function obs(
     snapshotLabel: opts.snapshotLabel ?? "C",
     finalizedAt: opts.finalizedAt ?? "2026-01-01T00:00:00Z",
     marketSector: opts.marketSector ?? "",
+    squareFootage: opts.squareFootage ?? 0,
+    unitCount: opts.unitCount ?? 0,
   };
 }
 
