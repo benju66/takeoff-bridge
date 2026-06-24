@@ -43,15 +43,11 @@
  */
 
 import { parseProcoreDivision } from "./conceptPricing";
+import { round2 } from "./currency";
 import { collectEventOverrides, resolveEffectiveDisposition } from "./eventReview";
 import type { OverlayRowLike } from "./eventReview";
 import { isBurdenCode } from "./normalize";
 import type { ClassifiedChangeEvent } from "./types";
-
-/** Round to cents — keeps floating-point dust out of reported draws / variances. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 /** Within ±0.5% of the contingency budget a draw still reads "within budget". */
 export const BUYOUT_TOLERANCE_PCT = 0.005;
@@ -186,7 +182,6 @@ export function buildBuyoutDraws(input: {
 }): BuyoutDrawBreakdown {
   const overrides = collectEventOverrides(input.overlayRows);
 
-  let directDrawn = 0;
   let burdenDrawn = 0;
   let drawCount = 0;
   let overriddenCount = 0;
@@ -228,7 +223,6 @@ export function buildBuyoutDraws(input: {
       }
     }
 
-    directDrawn += evDirect;
     burdenDrawn += evBurden;
     drawEvents.push({
       eventId: ev.eventId,
@@ -270,8 +264,13 @@ export function buildBuyoutDraws(input: {
   );
   drawEvents.sort((a, b) => b.directDraw - a.directDraw || a.eventId.localeCompare(b.eventId));
 
+  // Derive the scored total from the rounded division draws (themselves rounded
+  // sums of the rounded per-code draws) so Σ(byDivision) === directDrawn exactly —
+  // the expandable breakdown always reconciles with the headline Drawn figure.
+  const directDrawn = round2(byDivision.reduce((sum, d) => sum + d.directDraw, 0));
+
   return {
-    directDrawn: round2(directDrawn),
+    directDrawn,
     burdenDrawn: round2(burdenDrawn),
     grossDrawn: round2(directDrawn + burdenDrawn),
     drawCount,
@@ -336,16 +335,19 @@ export function scoreBuyoutAccuracy(
   const tolPct = options?.tolerancePct ?? BUYOUT_TOLERANCE_PCT;
   const tolAbs = options?.toleranceAbs ?? BUYOUT_TOLERANCE_ABS;
   const band = Math.max(tolAbs, Math.abs(budget) * tolPct);
-
-  const missAmount = round2(Math.max(0, d - budget));
-  const plannedDraw = round2(Math.max(0, Math.min(d, budget)));
-  const savings = d < 0 ? round2(-d) : 0;
   const utilizationPct = Math.abs(budget) > 1e-9 ? d / budget : null;
 
+  // Status first; then derive planned/miss/savings FROM the band-based status so
+  // the three never contradict the badge (a draw inside the tolerance band is
+  // fully "planned" with zero miss — never a non-zero miss beside a "within" badge).
   let status: BuyoutAccuracyStatus;
   if (d - budget > band) status = "miss";
   else if (d < -band) status = "savings";
   else status = "within";
+
+  const missAmount = status === "miss" ? round2(d - budget) : 0;
+  const plannedDraw = status === "miss" ? budget : round2(Math.max(0, d));
+  const savings = status === "savings" ? round2(-d) : 0;
 
   return {
     contingencyBudget: budget,

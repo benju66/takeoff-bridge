@@ -13,6 +13,17 @@ import { parseUsNumber } from "../parser";
 import type { ActualsCostType } from "./types";
 
 /**
+ * Round to cents — the single money-rounding rule shared across the actuals
+ * modules (normalize / eventReview / pricingPool / conceptPricing / variance /
+ * buyoutAccuracy). Defined once here so a future change to the rule (epsilon,
+ * banker's rounding) lands in exactly one place and the same dollar figure can
+ * never round differently between two views.
+ */
+export function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
  * Parse a Procore currency cell to a signed number.
  *
  * Handles: `"$1,234.50"`, `"$1,234.50 "` (trailing space), `"($41,476.26)"`

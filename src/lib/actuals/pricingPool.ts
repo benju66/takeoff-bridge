@@ -40,14 +40,10 @@
 
 import { applyEventClassificationOverrides, collectEventOverrides } from "./eventReview";
 import type { OverlayRowLike } from "./eventReview";
+import { round2 } from "./currency";
 import { median } from "../priceHistory";
 import { LOW_CONFIDENCE_BELOW } from "../historyTrust";
 import type { CodeActual, ClassifiedChangeEvent } from "./types";
-
-/** Round to cents — keeps floating-point dust out of reported pool numbers. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n;

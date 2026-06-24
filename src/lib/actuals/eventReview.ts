@@ -31,7 +31,7 @@ import {
   canonicalizeType,
   canonicalizeReason,
 } from "./classify";
-import { buildGrainKey } from "./currency";
+import { buildGrainKey, round2 } from "./currency";
 import { FEE_CODE, GL_INSURANCE_CODE, isBurdenCode } from "./normalize";
 import type { AllocationWriteInput } from "./reconcile";
 import type {
@@ -49,11 +49,6 @@ import type {
 
 /** Tolerance (dollars) for the net-zero Internal-reclass test — mirrors `normalize.ts`. */
 const NET_ZERO_EPS = 0.01;
-
-/** Round to cents — mirrors `normalize.ts` so effective numbers tie to frozen ones. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 // ---------------------------------------------------------------------------
 // The overlay `kind` for an event-classification override (open-enum; no DDL).

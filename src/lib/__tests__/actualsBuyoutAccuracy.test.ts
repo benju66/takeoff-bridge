@@ -153,6 +153,15 @@ describe("scoreBuyoutAccuracy", () => {
     expect(scoreBuyoutAccuracy(BUYOUT_TOLERANCE_ABS + 1, 0, { tolerancePct: 0 }).status).toBe("miss");
     expect(scoreBuyoutAccuracy(BUYOUT_TOLERANCE_ABS, 0, { tolerancePct: 0 }).status).toBe("within");
   });
+
+  it("an inside-band over-budget draw reports NO miss (status drives planned/miss)", () => {
+    // $40 over a $10k budget, inside the $50 band → within, and the planned/miss
+    // numbers agree with the badge: no miss, the whole draw counts as planned.
+    const s = scoreBuyoutAccuracy(10040, 10000);
+    expect(s.status).toBe("within");
+    expect(s.missAmount).toBe(0);
+    expect(s.plannedDraw).toBe(10040);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -206,6 +215,31 @@ describe("buildBuyoutDraws", () => {
     expect(divs).toEqual({ "1": 4000, "09": 6000 });
     // proves parseProcoreDivision grouping (raw tier-1 "09", not a CSI code)
     expect(draws.byDivision.every((d) => d.division === parseProcoreDivision(d.codes[0].costCode).key)).toBe(true);
+  });
+
+  it("the division breakdown reconciles EXACTLY with the scored directDrawn", () => {
+    // Sub-cent line values used to make round-once (directDrawn) disagree with
+    // round-per-code (the breakdown). directDrawn is now derived from the rounded
+    // division sums, so Σ(byDivision) === directDrawn === Σ(codes) to the cent.
+    const draws = buildBuyoutDraws({
+      events: [
+        ce({
+          eventId: "1",
+          lines: [
+            dl("1-10320.000", "Labor", 100.005, { eventId: "1" }),
+            dl("1-20000.000", "Material", 100.005, { eventId: "1" }),
+            dl("09-9000.002", "Subcontract", 100.005, { eventId: "1" }),
+          ],
+        }),
+      ],
+      overlayRows: [],
+    });
+    const sumDiv = round2(draws.byDivision.reduce((s, d) => s + d.directDraw, 0));
+    const sumCodes = round2(
+      draws.byDivision.flatMap((d) => d.codes).reduce((s, c) => s + c.directDraw, 0),
+    );
+    expect(sumDiv).toBe(draws.directDrawn);
+    expect(sumCodes).toBe(draws.directDrawn);
   });
 
   it("excludes a duplicate fp_buyout event (its dollars were already counted)", () => {

@@ -32,13 +32,9 @@
  */
 
 import { median } from "../priceHistory";
+import { round2 } from "./currency";
 import { scoreActualStrength } from "./pricingPool";
 import type { ActualCostObservation, ActualStrength } from "./pricingPool";
-
-/** Round to cents — keeps floating-point dust out of reported benchmarks. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 /** The two parametric denominators a project carries. */
 export type ConceptMetric = "sf" | "unit";

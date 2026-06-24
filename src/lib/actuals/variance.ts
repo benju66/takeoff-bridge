@@ -36,12 +36,8 @@
  */
 
 import { parseProcoreDivision } from "./conceptPricing";
+import { round2 } from "./currency";
 import type { CodeActual } from "./types";
-
-/** Round to cents — keeps floating-point dust out of reported variances. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
 
 /** Within ±0.5% of the original budget reads "on budget" (the neutral band). */
 export const ON_BUDGET_TOLERANCE_PCT = 0.005;

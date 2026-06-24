@@ -1802,24 +1802,39 @@ export async function getProjectBudgetVariance(
   const snapRows = snaps || [];
   if (snapRows.length === 0) return [];
 
-  // 2. Every snapshot's per-code actuals in one query (snapshot_id prefixed onto
-  //    the shared column list), grouped back by snapshot_id below.
+  // 2. Every snapshot's per-code actuals across the project, grouped back by
+  //    snapshot_id below. PAGED so a project with many snapshots × codes can never
+  //    silently truncate at PostgREST's max-rows cap — a truncated page would drop
+  //    cost rows and understate the variance with NO error. One page covers the
+  //    common case; the stable (snapshot_id, budget_code) order = the PK so paging
+  //    is deterministic.
   const ids = snapRows.map((s) => s.id as string);
-  const { data: actuals, error: actualsError } = await supabase
-    .from("budget_snapshot_actuals")
-    .select(`snapshot_id, ${BUDGET_SNAPSHOT_ACTUAL_COLUMNS}`)
-    .in("snapshot_id", ids);
+  const PAGE_SIZE = 1000;
+  const actualRows: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error: actualsError } = await supabase
+      .from("budget_snapshot_actuals")
+      .select(`snapshot_id, ${BUDGET_SNAPSHOT_ACTUAL_COLUMNS}`)
+      .in("snapshot_id", ids)
+      .order("snapshot_id", { ascending: true })
+      .order("budget_code", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
 
-  if (actualsError) {
-    console.error(`Failed to fetch snapshot actuals for variance (project ${projectId}):`, actualsError);
-    throw new Error(`Failed to fetch snapshot actuals: ${actualsError.message}`);
+    if (actualsError) {
+      console.error(`Failed to fetch snapshot actuals for variance (project ${projectId}):`, actualsError);
+      throw new Error(`Failed to fetch snapshot actuals: ${actualsError.message}`);
+    }
+
+    const batch = (data || []) as Record<string, unknown>[];
+    actualRows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
   }
 
   const codesBySnapshot = new Map<string, CodeActual[]>();
-  for (const row of actuals || []) {
-    const snapshotId = (row as Record<string, unknown>).snapshot_id as string;
+  for (const row of actualRows) {
+    const snapshotId = row.snapshot_id as string;
     const list = codesBySnapshot.get(snapshotId) ?? [];
-    list.push(mapBudgetSnapshotActualFromRow(row as Record<string, unknown>));
+    list.push(mapBudgetSnapshotActualFromRow(row));
     codesBySnapshot.set(snapshotId, list);
   }
 
@@ -1854,10 +1869,12 @@ export async function getProjectBudgetVariance(
  * change-event signal, so events + overlay suffice.
  */
 export async function getBuyoutAccuracyInputs(): Promise<BuyoutAccuracyInput[]> {
-  // 1. All FINAL snapshots with project context (mirrors getActualCostHistory).
+  // 1. All FINAL snapshots with project context + the frozen `events` JSONB (the
+  //    fp_buyout signal). RLS confines this to the caller's tenant. The per-code
+  //    actuals are deliberately NOT selected — fp_buyout is a change-event signal.
   const { data: finals, error } = await supabase
     .from("budget_snapshots")
-    .select("id, project_id, label, finalized_at, projects(name, market_sector)")
+    .select("id, project_id, label, finalized_at, events, projects(name, market_sector)")
     .eq("is_final", true);
 
   if (error) {
@@ -1868,9 +1885,12 @@ export async function getBuyoutAccuracyInputs(): Promise<BuyoutAccuracyInput[]> 
   const finalRows = finals || [];
   if (finalRows.length === 0) return [];
 
-  // 2. Each FINAL snapshot's frozen events + overlay rows (in parallel).
-  const details = await Promise.all(
-    finalRows.map((row) => getBudgetSnapshotDetail(row.id as string)),
+  // 2. Each FINAL snapshot's mutable overlay rows (the Phase-5 classification
+  //    corrections), one read per snapshot in parallel — far lighter than
+  //    getBudgetSnapshotDetail, which would also re-read the header and pull the
+  //    full per-code actuals only to discard them.
+  const overlaysBySnapshot = await Promise.all(
+    finalRows.map((row) => getBudgetSnapshotAllocations(row.id as string)),
   );
 
   // 3. The submitted-estimate contingency budget per involved project, in ONE
@@ -1902,25 +1922,23 @@ export async function getBuyoutAccuracyInputs(): Promise<BuyoutAccuracyInput[]> 
     budgetByProject.set(row.project_id as string, cc + dc);
   }
 
-  // 4. Assemble the pure builder's input (skipping any snapshot that vanished
-  //    between the list and the detail read). `?? null` preserves a real 0 budget
+  // 4. Assemble the pure builder's input. `?? null` preserves a real 0 budget
   //    while mapping an absent project to the unbudgeted case.
   const inputs: BuyoutAccuracyInput[] = [];
   for (let i = 0; i < finalRows.length; i += 1) {
-    const detail = details[i];
-    if (!detail) continue;
     const row = finalRows[i];
     const project = mapObservationProjectContext(row.projects);
+    const projectId = row.project_id as string;
     inputs.push({
-      projectId: detail.projectId,
+      projectId,
       projectName: project?.name ?? "",
-      snapshotId: detail.id,
-      snapshotLabel: detail.label,
-      finalizedAt: (row.finalized_at as string | null) ?? detail.finalizedAt ?? "",
+      snapshotId: row.id as string,
+      snapshotLabel: (row.label as string) ?? "",
+      finalizedAt: (row.finalized_at as string | null) ?? "",
       marketSector: project?.market_sector ?? "",
-      contingencyBudget: budgetByProject.get(detail.projectId) ?? null,
-      events: detail.events,
-      overlayRows: detail.allocations,
+      contingencyBudget: budgetByProject.get(projectId) ?? null,
+      events: Array.isArray(row.events) ? (row.events as ClassifiedChangeEvent[]) : [],
+      overlayRows: overlaysBySnapshot[i],
     });
   }
 

@@ -18,7 +18,7 @@
  */
 
 import { classifyChangeEvent } from "./classify";
-import { buildGrainKey } from "./currency";
+import { buildGrainKey, round2 } from "./currency";
 import type {
   RawActualsExport,
   NormalizedActuals,
@@ -42,11 +42,6 @@ const BURDEN_CODES = new Set([FEE_CODE, GL_INSURANCE_CODE]);
 /** True for the Fee / GL insurance burden codes (kept separable from direct cost). */
 export function isBurdenCode(costCode: string): boolean {
   return BURDEN_CODES.has(costCode);
-}
-
-/** Round to cents to keep floating-point dust out of reported totals. */
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 /**
