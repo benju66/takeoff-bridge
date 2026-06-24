@@ -1,4 +1,6 @@
-import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine } from "@/types/db";
+import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine, BudgetSnapshotMeta, BudgetSnapshotDetail, BudgetSnapshotAllocation } from "@/types/db";
+import { buildBudgetSnapshotPayload } from "./actuals";
+import type { NormalizedActuals, CodeActual, ClassifiedChangeEvent, ActualsDiagnostics } from "./actuals";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -1342,6 +1344,334 @@ export async function getBidPriceHistory(): Promise<PriceObservation[]> {
   }
 
   return observations;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Budget Snapshots (Actuals Cost-History — Phase 2 storage spine)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Immutable point-in-time captures of a project's Procore Budget Detail (+
+// change-event exports) after the Phase 1 normalization engine. Modeled on the
+// Estimate Versions section above: the header + per-code actuals are frozen at
+// creation (DB freeze-guard trigger), the only mutable header state is the
+// promotion pair, and at most ONE snapshot per project is FINAL (partial-unique
+// index). The per-line allocations table is a MUTABLE overlay (Phase 4) that
+// freezes once its snapshot is FINAL. NO consumer wires these yet — Phase 2 lays
+// the gateway (precedent: getProcoreCostCodes landed unwired); Phases 3/4/5/8 use
+// it. The calc/normalization engine stays the sole financial authority.
+
+const BUDGET_SNAPSHOT_META_COLUMNS =
+  "id, project_id, snapshot_number, label, source_kind, grand_total_actual, grand_normalized_actual, burden_total_actual, direct_total_actual, metadata, is_final, finalized_at, created_at, created_by";
+
+const BUDGET_SNAPSHOT_ACTUAL_COLUMNS =
+  "budget_code, cost_code, cost_type, description, original_budget, total_actual, normalized_actual, is_burden, normalized_out_contributions";
+
+function mapBudgetSnapshotMetaFromRow(row: Record<string, unknown>): BudgetSnapshotMeta {
+  return {
+    id: row.id as string,
+    projectId: row.project_id as string,
+    snapshotNumber: Number(row.snapshot_number) || 0,
+    label: (row.label as string) || "",
+    sourceKind: (row.source_kind as string) || "csv",
+    grandTotalActual: Number(row.grand_total_actual) || 0,
+    grandNormalizedActual: Number(row.grand_normalized_actual) || 0,
+    burdenTotalActual: Number(row.burden_total_actual) || 0,
+    directTotalActual: Number(row.direct_total_actual) || 0,
+    metadata: (row.metadata != null && typeof row.metadata === "object" && !Array.isArray(row.metadata))
+      ? (row.metadata as Record<string, unknown>)
+      : {},
+    isFinal: row.is_final === true,
+    finalizedAt: (row.finalized_at as string | null) ?? null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    createdBy: (row.created_by as string | null) ?? null,
+  };
+}
+
+// The per-code row maps straight back to the engine's CodeActual (the stored shape
+// IS the engine output — no drift). normalized_out_contributions is JSONB carrying
+// the engine's camelCase CodeChangeContribution[] verbatim.
+function mapBudgetSnapshotActualFromRow(row: Record<string, unknown>): CodeActual {
+  return {
+    budgetCode: (row.budget_code as string) || "",
+    costCode: (row.cost_code as string) || "",
+    costType: (row.cost_type as CodeActual["costType"]) || "Other",
+    description: (row.description as string) || "",
+    originalBudget: Number(row.original_budget) || 0,
+    totalActual: Number(row.total_actual) || 0,
+    normalizedActual: Number(row.normalized_actual) || 0,
+    isBurden: row.is_burden === true,
+    normalizedOutContributions: Array.isArray(row.normalized_out_contributions)
+      ? (row.normalized_out_contributions as CodeActual["normalizedOutContributions"])
+      : [],
+  };
+}
+
+function mapBudgetSnapshotAllocationFromRow(row: Record<string, unknown>): BudgetSnapshotAllocation {
+  return {
+    id: row.id as string,
+    snapshotId: row.snapshot_id as string,
+    budgetCode: (row.budget_code as string) || "",
+    estimateLineItemId: (row.estimate_line_item_id as string) || "",
+    kind: (row.kind as string) || "allocation",
+    allocatedTotal: Number(row.allocated_total) || 0,
+    allocatedNormalized: Number(row.allocated_normalized) || 0,
+    detail: (row.detail != null && typeof row.detail === "object" && !Array.isArray(row.detail))
+      ? (row.detail as Record<string, unknown>)
+      : {},
+    note: (row.note as string) || "",
+    createdBy: (row.created_by as string | null) ?? null,
+    createdAt: (row.created_at as string) || new Date().toISOString(),
+    updatedAt: (row.updated_at as string) || new Date().toISOString(),
+  };
+}
+
+// Rebuilds a type-safe ActualsDiagnostics from the stored JSONB (defaults every
+// field so a legacy/empty '{}' never yields an undefined array).
+function mapSnapshotDiagnosticsFromJson(v: unknown): ActualsDiagnostics {
+  const o = (v != null && typeof v === "object" && !Array.isArray(v))
+    ? (v as Record<string, unknown>)
+    : {};
+  return {
+    unjoinedDetailEventIds: Array.isArray(o.unjoinedDetailEventIds) ? (o.unjoinedDetailEventIds as string[]) : [],
+    summaryOnlyEventIds: Array.isArray(o.summaryOnlyEventIds) ? (o.summaryOnlyEventIds as string[]) : [],
+    duplicateEventGroups: Array.isArray(o.duplicateEventGroups)
+      ? (o.duplicateEventGroups as ActualsDiagnostics["duplicateEventGroups"]) : [],
+    unattributedDetailLineCount: Number(o.unattributedDetailLineCount) || 0,
+    internalNonZeroEventIds: Array.isArray(o.internalNonZeroEventIds) ? (o.internalNonZeroEventIds as string[]) : [],
+    unclassifiedEvents: Array.isArray(o.unclassifiedEvents)
+      ? (o.unclassifiedEvents as ActualsDiagnostics["unclassifiedEvents"]) : [],
+  };
+}
+
+/**
+ * Persists a parsed {@link NormalizedActuals} result as a new (un-promoted)
+ * snapshot via the atomic save_budget_snapshot RPC — header + per-code actuals in
+ * one transaction, with the per-project snapshot_number assigned server-side. The
+ * payload is shaped by the pure buildBudgetSnapshotPayload (engine numbers copied
+ * verbatim). A user-facing action: THROWS on failure.
+ */
+export async function saveBudgetSnapshot(input: {
+  projectId: string;
+  normalized: NormalizedActuals;
+  label?: string;
+  sourceKind?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<BudgetSnapshotMeta> {
+  const { snapshot, actuals } = buildBudgetSnapshotPayload(input.normalized, {
+    projectId: input.projectId,
+    label: input.label,
+    sourceKind: input.sourceKind,
+    metadata: input.metadata,
+  });
+
+  const { data, error } = await supabase.rpc("save_budget_snapshot", {
+    p_snapshot: snapshot,
+    p_actuals: actuals,
+  });
+
+  if (error || !data) {
+    console.error(`Failed to save budget snapshot for project ${input.projectId}:`, error);
+    throw new Error(`Failed to save budget snapshot: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapBudgetSnapshotMetaFromRow(data as Record<string, unknown>);
+}
+
+/**
+ * Lightweight snapshot list for a project (no events/actuals/allocations — use
+ * getBudgetSnapshotDetail for those), newest snapshot first.
+ */
+export async function getBudgetSnapshots(projectId: string): Promise<BudgetSnapshotMeta[]> {
+  const { data, error } = await supabase
+    .from("budget_snapshots")
+    .select(BUDGET_SNAPSHOT_META_COLUMNS)
+    .eq("project_id", projectId)
+    .order("snapshot_number", { ascending: false });
+
+  if (error) {
+    console.error(`Failed to fetch budget snapshots for project ${projectId}`, error);
+    throw new Error(`Failed to fetch budget snapshots: ${error.message}`);
+  }
+
+  return (data || []).map(mapBudgetSnapshotMetaFromRow);
+}
+
+/**
+ * One snapshot's full detail: header + frozen change events + diagnostics + the
+ * per-code+costType actuals + any manual allocations. Returns null when the
+ * snapshot id does not exist (or is outside the caller's tenant RLS view).
+ */
+export async function getBudgetSnapshotDetail(
+  snapshotId: string
+): Promise<BudgetSnapshotDetail | null> {
+  const { data: header, error: headerError } = await supabase
+    .from("budget_snapshots")
+    .select(`${BUDGET_SNAPSHOT_META_COLUMNS}, events, diagnostics`)
+    .eq("id", snapshotId)
+    .maybeSingle();
+
+  if (headerError) {
+    console.error(`Failed to fetch budget snapshot ${snapshotId}`, headerError);
+    throw new Error(`Failed to fetch budget snapshot: ${headerError.message}`);
+  }
+  if (!header) return null;
+
+  const [actuals, allocations] = await Promise.all([
+    (async () => {
+      const { data, error } = await supabase
+        .from("budget_snapshot_actuals")
+        .select(BUDGET_SNAPSHOT_ACTUAL_COLUMNS)
+        .eq("snapshot_id", snapshotId);
+      if (error) {
+        console.error(`Failed to fetch actuals for snapshot ${snapshotId}`, error);
+        throw new Error(`Failed to fetch snapshot actuals: ${error.message}`);
+      }
+      return (data || []).map(mapBudgetSnapshotActualFromRow);
+    })(),
+    getBudgetSnapshotAllocations(snapshotId),
+  ]);
+
+  return {
+    ...mapBudgetSnapshotMetaFromRow(header),
+    events: Array.isArray(header.events) ? (header.events as ClassifiedChangeEvent[]) : [],
+    diagnostics: mapSnapshotDiagnosticsFromJson(header.diagnostics),
+    actuals,
+    allocations,
+  };
+}
+
+/**
+ * Marks one snapshot as the project's FINAL/closeout — the one doorway that makes
+ * its normalized actuals eligible for the pricing pool (Phase 6). The
+ * finalize_budget_snapshot RPC withdraws the prior FINAL (if any) and sets the
+ * target in a single transaction, so the partial-unique invariant always holds.
+ * THROWS on failure.
+ */
+export async function finalizeBudgetSnapshot(
+  projectId: string,
+  snapshotId: string
+): Promise<void> {
+  const { error } = await supabase.rpc("finalize_budget_snapshot", {
+    p_project_id: projectId,
+    p_snapshot_id: snapshotId,
+  });
+
+  if (error) {
+    console.error(`Failed to finalize budget snapshot ${snapshotId} for project ${projectId}:`, error);
+    throw new Error(`Failed to finalize budget snapshot: ${error.message}`);
+  }
+}
+
+/**
+ * Withdraws the project's FINAL snapshot with no replacement (e.g. the wrong
+ * closeout was promoted): the project has no FINAL record until something else is
+ * finalized. A single flag flip — the DB freeze-guard confines it to the promotion
+ * pair. A no-op when nothing is FINAL. THROWS on failure.
+ */
+export async function withdrawFinalSnapshot(projectId: string): Promise<void> {
+  const { error } = await supabase
+    .from("budget_snapshots")
+    .update({ is_final: false, finalized_at: null })
+    .eq("project_id", projectId)
+    .eq("is_final", true);
+
+  if (error) {
+    console.error(`Failed to withdraw final snapshot for project ${projectId}:`, error);
+    throw new Error(`Failed to withdraw final snapshot: ${error.message}`);
+  }
+}
+
+/**
+ * Reads a snapshot's manual allocations (the Phase-4 overlay), oldest first.
+ */
+export async function getBudgetSnapshotAllocations(
+  snapshotId: string
+): Promise<BudgetSnapshotAllocation[]> {
+  const { data, error } = await supabase
+    .from("budget_snapshot_allocations")
+    .select("*")
+    .eq("snapshot_id", snapshotId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error(`Failed to fetch allocations for snapshot ${snapshotId}`, error);
+    throw new Error(`Failed to fetch snapshot allocations: ${error.message}`);
+  }
+
+  return (data || []).map(mapBudgetSnapshotAllocationFromRow);
+}
+
+/**
+ * Inserts a new manual allocation, or updates one in place when `id` is supplied
+ * (Phase-4 reconciliation editing). On CREATE, created_by is stamped from the
+ * session; on EDIT it is preserved (the updated_at touch trigger bumps the
+ * timestamp). The DB freeze-on-final guard rejects either once the snapshot is
+ * FINAL. THROWS on failure.
+ */
+export async function saveBudgetSnapshotAllocation(input: {
+  id?: string;
+  snapshotId: string;
+  budgetCode?: string;
+  estimateLineItemId?: string;
+  kind?: string;
+  allocatedTotal?: number;
+  allocatedNormalized?: number;
+  detail?: Record<string, unknown>;
+  note?: string;
+}): Promise<BudgetSnapshotAllocation> {
+  const row: Record<string, unknown> = {
+    snapshot_id: input.snapshotId,
+    budget_code: input.budgetCode ?? "",
+    estimate_line_item_id: input.estimateLineItemId ?? "",
+    kind: input.kind ?? "allocation",
+    allocated_total: input.allocatedTotal ?? 0,
+    allocated_normalized: input.allocatedNormalized ?? 0,
+    detail: input.detail ?? {},
+    note: input.note ?? "",
+  };
+
+  let data: Record<string, unknown> | null;
+  let error: { message: string } | null;
+
+  if (input.id) {
+    ({ data, error } = await supabase
+      .from("budget_snapshot_allocations")
+      .update(row)
+      .eq("id", input.id)
+      .select("*")
+      .maybeSingle());
+  } else {
+    const { data: { session } } = await supabase.auth.getSession();
+    ({ data, error } = await supabase
+      .from("budget_snapshot_allocations")
+      .insert({ ...row, created_by: session?.user?.id ?? null })
+      .select("*")
+      .maybeSingle());
+  }
+
+  if (error || !data) {
+    console.error(`Failed to save allocation for snapshot ${input.snapshotId}:`, error);
+    throw new Error(`Failed to save snapshot allocation: ${error?.message ?? "no row returned"}`);
+  }
+
+  return mapBudgetSnapshotAllocationFromRow(data);
+}
+
+/**
+ * Deletes one manual allocation by id (Phase-4 editing — e.g. clearing a declined
+ * rollup). The DB freeze-on-final guard rejects this once the snapshot is FINAL.
+ * THROWS on failure.
+ */
+export async function deleteBudgetSnapshotAllocation(allocationId: string): Promise<void> {
+  const { error } = await supabase
+    .from("budget_snapshot_allocations")
+    .delete()
+    .eq("id", allocationId);
+
+  if (error) {
+    console.error(`Failed to delete snapshot allocation ${allocationId}:`, error);
+    throw new Error(`Failed to delete snapshot allocation: ${error.message}`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
