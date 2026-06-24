@@ -8,7 +8,8 @@ import {
   AlertTriangle,
   MapPin,
   Calendar,
-  Menu
+  Menu,
+  Database
 } from "lucide-react";
 import {
   computeTakeoffSummary,
@@ -550,6 +551,13 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
           </div>
         </div>
 
+        <Link
+          href={`/projects/${projectId}/snapshots`}
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors flex-shrink-0"
+          title="Procore actuals snapshots & reconciliation"
+        >
+          <Database size={14} className="text-blue-600 dark:text-blue-400" /> Actuals snapshots
+        </Link>
       </header>
 
       {/* Data Health strip (fidelity Phase 4) — the company audit filtered to

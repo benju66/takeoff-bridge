@@ -54,3 +54,22 @@ export {
   type BudgetSnapshotActualPayload,
   type BuildBudgetSnapshotOptions,
 } from "./snapshotPayload";
+export {
+  buildReconciliationModel,
+  buildVerifyAllocation,
+  buildLineAllocation,
+  buildDeclineAllocation,
+  ALLOCATION_KIND,
+  DEFAULT_RECONCILIATION_THRESHOLDS,
+  type AllocationKind,
+  type EstimateLineLike,
+  type AllocationLike,
+  type ReconciliationBucket,
+  type ReconciliationStatus,
+  type ReconciliationThresholds,
+  type CodeTypeActual,
+  type CodeReconciliation,
+  type ReconciliationModel,
+  type BuildReconciliationInput,
+  type AllocationWriteInput,
+} from "./reconcile";

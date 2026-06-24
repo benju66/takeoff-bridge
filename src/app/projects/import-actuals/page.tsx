@@ -215,7 +215,13 @@ export default function ImportActualsPage() {
               <Row label="Burden (Fee + GL)" value={money(saved.burdenTotalActual)} />
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Link
+              href={`/projects/${saved.projectId}/snapshots/${saved.id}`}
+              className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold uppercase rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all"
+            >
+              <ScrollText size={14} /> Reconcile snapshot
+            </Link>
             <Link
               href={`/projects/${saved.projectId}`}
               className="px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors"
@@ -224,9 +230,9 @@ export default function ImportActualsPage() {
             </Link>
             <button
               onClick={resetAll}
-              className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold uppercase rounded-lg text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 transition-all"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-lg border border-grid-border text-foreground hover:bg-background transition-colors"
             >
-              <Upload size={14} /> Upload another snapshot
+              <Upload size={14} /> Upload another
             </button>
           </div>
         </div>
