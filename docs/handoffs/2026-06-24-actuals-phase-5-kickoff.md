@@ -61,6 +61,20 @@ _2026-06-24 · from the Phase 4 (staging-ground reconciliation) session_
    (the user attributes the in-scope cost of a line; the code-level total-vs-normalized
    split stays on the frozen snapshot). Ties-out validates Σ entries vs the code's
    normalized actual. Architect approved this in the Phase 4 plan.
+   - **DECISION — do not re-litigate (architect-confirmed 2026-06-24):** split the
+     NORMALIZED number, single entry per line. Rationale: the ONLY downstream consumer
+     of these line-grain splits is forward pricing (P6/P7), which reads normalized;
+     splitting raw EAC would let owner/out-of-scope/winter COs poison the pricing history,
+     and attributing those down to a specific estimate line is fabrication the app must
+     not do. For codes with no out-of-scope COs, raw == normalized anyway. The
+     **code-level raw-vs-normalized** distinction (for the P8 variance/KPI dashboard) is
+     served by the FROZEN snapshot rows, not this overlay — P8 never reads these splits.
+   - **If per-estimate-line RAW-total variance is ever wanted** (only path: a future
+     merge with the [[estimate-buyout-lens-plan]] estimate-side per-line tool — explicitly
+     deferred, NOT on this 9-phase roadmap), it is a CHEAP additive change, not a redo:
+     the overlay already has a distinct `allocated_total` column standing ready — add a
+     second entry field and write the true EAC share there. Only the handful of rollup
+     codes that BOTH had out-of-scope COs AND were manually split would need re-splitting.
 3. **Overlay writes are "replace the code's overlay"** (delete the code's rows, insert
    the new set) — per-row, not atomic (Phase 2 added no multi-row overlay RPC). A
    mid-failure leaves a partial overlay; the UI surfaces the error and a retry fully
