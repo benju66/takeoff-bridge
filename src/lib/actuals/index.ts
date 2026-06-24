@@ -87,3 +87,20 @@ export {
   type ApplyEventOverridesInput,
   type EffectiveActualsResult,
 } from "./eventReview";
+export {
+  buildActualCostObservations,
+  aggregateActualCostHistory,
+  scoreActualStrength,
+  RECENCY_FRESH_MONTHS,
+  RECENCY_STALE_MONTHS,
+  STRENGTH_WEIGHTS,
+  ACTUAL_PROVENANCE_FLOOR,
+  STRENGTH_STRONG,
+  STRENGTH_MODERATE,
+  type FinalSnapshotInput,
+  type ActualCostObservation,
+  type ActualCostStat,
+  type ActualStrength,
+  type ActualStrengthSignals,
+  type StrengthTier,
+} from "./pricingPool";

@@ -1,6 +1,13 @@
 import { Project, ProjectEstimate, TemplateConfig, TemplateLayoutConfig, CostCodeMapEntry, RateCardEntry, ImportedStep23Lines, CustomStep23LineDef, CatalogAddition, CatalogAdditionStatus, CatalogCostTypeOverride, ProcoreCostCode, EstimateVersionMeta, EstimateVersionDetail, EstimateSectionLine, BudgetSnapshotMeta, BudgetSnapshotDetail, BudgetSnapshotAllocation } from "@/types/db";
-import { buildBudgetSnapshotPayload } from "./actuals";
-import type { NormalizedActuals, CodeActual, ClassifiedChangeEvent, ActualsDiagnostics } from "./actuals";
+import { buildBudgetSnapshotPayload, buildActualCostObservations } from "./actuals";
+import type {
+  NormalizedActuals,
+  CodeActual,
+  ClassifiedChangeEvent,
+  ActualsDiagnostics,
+  FinalSnapshotInput,
+  ActualCostObservation,
+} from "./actuals";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
 import type { Step23HistorySource } from "./step23Normalization";
@@ -1672,6 +1679,69 @@ export async function deleteBudgetSnapshotAllocation(allocationId: string): Prom
     console.error(`Failed to delete snapshot allocation ${allocationId}:`, error);
     throw new Error(`Failed to delete snapshot allocation: ${error.message}`);
   }
+}
+
+/**
+ * The actuals pricing pool reader (Actuals Cost-History Phase 6) — the FIRST
+ * downstream consumer of FINAL budget snapshots. Returns per-(FINAL snapshot,
+ * Procore code) actual-cost observations across ALL of the caller's projects,
+ * tagged `actual` provenance and kept SEPARATE from the as-bid pool
+ * (getBidPriceHistory). REPORT-only; the calc/normalization engine stays the
+ * sole financial authority (this copies engine output, fabricates nothing).
+ *
+ * CRITICAL contract (plan Phase 6 + Phase-5 handoff Non-obvious #1): the
+ * pricing-relevant per-code normalized actual is the EFFECTIVE one — the pure
+ * buildActualCostObservations runs applyEventClassificationOverrides over each
+ * snapshot's frozen actuals + events + its `event_classification` overlay rows,
+ * so every Phase-5 human classification correction is honored. The frozen
+ * `normalizedActual` is NEVER read directly.
+ *
+ * Reads only FINAL snapshots (is_final = true; at most one per project, RLS
+ * tenant-scoped via the projects join — no read-perf index needed).
+ */
+export async function getActualCostHistory(): Promise<ActualCostObservation[]> {
+  // 1. All FINAL snapshots with project context (mirrors getBidPriceHistory's
+  //    projects(...) join). RLS confines this to the caller's tenant.
+  const { data: finals, error } = await supabase
+    .from("budget_snapshots")
+    .select("id, project_id, label, finalized_at, projects(name, market_sector)")
+    .eq("is_final", true);
+
+  if (error) {
+    console.error("Failed to fetch FINAL budget snapshots for the pricing pool:", error);
+    throw new Error(`Failed to fetch FINAL budget snapshots: ${error.message}`);
+  }
+
+  const finalRows = finals || [];
+  if (finalRows.length === 0) return [];
+
+  // 2. Pull each FINAL snapshot's frozen actuals + events + overlay rows.
+  const details = await Promise.all(
+    finalRows.map((row) => getBudgetSnapshotDetail(row.id as string)),
+  );
+
+  // 3. Assemble the pure builder's input (skipping any snapshot that vanished
+  //    between the list and the detail read), then derive the EFFECTIVE pool.
+  const inputs: FinalSnapshotInput[] = [];
+  for (let i = 0; i < finalRows.length; i += 1) {
+    const detail = details[i];
+    if (!detail) continue;
+    const row = finalRows[i];
+    const project = mapObservationProjectContext(row.projects);
+    inputs.push({
+      projectId: detail.projectId,
+      projectName: project?.name ?? "",
+      snapshotId: detail.id,
+      snapshotLabel: detail.label,
+      finalizedAt: (row.finalized_at as string | null) ?? detail.finalizedAt ?? "",
+      marketSector: project?.market_sector ?? "",
+      actuals: detail.actuals,
+      events: detail.events,
+      overlayRows: detail.allocations,
+    });
+  }
+
+  return buildActualCostObservations(inputs);
 }
 
 // ═══════════════════════════════════════════════════════════════════
