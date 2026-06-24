@@ -8,6 +8,7 @@ import type {
   FinalSnapshotInput,
   ActualCostObservation,
   ProjectSnapshotInput,
+  BuyoutAccuracyInput,
 } from "./actuals";
 import type { PriceObservation } from "./priceHistory";
 import type { LineItemHealthFact } from "./dataHealth";
@@ -1831,6 +1832,99 @@ export async function getProjectBudgetVariance(
     finalizedAt: (s.finalized_at as string | null) ?? "",
     codes: codesBySnapshot.get(s.id as string) ?? [],
   }));
+}
+
+/**
+ * The buyout-accuracy reader (Actuals Cost-History Phase 9) — the THIRD downstream
+ * consumer of FINAL budget snapshots and the only one that couples to the estimate
+ * side. Returns per-FINAL-snapshot buyout-accuracy inputs across ALL of the
+ * caller's projects: each FINAL snapshot's frozen change events + overlay rows (so
+ * the pure buildBuyoutAccuracy can derive the EFFECTIVE fp_buyout draw), paired
+ * with that project's SUBMITTED-estimate contingency budget
+ * (constructionContingency + designContingency, frozen on the submitted version's
+ * summary at bid time). REPORT-only; the calc/normalization engine stays the sole
+ * financial authority (this copies engine output, fabricates nothing).
+ *
+ * Reuses the getActualCostHistory FINAL-snapshot path (is_final = true; one per
+ * project, RLS tenant-scoped via the projects join). The contingency budgets are
+ * fetched in ONE batched query over the involved projects (no N+1). A project with
+ * no submitted estimate version yields contingencyBudget = null — scored
+ * "unbudgeted" downstream, never fabricated (this estimate coupling is why P9 was
+ * deferred). The per-code actuals are deliberately NOT read here: fp_buyout is a
+ * change-event signal, so events + overlay suffice.
+ */
+export async function getBuyoutAccuracyInputs(): Promise<BuyoutAccuracyInput[]> {
+  // 1. All FINAL snapshots with project context (mirrors getActualCostHistory).
+  const { data: finals, error } = await supabase
+    .from("budget_snapshots")
+    .select("id, project_id, label, finalized_at, projects(name, market_sector)")
+    .eq("is_final", true);
+
+  if (error) {
+    console.error("Failed to fetch FINAL budget snapshots for buyout accuracy:", error);
+    throw new Error(`Failed to fetch FINAL budget snapshots: ${error.message}`);
+  }
+
+  const finalRows = finals || [];
+  if (finalRows.length === 0) return [];
+
+  // 2. Each FINAL snapshot's frozen events + overlay rows (in parallel).
+  const details = await Promise.all(
+    finalRows.map((row) => getBudgetSnapshotDetail(row.id as string)),
+  );
+
+  // 3. The submitted-estimate contingency budget per involved project, in ONE
+  //    batched query: constructionContingency + designContingency off the frozen
+  //    summary. A project missing from the result has no submitted bid → null
+  //    budget below. (A submitted bid with zero contingency maps to 0, NOT null —
+  //    a real zero budget, distinct from "no yardstick"; the Map.has check keeps
+  //    them apart.)
+  const projectIds = Array.from(new Set(finalRows.map((r) => r.project_id as string)));
+  const budgetByProject = new Map<string, number>();
+  const { data: submitted, error: submittedError } = await supabase
+    .from("estimate_versions")
+    .select("project_id, summary")
+    .eq("is_submitted", true)
+    .in("project_id", projectIds);
+
+  if (submittedError) {
+    console.error("Failed to fetch submitted-version contingency budgets:", submittedError);
+    throw new Error(`Failed to fetch submitted contingency budgets: ${submittedError.message}`);
+  }
+
+  for (const row of submitted || []) {
+    const summary =
+      row.summary != null && typeof row.summary === "object" && !Array.isArray(row.summary)
+        ? (row.summary as Record<string, unknown>)
+        : {};
+    const cc = Number(summary.constructionContingency) || 0;
+    const dc = Number(summary.designContingency) || 0;
+    budgetByProject.set(row.project_id as string, cc + dc);
+  }
+
+  // 4. Assemble the pure builder's input (skipping any snapshot that vanished
+  //    between the list and the detail read). `?? null` preserves a real 0 budget
+  //    while mapping an absent project to the unbudgeted case.
+  const inputs: BuyoutAccuracyInput[] = [];
+  for (let i = 0; i < finalRows.length; i += 1) {
+    const detail = details[i];
+    if (!detail) continue;
+    const row = finalRows[i];
+    const project = mapObservationProjectContext(row.projects);
+    inputs.push({
+      projectId: detail.projectId,
+      projectName: project?.name ?? "",
+      snapshotId: detail.id,
+      snapshotLabel: detail.label,
+      finalizedAt: (row.finalized_at as string | null) ?? detail.finalizedAt ?? "",
+      marketSector: project?.market_sector ?? "",
+      contingencyBudget: budgetByProject.get(detail.projectId) ?? null,
+      events: detail.events,
+      overlayRows: detail.allocations,
+    });
+  }
+
+  return inputs;
 }
 
 // ═══════════════════════════════════════════════════════════════════
