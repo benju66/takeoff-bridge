@@ -5,12 +5,14 @@ import Link from "next/link";
 import {
   ArrowLeft, Loader2, AlertTriangle, CheckCircle2, Lock, Layers, ScrollText,
   ChevronRight, ChevronDown, Sparkles, XCircle, RotateCcw, Info,
+  Scale, Flag, Unlock, Pencil, Save, FileWarning, ListChecks,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
   getProject, getBudgetSnapshotDetail, getEstimateLineItems,
   getEstimateVersions, getEstimateVersionDetail, getCostCodeMap, getCatalogAdditions,
   getBudgetSnapshotAllocations, saveBudgetSnapshotAllocation, deleteBudgetSnapshotAllocation,
+  getBudgetSnapshots, finalizeBudgetSnapshot, withdrawFinalSnapshot,
 } from "@/lib/db";
 import {
   primeCostCodeResolver, primeCostCodeResolverFromCatalog, resolveProcoreCode,
@@ -20,10 +22,13 @@ import { MASTER_TEMPLATE_NAME } from "@/lib/constants";
 import {
   buildReconciliationModel, buildVerifyAllocation, buildLineAllocation, buildDeclineAllocation,
   ALLOCATION_KIND,
+  collectEventOverrides, buildEventOverrideAllocation, applyEventClassificationOverrides,
+  EVENT_CLASSIFICATION_KIND,
   type CodeReconciliation, type EstimateLineLike, type ReconciliationStatus,
-  type AllocationWriteInput,
+  type AllocationWriteInput, type EffectiveChangeEvent, type EffectiveActualsResult,
+  type NormalizationBucket, type ChangeEventScope, type ChangeEventType, type ChangeEventReason,
 } from "@/lib/actuals";
-import type { Project, BudgetSnapshotDetail } from "@/types/db";
+import type { Project, BudgetSnapshotDetail, BudgetSnapshotMeta } from "@/types/db";
 import type { ProcessedTakeoffRow } from "@/types";
 
 const money = (n: number) =>
@@ -32,6 +37,34 @@ const money = (n: number) =>
 const parseMoney = (s: string): number => {
   const n = parseFloat(s.replace(/[$,\s]/g, ""));
   return isNaN(n) ? 0 : n;
+};
+
+const fmtDateTime = (iso: string): string => {
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+// Canonical classification options (mirror the enums in actuals/types.ts).
+const SCOPE_OPTIONS: ChangeEventScope[] = ["In Scope", "Out of Scope", "Unclassified"];
+const TYPE_OPTIONS: ChangeEventType[] = [
+  "Original Budget", "FP Contingency/Buyout", "Owner Contingency", "Allowance", "No Cost", "Unclassified",
+];
+const REASON_OPTIONS: ChangeEventReason[] = [
+  "FP Construction", "Arch/Eng", "Owner Request", "Winter Conditions", "AHJ", "Allowance", "Internal", "Unclassified",
+];
+
+const BUCKET_LABEL: Record<NormalizationBucket, string> = {
+  fp_buyout: "FP Buyout",
+  original_budget: "Original Budget",
+  owner_contingency: "Owner Contingency",
+  out_of_scope: "Out of Scope",
+  allowance_reconcile: "Allowance reconcile",
+  internal_reclass: "Internal reclass (net-zero)",
+  internal_nonzero: "Internal, non-zero",
+  no_cost: "No cost",
+  unclassified: "Unclassified",
 };
 
 /** Prefer the project's submitted estimate version; fall back to current saved lines. */
@@ -71,6 +104,17 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
   const [busy, setBusy] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
 
+  // Phase 5 — change-event review + promotion.
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<string | null>(null);
+  const [eventDraft, setEventDraft] = useState<{ scope: ChangeEventScope; type: ChangeEventType; reason: ChangeEventReason }>(
+    { scope: "Unclassified", type: "Unclassified", reason: "Unclassified" },
+  );
+  const [otherFinal, setOtherFinal] = useState<BudgetSnapshotMeta | null>(null);
+  const [confirmFinal, setConfirmFinal] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const [promoteBusy, setPromoteBusy] = useState(false);
+
   const isFinal = detail?.isFinal ?? false;
   const locked = isFinal || busy !== null;
 
@@ -81,9 +125,10 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
       setLoading(true);
       setError(null);
       try {
-        const [proj, det] = await Promise.all([
+        const [proj, det, snaps] = await Promise.all([
           getProject(projectId),
           getBudgetSnapshotDetail(snapshotId),
+          getBudgetSnapshots(projectId).catch(() => [] as BudgetSnapshotMeta[]),
         ]);
         if (cancelled) return;
         if (!det) {
@@ -94,6 +139,7 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
         setProject(proj);
         setDetail(det);
         setAllocations(det.allocations);
+        setOtherFinal(snaps.find((s) => s.isFinal && s.id !== snapshotId) ?? null);
 
         // Prime the cost-code resolver exactly as the workbook does, so each
         // estimate line resolves to its granular Procore code from the live map.
@@ -131,15 +177,27 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
     return () => { cancelled = true; };
   }, [projectId, snapshotId]);
 
-  // ----- model (recompute from frozen actuals + overlay) -------------------
-  const model = useMemo(() => {
+  // ----- effective actuals (frozen + change-event classification overrides) -
+  const eventOverrides = useMemo(() => collectEventOverrides(allocations), [allocations]);
+
+  const effective = useMemo<EffectiveActualsResult | null>(() => {
     if (!detail) return null;
-    return buildReconciliationModel({
+    return applyEventClassificationOverrides({
       actuals: detail.actuals,
+      events: detail.events,
+      overrides: eventOverrides,
+    });
+  }, [detail, eventOverrides]);
+
+  // ----- model (recompute from EFFECTIVE actuals + overlay) ----------------
+  const model = useMemo(() => {
+    if (!detail || !effective) return null;
+    return buildReconciliationModel({
+      actuals: effective.effectiveActuals,
       estimateLines,
       allocations,
     });
-  }, [detail, estimateLines, allocations]);
+  }, [detail, effective, estimateLines, allocations]);
 
   // ----- overlay writes (replace-the-code's-overlay semantics) -------------
   const refreshAllocations = useCallback(async () => {
@@ -211,6 +269,92 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
     [splitInputs, replaceCodeOverlay, snapshotId],
   );
 
+  // ----- change-event classification overrides -----------------------------
+  // Replace-this-event's-override semantics: delete the event's existing override
+  // rows, then insert the new one (or none, to reset to the frozen auto-read).
+  const replaceEventOverride = useCallback(
+    async (eventId: string, write: AllocationWriteInput | null) => {
+      setBusy(`event:${eventId}`);
+      setWriteError(null);
+      try {
+        const existing = allocations.filter(
+          (a) => a.kind === EVENT_CLASSIFICATION_KIND && a.detail.eventId === eventId,
+        );
+        for (const e of existing) await deleteBudgetSnapshotAllocation(e.id);
+        if (write) await saveBudgetSnapshotAllocation(write);
+        await refreshAllocations();
+        setEditingEvent(null);
+      } catch (err) {
+        setWriteError(err instanceof Error ? err.message : "Failed to save the classification.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [allocations, refreshAllocations],
+  );
+
+  const saveEventOverride = useCallback(
+    (eventId: string) =>
+      replaceEventOverride(
+        eventId,
+        buildEventOverrideAllocation(snapshotId, { eventId, ...eventDraft }),
+      ),
+    [replaceEventOverride, snapshotId, eventDraft],
+  );
+
+  const resetEventOverride = useCallback(
+    (eventId: string) => replaceEventOverride(eventId, null),
+    [replaceEventOverride],
+  );
+
+  const beginEditEvent = useCallback((ev: EffectiveChangeEvent) => {
+    const src = ev.override ?? { scope: ev.scope, type: ev.type, reason: ev.reason };
+    setEventDraft({ scope: src.scope, type: src.type, reason: src.reason });
+    setEditingEvent(ev.eventId);
+  }, []);
+
+  // ----- promotion (mark FINAL / withdraw) ---------------------------------
+  const refetchDetail = useCallback(async () => {
+    const [det, snaps] = await Promise.all([
+      getBudgetSnapshotDetail(snapshotId),
+      getBudgetSnapshots(projectId).catch(() => [] as BudgetSnapshotMeta[]),
+    ]);
+    if (det) {
+      setDetail(det);
+      setAllocations(det.allocations);
+    }
+    setOtherFinal(snaps.find((s) => s.isFinal && s.id !== snapshotId) ?? null);
+  }, [snapshotId, projectId]);
+
+  const finalize = useCallback(async () => {
+    setPromoteBusy(true);
+    setWriteError(null);
+    try {
+      await finalizeBudgetSnapshot(projectId, snapshotId);
+      setEditingEvent(null);
+      await refetchDetail();
+      setConfirmFinal(false);
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : "Failed to mark the snapshot FINAL.");
+    } finally {
+      setPromoteBusy(false);
+    }
+  }, [projectId, snapshotId, refetchDetail]);
+
+  const withdraw = useCallback(async () => {
+    setPromoteBusy(true);
+    setWriteError(null);
+    try {
+      await withdrawFinalSnapshot(projectId);
+      await refetchDetail();
+      setConfirmWithdraw(false);
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : "Failed to withdraw the FINAL promotion.");
+    } finally {
+      setPromoteBusy(false);
+    }
+  }, [projectId, refetchDetail]);
+
   // ----- expand / input plumbing -------------------------------------------
   const toggleExpand = useCallback((code: CodeReconciliation) => {
     const willExpand = !expanded.has(code.costCode);
@@ -249,7 +393,7 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
       </ProtectedRoute>
     );
   }
-  if (error || !detail || !model) {
+  if (error || !detail || !model || !effective) {
     return (
       <ProtectedRoute>
         <div className="flex flex-col gap-4 max-w-2xl p-2">
@@ -274,6 +418,25 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
     : rollups.filter((x) => x.isTargeted || x.status !== "pending");
   const unbacked = model.codes.filter((x) => x.bucket === "unbacked" && x.hasActual);
   const estimateOnly = model.codes.filter((x) => x.bucket === "estimateOnly");
+
+  // ----- change-event review view-model ------------------------------------
+  // Default view surfaces the events that matter for the normalized number:
+  // anything unclassified, normalized-out, flagged, or human-overridden. "Show
+  // all" reveals the kept original-budget events (and duplicates) too.
+  const needsAttention = (ev: EffectiveChangeEvent) =>
+    !ev.isDuplicate &&
+    (ev.effectiveBucket === "unclassified" || ev.isOverridden ||
+      ev.effectiveIsNormalizedOut || ev.bucket === "internal_nonzero");
+  const reviewEvents = [...effective.effectiveEvents].sort((a, b) => {
+    const au = a.effectiveBucket === "unclassified" ? 0 : 1;
+    const bu = b.effectiveBucket === "unclassified" ? 0 : 1;
+    if (au !== bu) return au - bu;
+    return a.eventId.localeCompare(b.eventId, undefined, { numeric: true });
+  });
+  const visibleEvents = showAllEvents ? reviewEvents : reviewEvents.filter(needsAttention);
+  const unclassifiedCount = effective.effectiveEvents.filter((e) => e.effectiveBucket === "unclassified").length;
+  const normalizedOutCount = effective.effectiveEvents.filter((e) => !e.isDuplicate && e.effectiveIsNormalizedOut).length;
+  const attentionCount = effective.effectiveEvents.filter(needsAttention).length;
 
   return (
     <ProtectedRoute>
@@ -314,6 +477,94 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
             <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" /> {writeError}
           </div>
         )}
+
+        {/* Money breakdown — normalized vs total + Fee/GL/direct split */}
+        <div className="bg-card border border-grid-border rounded-xl p-5">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-4 flex items-center gap-2">
+            <Scale size={13} className="text-teal-500" /> Normalized vs total
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <Stat label="Total actual (EAC)" value={money(effective.grandTotalActual)} />
+            <Stat
+              label="Normalized actual"
+              value={money(effective.grandNormalizedActual)}
+              tone="emerald"
+              sub={effective.overrideCount > 0 ? `base ${money(effective.baseGrandNormalizedActual)}` : undefined}
+            />
+            <Stat label="Direct cost" value={money(effective.directTotalActual)} />
+            <Stat
+              label="Burden (Fee + GL)"
+              value={money(effective.burdenTotalActual)}
+              sub={`Fee ${money(effective.feeTotalActual)} · GL ${money(effective.glTotalActual)}`}
+            />
+          </div>
+          {effective.overrideCount > 0 && (
+            <p className="text-[11px] mt-3 flex items-center gap-1.5 text-slate-500">
+              <Info size={12} className="text-blue-500" />
+              {effective.overrideCount} classification override(s) applied — normalized shifted{" "}
+              {effective.normalizedDelta >= 0 ? "+" : "−"}{money(Math.abs(effective.normalizedDelta))} from the auto-read baseline.
+            </p>
+          )}
+          <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+            <span className="font-semibold text-slate-600 dark:text-slate-400">Normalized</span> strips owner
+            extras, allowances, and net-zero internal reclasses out of EAC — what the original bid scope actually
+            cost, and the number a FINAL snapshot feeds into pricing history.
+          </p>
+        </div>
+
+        {/* Change-event review */}
+        <section className="bg-card border border-grid-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 flex items-center gap-2">
+              <ListChecks size={13} className="text-blue-500" /> Change-event review
+              <span className="font-normal normal-case text-slate-500">
+                {effective.effectiveEvents.length} events · {normalizedOutCount} normalized out
+                {effective.overrideCount > 0 ? ` · ${effective.overrideCount} overridden` : ""}
+              </span>
+            </h3>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
+              <input type="checkbox" checked={showAllEvents} onChange={(e) => setShowAllEvents(e.target.checked)} className="accent-blue-600" />
+              Show all ({effective.effectiveEvents.length})
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-500 mb-3">
+            {showAllEvents
+              ? "Every change event. Correct any misread classification — the normalized total updates live."
+              : `Showing the ${attentionCount} that affect the normalized number (unclassified, stripped, flagged, or overridden). Toggle "Show all" for the rest.`}
+          </p>
+
+          {unclassifiedCount > 0 && (
+            <div className="bg-amber-50/60 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 rounded-lg p-3 mb-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
+              <FileWarning size={13} className="mt-0.5 flex-shrink-0" />
+              {unclassifiedCount} event(s) arrived without a usable Scope/Type/Reason and are KEPT but flagged.
+              Classify them before promoting so the normalized number is trustworthy.
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 max-h-[36rem] overflow-y-auto">
+            {visibleEvents.map((ev) => (
+              <EventReviewCard
+                key={ev.eventId}
+                ev={ev}
+                editing={editingEvent === ev.eventId}
+                draft={eventDraft}
+                onDraft={(patch) => setEventDraft((d) => ({ ...d, ...patch }))}
+                onBeginEdit={() => beginEditEvent(ev)}
+                onCancelEdit={() => setEditingEvent(null)}
+                onSave={() => saveEventOverride(ev.eventId)}
+                onReset={() => resetEventOverride(ev.eventId)}
+                busy={busy === `event:${ev.eventId}`}
+                locked={locked}
+                isFinal={isFinal}
+              />
+            ))}
+            {visibleEvents.length === 0 && (
+              <p className="text-xs text-slate-500 italic">
+                No events need attention. Toggle &quot;Show all&quot; to review the kept original-budget events.
+              </p>
+            )}
+          </div>
+        </section>
 
         {/* Summary */}
         <div className="bg-card border border-grid-border rounded-xl p-5">
@@ -456,6 +707,72 @@ function ReconcileInner({ projectId, snapshotId }: { projectId: string; snapshot
         {(unbacked.length > 0 || estimateOnly.length > 0) && (
           <InfoSection unbacked={unbacked} estimateOnly={estimateOnly} />
         )}
+
+        {/* Promotion / closeout */}
+        <section className={`rounded-xl p-5 border ${isFinal ? "bg-emerald-50/40 dark:bg-emerald-950/15 border-emerald-300 dark:border-emerald-900/50" : "bg-card border-grid-border"}`}>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-2">
+            <Flag size={13} className={isFinal ? "text-emerald-500" : "text-blue-500"} /> Promotion / closeout
+          </h3>
+          {isFinal ? (
+            <>
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed mb-3 flex items-start gap-2">
+                <Lock size={14} className="mt-0.5 flex-shrink-0" />
+                This snapshot is the project&apos;s FINAL closeout{detail.finalizedAt ? ` · finalized ${fmtDateTime(detail.finalizedAt)}` : ""}.
+                Its normalized actuals are eligible for the pricing pool. The reconciliation overlay and event
+                classifications are frozen.
+              </p>
+              {!confirmWithdraw ? (
+                <button onClick={() => setConfirmWithdraw(true)} disabled={promoteBusy} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg border border-grid-border text-slate-700 dark:text-slate-300 hover:bg-card disabled:opacity-40">
+                  <Unlock size={12} /> Withdraw FINAL
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">Reopen this snapshot for editing? It will no longer be the project&apos;s FINAL.</span>
+                  <button onClick={withdraw} disabled={promoteBusy} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50">
+                    {promoteBusy ? <Loader2 className="animate-spin" size={12} /> : <Unlock size={12} />} Confirm withdraw
+                  </button>
+                  <button onClick={() => setConfirmWithdraw(false)} disabled={promoteBusy} className="px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg border border-grid-border text-slate-600 dark:text-slate-400 hover:bg-card disabled:opacity-40">Cancel</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-3">
+                Marking this snapshot FINAL freezes the reconciliation overlay and event classifications, and makes
+                its normalized actuals the project&apos;s official cost record — the one snapshot eligible for the
+                pricing pool. One FINAL per project; you can withdraw it later.
+              </p>
+              {otherFinal && (
+                <div className="bg-amber-50/60 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 rounded-lg p-3 mb-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+                  Snapshot #{otherFinal.snapshotNumber} is currently FINAL. Promoting this one will replace it as the project&apos;s closeout.
+                </div>
+              )}
+              {unclassifiedCount > 0 && (
+                <div className="bg-amber-50/60 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 rounded-lg p-3 mb-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  <FileWarning size={13} className="mt-0.5 flex-shrink-0" />
+                  {unclassifiedCount} change event(s) are still unclassified. You can still promote, but resolving them
+                  first makes the pricing history trustworthy.
+                </div>
+              )}
+              {!confirmFinal ? (
+                <button onClick={() => setConfirmFinal(true)} disabled={promoteBusy || busy !== null} className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold uppercase rounded-lg text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 transition-all">
+                  <Flag size={14} /> Mark as FINAL / closeout
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
+                    {otherFinal ? `Replace #${otherFinal.snapshotNumber} and freeze this snapshot?` : "Freeze this snapshot as the project's FINAL?"}
+                  </span>
+                  <button onClick={finalize} disabled={promoteBusy} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50">
+                    {promoteBusy ? <Loader2 className="animate-spin" size={12} /> : <Lock size={12} />} Confirm FINAL
+                  </button>
+                  <button onClick={() => setConfirmFinal(false)} disabled={promoteBusy} className="px-3 py-1.5 text-[11px] font-bold uppercase rounded-lg border border-grid-border text-slate-600 dark:text-slate-400 hover:bg-card disabled:opacity-40">Cancel</button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
       </div>
     </ProtectedRoute>
   );
@@ -574,6 +891,119 @@ function RollupCard({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Change-event review card (auto-read classification + inline override editor)
+// ---------------------------------------------------------------------------
+
+type ClassDraft = { scope: ChangeEventScope; type: ChangeEventType; reason: ChangeEventReason };
+
+function EventReviewCard({
+  ev, editing, draft, onDraft, onBeginEdit, onCancelEdit, onSave, onReset, busy, locked, isFinal,
+}: {
+  ev: EffectiveChangeEvent;
+  editing: boolean;
+  draft: ClassDraft;
+  onDraft: (patch: Partial<ClassDraft>) => void;
+  onBeginEdit: () => void;
+  onCancelEdit: () => void;
+  onSave: () => void;
+  onReset: () => void;
+  busy: boolean;
+  locked: boolean;
+  isFinal: boolean;
+}) {
+  const out = ev.effectiveIsNormalizedOut;
+  const isUnclassified = ev.effectiveBucket === "unclassified";
+
+  return (
+    <div className={`border rounded-lg overflow-hidden ${isUnclassified ? "border-amber-300 dark:border-amber-900/50" : "border-grid-border"}`}>
+      <div className="flex items-start justify-between gap-3 px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-xs text-foreground whitespace-nowrap">#{ev.eventId}</span>
+            <span className="text-xs text-slate-600 dark:text-slate-400 truncate max-w-[22rem]" title={ev.title}>{ev.title || "—"}</span>
+            {ev.isDuplicate && <Badge tone="slate">duplicate</Badge>}
+            {ev.isOverridden && <Badge tone="violet">overridden</Badge>}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1.5">
+            {ev.scope} · {ev.type} · {ev.reason}
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className={`text-[10px] uppercase tracking-wider font-bold ${out ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+              {out ? "Normalized out" : "Kept"}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">{BUCKET_LABEL[ev.effectiveBucket]}</span>
+            {isUnclassified && (
+              <span className="text-[10px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+                <FileWarning size={11} /> needs review
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <span className="font-mono text-xs text-foreground">{money(ev.netLatestCost)}</span>
+          {ev.isDuplicate ? (
+            <span className="text-[10px] text-slate-400 italic">suppressed — no effect</span>
+          ) : !isFinal && !editing && (
+            <button onClick={onBeginEdit} disabled={locked} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold uppercase rounded border border-grid-border text-slate-600 dark:text-slate-400 hover:bg-background disabled:opacity-40">
+              <Pencil size={11} /> {ev.isOverridden ? "Re-classify" : "Override"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing && !isFinal && (
+        <div className="border-t border-grid-border p-3 bg-background/30">
+          <p className="text-[11px] text-slate-500 mb-2.5">
+            Correct the classification — the engine re-derives whether this event&apos;s dollars are kept or stripped.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+            <ClassSelect label="Scope" value={draft.scope} options={SCOPE_OPTIONS} onChange={(v) => onDraft({ scope: v as ChangeEventScope })} disabled={busy} />
+            <ClassSelect label="Type" value={draft.type} options={TYPE_OPTIONS} onChange={(v) => onDraft({ type: v as ChangeEventType })} disabled={busy} />
+            <ClassSelect label="Reason" value={draft.reason} options={REASON_OPTIONS} onChange={(v) => onDraft({ reason: v as ChangeEventReason })} disabled={busy} />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={onCancelEdit} disabled={busy} className="px-2.5 py-1 text-[11px] font-bold uppercase rounded border border-grid-border text-slate-600 dark:text-slate-400 hover:bg-card disabled:opacity-40">Cancel</button>
+            {ev.isOverridden && (
+              <button onClick={onReset} disabled={busy} className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold uppercase rounded border border-grid-border text-slate-600 dark:text-slate-400 hover:bg-card disabled:opacity-40">
+                <RotateCcw size={11} /> Reset to auto
+              </button>
+            )}
+            <button onClick={onSave} disabled={busy} className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-bold uppercase rounded text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+              {busy ? <Loader2 className="animate-spin" size={11} /> : <Save size={11} />} Save
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Badge({ tone, children }: { tone: "slate" | "violet" | "amber"; children: React.ReactNode }) {
+  const cls = tone === "violet"
+    ? "text-violet-600 dark:text-violet-400"
+    : tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-slate-400";
+  return <span className={`text-[9px] uppercase tracking-wider font-bold ${cls}`}>{children}</span>;
+}
+
+function ClassSelect({
+  label, value, options, onChange, disabled,
+}: { label: string; value: string; options: readonly string[]; onChange: (v: string) => void; disabled: boolean }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="bg-background border border-grid-border rounded px-2 py-1 text-xs text-foreground outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+      >
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
   );
 }
 

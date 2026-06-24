@@ -73,3 +73,17 @@ export {
   type BuildReconciliationInput,
   type AllocationWriteInput,
 } from "./reconcile";
+export {
+  EVENT_CLASSIFICATION_KIND,
+  parseEventOverride,
+  collectEventOverrides,
+  buildEventOverrideAllocation,
+  resolveEffectiveDisposition,
+  applyEventClassificationOverrides,
+  type EventClassificationOverride,
+  type OverlayRowLike,
+  type EffectiveEventDisposition,
+  type EffectiveChangeEvent,
+  type ApplyEventOverridesInput,
+  type EffectiveActualsResult,
+} from "./eventReview";
