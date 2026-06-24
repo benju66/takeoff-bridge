@@ -70,17 +70,17 @@ is in `supabase_schema.sql` (source of truth, Tables 23/24/25). Verified live:
    explicit per-action approval (and a review-driven CHANGE to the approved SQL needed
    re-approval). Budget a round-trip for any future DDL.
 
-## ⚠️ Carry-over gaps for the architect (NOT fixed in Phase 2)
-1. **Actuals test fixtures are UNTRACKED (inherited from Phase 1).** The six
-   `templates/active_project_*.csv` exports the whole actuals suite reads are NOT in git
-   (`7b0085a` never added `templates/`). Tests are green LOCALLY only; a fresh checkout /
-   CI cannot run them. **Decision needed:** commit the sample exports (they are real
-   project financials — Orchard Path III / 25-117) so the golden tests are reproducible,
-   or keep them local and gate the actuals suite behind a fixture-present check. Also
-   untracked: `docs/plans/2026-06-23-actuals-...md` (the plan of record itself),
-   `templates/change_event_types_reasons_scope.txt`, `templates/Company_Bid_Comp_Template.xlsx`.
+## Carry-over notes
+1. **Actuals test fixtures — RESOLVED 2026-06-24 (architect-approved).** The six
+   `templates/active_project_*.csv` golden exports the whole actuals suite reads are now
+   **committed** (they were untracked, inherited from Phase 1 — `7b0085a` never added
+   `templates/`). The actuals suite is reproducible on a fresh checkout / CI. Still
+   untracked and left local by choice: `templates/change_event_types_reasons_scope.txt`
+   (CE-taxonomy reference, not read by any test) and `templates/Company_Bid_Comp_Template.xlsx`
+   (unrelated comp template). The plan-of-record `docs/plans/2026-06-23-actuals-...md` is
+   also still untracked — commit it whenever convenient.
 2. **Unrelated working-tree churn** (a `docs/handoffs|plans` → `archive/` reorg) was
-   present before this session and left untouched — not part of the Phase 2 commit.
+   present before this session and left untouched — not part of the actuals commits.
 
 ## Phase 3 — Ingestion UI: upload + project match + save snapshot
 Per the plan's Phase 3 scope. A new route (mirror `src/app/projects/import/`): upload the
@@ -109,5 +109,3 @@ the parsed `NormalizedActuals`, and save as an **un-promoted** snapshot via
 > `computeNormalizedActuals` (Phase 1) and the Phase 2 gateway; NO reconciliation or
 > promotion yet, NO DDL. Take it through the Definition of Done, commit one phase to
 > `actuals-cost-history`, push, write the Phase 4 handoff. Stop at the phase boundary.
-> First, resolve the carry-over gap: decide whether to commit the untracked
-> `templates/active_project_*.csv` fixtures so the actuals suite is reproducible.
