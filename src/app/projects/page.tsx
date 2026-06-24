@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2, FileSpreadsheet } from "lucide-react";
+import { Folder, Plus, X, Layers, MapPin, Calendar, Hash, ExternalLink, Activity, Info, Trash2, Menu, Building2, FileSpreadsheet, Database } from "lucide-react";
 import { getProjects, saveProject, deleteProjectData } from "@/lib/db";
 import { MARKET_SECTORS, BID_OUTCOMES, DELIVERY_METHODS } from "@/lib/constants";
 import { Project, BidOutcome, DeliveryMethod } from "@/types/db";
@@ -138,6 +138,12 @@ export default function ProjectsDashboard() {
               className="flex items-center gap-2 bg-card hover:bg-background dark:bg-card dark:hover:bg-background text-blue-600 dark:text-blue-400 border border-grid-border hover:border-blue-500/50 dark:hover:border-blue-400/50 text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300"
             >
               <FileSpreadsheet size={18} /> Import Past Estimate
+            </Link>
+            <Link
+              href="/projects/import-actuals"
+              className="flex items-center gap-2 bg-card hover:bg-background dark:bg-card dark:hover:bg-background text-blue-600 dark:text-blue-400 border border-grid-border hover:border-blue-500/50 dark:hover:border-blue-400/50 text-sm px-5 py-3 rounded-lg cursor-pointer font-bold transition-all duration-300"
+            >
+              <Database size={18} /> Import Actuals
             </Link>
             <button
               onClick={() => setIsModalOpen(true)}

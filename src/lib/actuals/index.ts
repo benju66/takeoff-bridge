@@ -39,6 +39,15 @@ export {
 } from "./normalize";
 export { CsvActualsSource, type ActualsCsvPayloads } from "./csvSource";
 export {
+  classifyActualsCsv,
+  extractEmbeddedProjectToken,
+  suggestProjectMatch,
+  type ActualsExportKind,
+  type EmbeddedProjectToken,
+  type ProjectLike,
+  type ProjectMatchCandidate,
+} from "./ingest";
+export {
   buildBudgetSnapshotPayload,
   type BudgetSnapshotPayload,
   type BudgetSnapshotHeaderPayload,
