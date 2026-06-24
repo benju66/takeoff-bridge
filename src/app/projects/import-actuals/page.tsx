@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Upload, Database, CheckCircle2, AlertTriangle, ArrowLeft, Loader2, Building2,
-  FileText, Layers, X, Sparkles, Info, ScrollText,
+  FileText, Layers, X, Sparkles, Info, ScrollText, ChevronDown,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -386,6 +386,7 @@ export default function ImportActualsPage() {
                 <ScrollText size={13} className="text-violet-500" /> Per-code actuals
                 <span className="font-normal normal-case text-slate-500">{n.codeActuals.length} codes</span>
               </h3>
+              <NumbersLegend />
               <div className="max-h-96 overflow-y-auto border border-grid-border rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-background">
@@ -485,6 +486,66 @@ export default function ImportActualsPage() {
         )}
       </div>
     </ProtectedRoute>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Numbers legend — a collapsed, plain-language key for the per-code columns
+// (Total/EAC, Normalized, the blue highlight, the burden tag). Collapsed by
+// default via a native <details> so it never crowds the table.
+// ---------------------------------------------------------------------------
+
+function LegendRow({ term, children }: { term: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[8.5rem_1fr] gap-3 py-1.5 border-t border-grid-border first:border-t-0">
+      <dt className="text-[11px] font-bold text-foreground">{term}</dt>
+      <dd className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">{children}</dd>
+    </div>
+  );
+}
+
+function NumbersLegend() {
+  return (
+    <details className="group mb-3 rounded-lg border border-grid-border bg-background/60 dark:bg-slate-900/40">
+      <summary className="flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+        <Info size={13} className="text-blue-500 shrink-0" />
+        What do these numbers mean?
+        <ChevronDown size={14} className="ml-auto shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+      </summary>
+      <dl className="px-4 pb-4 pt-1">
+        <LegendRow term="Original budget">
+          The as-bid baseline (Procore &ldquo;Original Budget Amount&rdquo;) — what we <em>planned</em> to spend on this code.
+        </LegendRow>
+        <LegendRow term="Total (EAC)">
+          Estimated Cost at Completion — the real, all-in projected final cost, with <em>everything</em> included
+          (original work + owner extras + change orders). The authoritative actual; the app never alters it.
+        </LegendRow>
+        <LegendRow term="Normalized">
+          The EAC with the dollars that aren&rsquo;t original-bid-scope cost removed — owner extras, allowance
+          reconciles, and net-zero internal reclasses — while <em>keeping</em> in-scope buyout draws. &ldquo;What our
+          original scope actually cost,&rdquo; and the number a FINAL snapshot feeds into pricing history.
+        </LegendRow>
+        <LegendRow
+          term={<span className="text-blue-600 dark:text-blue-400">Normalized in blue</span>}
+        >
+          Flags a code where Normalized differs from its Total (EAC) — change-event classification adjusted it. A plain
+          (not blue) Normalized means a clean code: nothing was stripped, so raw cost = original-scope cost.
+        </LegendRow>
+        <LegendRow
+          term={<span className="text-[9px] uppercase tracking-wider text-amber-600 dark:text-amber-400">burden</span>}
+        >
+          Marks the Fee and GL-insurance markup codes, kept separate from direct cost.
+        </LegendRow>
+        <div className="mt-3 flex items-start gap-2 rounded-md bg-blue-50/50 dark:bg-blue-950/15 border border-blue-200 dark:border-blue-900/40 px-3 py-2">
+          <Sparkles size={12} className="text-blue-500 mt-0.5 shrink-0" />
+          <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+            <span className="font-semibold text-foreground">Example:</span> an owner-requested upgrade (Out of Scope)
+            adds $40K to a code&rsquo;s EAC. That&rsquo;s the owner&rsquo;s money, not our original bid scope — so it&rsquo;s
+            normalized out: that code&rsquo;s Normalized reads $40K below its Total (EAC), and the cell shows blue.
+          </p>
+        </div>
+      </dl>
+    </details>
   );
 }
 
