@@ -1,11 +1,13 @@
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
-import { Project, DivisionLayout, TemplateLayoutConfig } from "@/types/db";
+import { Project, DivisionLayout, TemplateLayoutConfig, EstimateSectionLine } from "@/types/db";
 import { DEFAULT_CURRENCY_DECIMALS, DEFAULT_QTY_DECIMALS, ESTIMATE_MODIFIERS, GC_MANUAL_DEFAULTS, isLinkedDivisionRow } from "./constants";
-import { computeTakeoffSummary, computeLinkedDivisionTotals, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
+import { computeTakeoffSummary, computeLinkedDivisionTotals, roundByRule, LinkedDivisionTotal, PersonnelCalcResult, SiteOpsCalcResult, TakeoffSummary } from "./calculations";
 import { escapeCSVField, buildNumFmt, getColumnLetter } from "./exportUtils";
 import { getDivisionCode } from "./division";
 import { resolveProcoreCode } from "./costCodeResolver";
 import { isValidProcoreCode } from "./procoreValidCodes";
+import { feeLineAmount, isMarkupLine } from "./sectionLines/markup";
+import { sectionLineTotalOverrideKey } from "./sectionLines/ids";
 import JSZip from "jszip";
 import { XMLParser, XMLBuilder } from "fast-xml-parser";
 
@@ -40,7 +42,10 @@ export function generateExcelPayload(
   linkedTotals?: LinkedDivisionTotal[],
   // Phase 5 (INV-1): active estimator overrides so the modifier rows carry the
   // EFFECTIVE (override-applied) values — on-screen == saved == exported.
-  overrides?: EstimateOverrideMap
+  overrides?: EstimateOverrideMap,
+  // Fee-block Phase 5: Division 60 markup fee lines, written as flat rows below the 7
+  // modifiers (the printout's fee block). Omitted/empty → byte-identical to before.
+  markupLines?: EstimateSectionLine[]
 ): string {
   assertNotImported(project);
   const csvLines: string[] = [];
@@ -183,6 +188,40 @@ export function generateExcelPayload(
     }
   }
 
+  // Division 60 markup fee lines (Phase 5): flat below-subtotal rows, written AFTER the 7
+  // modifiers — exactly where the engine folds in `additionalFees`. Each carries its rounded
+  // effective amount (override-aware), so the printout's fee block ties to the on-screen total.
+  // Written regardless of subtotal (a fee line can exist on an otherwise-empty estimate).
+  const payloadRoundingRule = project?.roundingRule ?? "none";
+  for (const line of (markupLines ?? []).filter(isMarkupLine)) {
+    const amount = effectiveFeeLineAmount(line, payloadRoundingRule, overrides);
+    const feeRow = activeCols.map((col) => {
+      if (col.type === "default") {
+        switch (col.id) {
+          case "costType":
+            return line.costType || "O";
+          case "itemId":
+            return line.procoreCode || "";
+          case "description":
+            return line.label || "";
+          case "matchedQty":
+            return 1;
+          case "uom":
+            return "LS";
+          case "unitPrice":
+            return amount.toFixed(2);
+          case "total":
+            return amount.toFixed(2);
+          default:
+            return "";
+        }
+      } else {
+        return "";
+      }
+    });
+    csvLines.push(feeRow.map(escapeCSVField).join(","));
+  }
+
   // Use \r\n for universal Windows and Excel spreadsheet compliance
   return csvLines.join("\r\n");
 }
@@ -203,7 +242,11 @@ export function generateProcoreBudget(
   siteOpsCalcResult: SiteOpsCalcResult,
   // Phase 5 (INV-1): active estimator overrides so the 60-xxxx modifier rows
   // carry the EFFECTIVE values — the Procore budget matches the on-screen total.
-  overrides?: EstimateOverrideMap
+  overrides?: EstimateOverrideMap,
+  // Fee-block Phase 5: each MAPPED Division 60 markup fee line joins the budget under its
+  // assigned procoreCode + stored costType (like the GC/Site-Ops lines). Unmapped fee lines
+  // are skipped here — they are blocked upstream by validateExportReadiness, never mis-routed.
+  markupLines?: EstimateSectionLine[]
 ): string {
   assertNotImported(project);
   const csvLines: string[] = [];
@@ -265,6 +308,30 @@ export function generateProcoreBudget(
     }
     groupings[groupKey].descriptions.add(line.desc);
     groupings[groupKey].totalCost += line.total;
+  }
+
+  // Division 60 markup fee lines (Phase 5): each MAPPED fee line joins the budget under its
+  // assigned procoreCode + stored costType, exactly like a GC/Site-Ops line. Unmapped/blank-coded
+  // fee lines are skipped (the export gate blocks them — AGENTS.md "No Speculative Changes"). The
+  // amount is the engine's effective (rounded, override-aware) dollar, so the CSV ties to screen.
+  const budgetRoundingRule = project?.roundingRule ?? "none";
+  for (const line of (markupLines ?? []).filter(isMarkupLine)) {
+    const costCode = (line.procoreCode || "").trim();
+    if (!isValidProcoreCode(costCode)) continue;
+    const amount = effectiveFeeLineAmount(line, budgetRoundingRule, overrides);
+    if (Math.abs(amount) <= RECONCILIATION_TOLERANCE) continue;
+    const costType = (line.costType || "").trim();
+    const groupKey = `${costCode}::${costType}`;
+    if (!groupings[groupKey]) {
+      groupings[groupKey] = {
+        costCode,
+        costType,
+        descriptions: new Set<string>(),
+        totalCost: 0,
+      };
+    }
+    groupings[groupKey].descriptions.add(line.label);
+    groupings[groupKey].totalCost += amount;
   }
 
   // Serialize grouped lines
@@ -457,6 +524,51 @@ export function rollupEffectiveModifiers(summary: TakeoffSummary): number {
   );
 }
 
+// ─── DIVISION 60 MARKUP FEE LINES (Phase 5 — fee-block addressability) ───────
+
+/**
+ * A markup fee line's EFFECTIVE dollar — the exact value the engine folds into
+ * `additionalFees` (calculations.ts): the flat `inputs.amount` rounded per the project
+ * rule, unless a `line:<id>:total` type-over substitutes it (mirroring the engine's
+ * per-line override path). One shared definition keeps the fee-block printout, the
+ * Procore CSV, and the workbook fee rows all tied to the on-screen total to the cent.
+ * NOT new math — it re-reads `feeLineAmount` + `roundByRule`, both calc-layer authorities.
+ */
+export function effectiveFeeLineAmount(
+  line: EstimateSectionLine,
+  roundingRule: string,
+  overrides?: EstimateOverrideMap
+): number {
+  const key = sectionLineTotalOverrideKey(line.id);
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, key) && typeof overrides[key] === "number") {
+    return overrides[key] as number;
+  }
+  return roundByRule(feeLineAmount(line), roundingRule);
+}
+
+/**
+ * Sums MAPPED markup fee lines by their granular Procore Budget Line Items code. A fee
+ * line is mapped only when its `procoreCode` is a valid `procore_cost_codes` entry
+ * (`isValidProcoreCode`) — an unmapped/blank-coded line is skipped here (it is BLOCKED by
+ * `validateExportReadiness`, never silently mis-routed — AGENTS.md). Mirrors
+ * `rollupGcSiteOps`; accumulates (never overwrites) so two fee lines on one code sum.
+ * The summed value is exactly the dollars the Procore CSV writes for fees, so the Reconcile
+ * grand-total tie (Σ scope + modifiers + this) closes when every fee line is mapped.
+ */
+export function rollupMarkupLines(
+  markupLines: EstimateSectionLine[] | undefined,
+  roundingRule: string,
+  overrides?: EstimateOverrideMap
+): Record<string, number> {
+  const rollup: Record<string, number> = {};
+  for (const line of (markupLines ?? []).filter(isMarkupLine)) {
+    const code = (line.procoreCode || "").trim();
+    if (!isValidProcoreCode(code)) continue;
+    rollup[code] = (rollup[code] || 0) + effectiveFeeLineAmount(line, roundingRule, overrides);
+  }
+  return rollup;
+}
+
 /** A row whose dollars cannot be placed on any Procore Budget Line Items code. */
 export interface ExportBlocker {
   rowId: string;
@@ -464,12 +576,14 @@ export interface ExportBlocker {
   description: string;
   amount: number;
   /**
-   * Which surface fixes this blocker (Phase B5 / D1). `'takeoff'` (default) = an unmapped
-   * STEP 4 takeoff row → routes to the ExportOverrideModal. `'oneOff'` = a GC/Site-Ops one-off
-   * line carrying dollars without a valid Procore code → fixed by assigning the code on
-   * Step 2/3 (the override modal cannot touch it), so the handler surfaces a clear message.
+   * Which surface fixes this blocker (Phase B5 / D1; fee-block Phase 5). `'takeoff'` (default) =
+   * an unmapped STEP 4 takeoff row → routes to the ExportOverrideModal. `'oneOff'` = a GC/Site-Ops
+   * one-off line carrying dollars without a valid Procore code → fixed by assigning the code on
+   * Step 2/3 (the override modal cannot touch it). `'feeLine'` = a Division 60 markup fee line
+   * carrying dollars without a valid Procore code → fixed by assigning the code in the fee block.
+   * Both `'oneOff'` and `'feeLine'` surface a clear, line-named message instead of the modal.
    */
-  kind?: 'takeoff' | 'oneOff';
+  kind?: 'takeoff' | 'oneOff' | 'feeLine';
 }
 
 export interface ExportReadiness {
@@ -501,7 +615,13 @@ export function validateExportReadiness(
      * be app defaults a finished bid never carried).
      */
     importedLinkedBasis?: boolean;
-  }
+  },
+  // Fee-block Phase 5: Division 60 markup fee lines. A fee line carrying dollars without a
+  // valid Procore code BLOCKS the export (kind 'feeLine') — never silently mis-routed. Fee
+  // dollars stay OUT of the scope reconciliation below: they are flat below-subtotal addends
+  // (like the 7 modifiers), so the scope tie still represents the subtotal/BLI sheet. Their
+  // grand-total tie lives in the Reconcile model (feeRollupTotal). Omitted/empty → fully inert.
+  markupLines?: EstimateSectionLine[]
 ): ExportReadiness {
   const blockers: ExportBlocker[] = [];
   let lineItemTotal = 0;
@@ -554,6 +674,25 @@ export function validateExportReadiness(
       });
     }
   }
+  // Division 60 markup fee lines (Phase 5). A fee line carrying dollars whose Procore code is
+  // NOT a valid `procore_cost_codes` entry blocks the export (kind 'feeLine') — fixed by
+  // assigning the code in the fee block, not the takeoff override modal. Fee dollars are NOT
+  // folded into lineItemTotal/rollupTotal: they are below-subtotal addends (like the modifiers,
+  // also excluded), so the scope tie keeps representing the subtotal/BLI-sheet rollup. With no
+  // fee lines this loop is inert and a default project stays byte-identical.
+  for (const line of (markupLines ?? []).filter(isMarkupLine)) {
+    const amount = feeLineAmount(line);
+    if (Math.abs(amount) <= RECONCILIATION_TOLERANCE) continue;
+    if (!isValidProcoreCode((line.procoreCode || "").trim())) {
+      blockers.push({
+        rowId: line.id,
+        itemId: line.procoreCode || "",
+        description: line.label,
+        amount,
+        kind: 'feeLine',
+      });
+    }
+  }
   const rollupTotal =
     Object.values(rollupByProcoreCode(rows)).reduce((s, v) => s + v, 0) +
     Object.values(rollupGcSiteOps(gcSiteOpsLines)).reduce((s, v) => s + v, 0);
@@ -601,10 +740,16 @@ function assertWorkbookInputs(
  * from divisions whose endRow < R). This correctly handles the fact that
  * insertions at different division boundaries shift downstream rows by
  * different cumulative amounts.
+ *
+ * Fee-block Phase 5: an optional `feeInsertion` adds one more threshold — the markup fee
+ * rows inserted between the last modifier and the grand total. Any ORIGINAL row below that
+ * threshold (the grand total, recon rows, the STEP 2 → I341 cross-sheet ref, print area)
+ * gets the extra fee shift, while the subtotal/modifiers (at or above the threshold) do not.
  */
 function buildRowShifter(
   divisions: DivisionLayout[],
-  insertionCounts: Record<string, number>
+  insertionCounts: Record<string, number>,
+  feeInsertion?: { threshold: number; count: number }
 ): (originalRow: number) => number {
   // Build sorted array of { threshold, count } pairs.
   // Rows strictly AFTER div.endRow are shifted by that division's insertion count.
@@ -614,6 +759,9 @@ function buildRowShifter(
     if (count > 0) {
       shiftEntries.push({ threshold: div.endRow, count });
     }
+  }
+  if (feeInsertion && feeInsertion.count > 0) {
+    shiftEntries.push(feeInsertion);
   }
   // Sort by threshold ascending (should already be in order from the layout config)
   shiftEntries.sort((a, b) => a.threshold - b.threshold);
@@ -1301,7 +1449,12 @@ export async function generateExcelWorkbook(
   // the STEP 4 summary block (subtotal / 7 modifiers / total) is written as
   // VALUES equal to the engine's effective numbers — so the exported workbook
   // total matches the on-screen/saved total to the cent. Inert when empty.
-  overrides?: EstimateOverrideMap
+  overrides?: EstimateOverrideMap,
+  // Fee-block Phase 5: Division 60 markup fee lines. Each is written as a flat row in the
+  // STEP 4 fee block (between the 7 modifiers and the grand total — where the engine folds in
+  // `additionalFees`), inserted via the same row-shift machinery the division overflow uses, so
+  // the grand-total SUM auto-spans them and the exported TOTAL ties to the engine. Inert when empty.
+  markupLines?: EstimateSectionLine[]
 ): Promise<Blob> {
   // ── PHASE 1: ZIP Open + XML Extraction ──────────────────────────────────────
 
@@ -1682,7 +1835,11 @@ export async function generateExcelWorkbook(
       roundingRule: projectMetadata?.roundingRule ?? "none",
     },
     linkedDivisionTotals,
-    overrides
+    overrides,
+    // Fee-block Phase 5: the markup lines so the OVERRIDE-path grand-total VALUE includes
+    // `additionalFees` (with no overrides the total is a SUM formula that already spans the
+    // inserted fee rows; inert when there are no fee lines).
+    markupLines
   );
   const writeSummaryValues = Object.keys(step4Summary.overrides ?? {}).length > 0;
   const modifierEffectiveValues: Record<string, number> = {
@@ -1746,8 +1903,44 @@ export async function generateExcelWorkbook(
     if (pModCell) setCellFormula(pModCell, `I${r}`);
   }
 
-  // Grand Total row (= subtotal + grandTotalOffset; the SUM spans the rows between them)
-  const totalRowIdx = subtotalRowIdx + anchors.grandTotalOffset;
+  // ── Division 60 markup fee lines (Phase 5): flat below-subtotal rows ──────────
+  // Each fee line is inserted as a REAL row in the fee block — between the last modifier
+  // (subtotalRowIdx + modifierEndOffset) and the grand total — exactly where the engine folds in
+  // `additionalFees`. The empty template spare row (340) is the insertion point, so the grand
+  // total / recon / spare slide down together (the same row-shift machinery the division overflow
+  // uses). The grand-total SUM and recon E347 are rewritten below over the shifted span, so they
+  // auto-include every fee row. Each fee dollar is the engine's effective (rounded, override-aware)
+  // value written as a VALUE in column I, so the SUM ties to the engine total to the cent. Cells go
+  // in ascending column order (A, C, D, G, I — CLAUDE.md). No fee lines → inert (feeRowShift 0).
+  const feeRoundingRule = projectMetadata?.roundingRule ?? "none";
+  const feeLines = (markupLines ?? []).filter(isMarkupLine);
+  let feeRowShift = 0;
+  if (feeLines.length > 0) {
+    const feeBlockStartRow = subtotalRowIdx + anchors.modifierEndOffset + 1;
+    // Clone the first modifier row so each fee row inherits the fee-block styling.
+    const feeStyleRowEl = findRowElement(sheetDataChildren, subtotalRowIdx + anchors.modifierStartOffset);
+    shiftRowElements(sheetDataChildren, feeBlockStartRow, feeLines.length);
+    feeLines.forEach((line, i) => {
+      const r = feeBlockStartRow + i;
+      const amount = effectiveFeeLineAmount(line, feeRoundingRule, overrides);
+      const newRow = feeStyleRowEl
+        ? cloneRowElement(feeStyleRowEl, r)
+        : { row: [], ":@": { "@_r": String(r) } };
+      const styleOf = (col: string) => (feeStyleRowEl ? getStyleFromRow(feeStyleRowEl, col) : "0");
+      // Ascending column order: A → C → D → G → I. C is always written (even empty) so a cloned
+      // shared-string cell can never dangle without a value.
+      setCellInlineString(getOrCreateCell(newRow, "A", r, styleOf("A")), line.costType || "O");
+      setCellInlineString(getOrCreateCell(newRow, "C", r, styleOf("C")), (line.procoreCode || "").trim());
+      setCellInlineString(getOrCreateCell(newRow, "D", r, styleOf("D")), line.label || "");
+      setCellInlineString(getOrCreateCell(newRow, "G", r, styleOf("G")), "LS");
+      setCellValue(getOrCreateCell(newRow, "I", r, styleOf("I")), amount);
+      insertRowElement(sheetDataChildren, newRow);
+    });
+    feeRowShift = feeLines.length;
+  }
+
+  // Grand Total row (= subtotal + grandTotalOffset + fee rows; the SUM spans the rows between them)
+  const totalRowIdx = subtotalRowIdx + anchors.grandTotalOffset + feeRowShift;
   const totalRowEl = findRowElement(sheetDataChildren, totalRowIdx);
   if (totalRowEl) {
     // Grand total: the effective value when overrides are active (a direct
@@ -1770,8 +1963,9 @@ export async function generateExcelWorkbook(
     if (pTotal) setCellFormula(pTotal, `SUM(P${dataStartRow}:P${totalRowIdx - 1})`);
   }
 
-  // Reconciliation rows (4 rows starting at anchors.reconStartRow)
-  const reconStartRow = anchors.reconStartRow + rowShift;
+  // Reconciliation rows (4 rows starting at anchors.reconStartRow). They sit BELOW the fee
+  // block, so they shift by the division rowShift AND the inserted fee rows (feeRowShift).
+  const reconStartRow = anchors.reconStartRow + rowShift + feeRowShift;
 
   // Recon row 1 (template row 346): "Totals from Column E"
   const reconRow1 = findRowElement(sheetDataChildren, reconStartRow);
@@ -1837,27 +2031,34 @@ export async function generateExcelWorkbook(
 
   // ── PHASE 3: Metadata Updates + ZIP Write ──────────────────────────────────
 
-  const shiftRow = buildRowShifter(layoutConfig.divisions, insertionsByDivision);
+  // Fee-block Phase 5: the shifter also knows the inserted fee rows — any ORIGINAL row below the
+  // last modifier (the grand total, recon, the STEP 2 → I341 cross-sheet ref, print area, recon
+  // merge) shifts by the division rowShift AND feeRowShift. Inert (no extra entry) when no fees.
+  const shiftRow = buildRowShifter(layoutConfig.divisions, insertionsByDivision, {
+    threshold: anchors.subtotalRow + anchors.modifierEndOffset,
+    count: feeRowShift,
+  });
 
   // Derived boundaries (see TemplateLayoutAnchors): last data row sits just
   // above the subtotal; the sheet ends at the last of the 4 recon rows.
   const dataEndRow = anchors.subtotalRow - 1;
   const sheetEndRow = anchors.reconStartRow + 3;
 
-  // 3a: Update AutoFilter range (column-header row spans the data region)
+  // 3a: Update AutoFilter range (column-header row spans the data region — ABOVE the fee block,
+  // so only the division rowShift applies; the inserted fee rows never enter the filter range)
   step4Xml = step4Xml.replace(
     /(<autoFilter[^>]*ref=")[^"]+(")/,
     `$1A${dataStartRow - 1}:K${dataEndRow + rowShift}$2`
   );
 
-  // 3a: Update Dimension
+  // 3a: Update Dimension (sheet end is below the fee block — add feeRowShift too)
   step4Xml = step4Xml.replace(
     /(<dimension[^>]*ref=")[^"]+(")/,
-    `$1B1:U${sheetEndRow + rowShift}$2`
+    `$1B1:U${sheetEndRow + rowShift + feeRowShift}$2`
   );
 
-  // 3a: Update MergeCells — shift row numbers
-  if (rowShift > 0) {
+  // 3a: Update MergeCells — shift row numbers (shiftRow carries the fee shift for recon merges)
+  if (rowShift > 0 || feeRowShift > 0) {
     step4Xml = step4Xml.replace(
       /<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/g,
       (_match: string, col1: string, row1Str: string, col2: string, row2Str: string) => {
@@ -1879,15 +2080,17 @@ export async function generateExcelWorkbook(
   wbXml = wbXml.replace(/<definedName[^>]*>[^<]*\[\d+\][^<]*<\/definedName>/g, "");
 
   // 3c: Update Print Area for STEP 4
-  // Find the _xlnm.Print_Area for STEP 4 and update its row references
-  if (rowShift > 0) {
+  // Find the _xlnm.Print_Area for STEP 4 and update its end row reference. shiftRow carries both
+  // the division rowShift and the inserted fee rows, so the print area (ends at the grand-total
+  // region) extends over the fee block too.
+  if (rowShift > 0 || feeRowShift > 0) {
     wbXml = wbXml.replace(
       /(<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>[^<]*\$)(\d+)(<\/definedName>)/g,
       (_match: string, prefix: string, rowStr: string, suffix: string) => {
         const origRow = parseInt(rowStr, 10);
         // Only shift rows in the range that's above the data region boundary
         if (origRow > dataEndRow) {
-          return `${prefix}${origRow + rowShift}${suffix}`;
+          return `${prefix}${shiftRow(origRow)}${suffix}`;
         }
         return `${prefix}${rowStr}${suffix}`;
       }
@@ -1895,7 +2098,7 @@ export async function generateExcelWorkbook(
   }
 
   // 3d: Cross-sheet formula row shifting + #REF! fix
-  if (rowShift > 0) {
+  if (rowShift > 0 || feeRowShift > 0) {
     const crossSheetNames = [
       "COVER", "STEP 2 - GCs", "STEP 3 - SITE OPS", "PER DIEM", sheetNames.budgetLineItems
     ];

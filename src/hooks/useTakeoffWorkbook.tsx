@@ -370,7 +370,7 @@ export function useTakeoffWorkbook(
     isExportingExcel, exportError, setExportError,
     exportBlockers, pendingExportKind, clearExportBlockers,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
-  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult, activeOverrides);
+  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult, activeOverrides, markupLines);
 
   // ---------------------------------------------------------------------------
   // Export override — assign granular Procore codes to blocker rows.

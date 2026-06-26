@@ -240,6 +240,12 @@ export interface BuildReconciliationArgs {
   summary: TakeoffSummary;
   /** Σ effective modifiers (exporter.rollupEffectiveModifiers) — the 60-xxxx dollars. */
   modifierRollupTotal: number;
+  /**
+   * Σ MAPPED Division 60 markup fee lines (exporter.rollupMarkupLines) — the flat fee dollars the
+   * Procore CSV writes under their assigned BLI codes (fee-block Phase 5). Folded into the full
+   * Procore budget so the grand-total tie closes when every fee line is mapped. Default 0 → inert.
+   */
+  feeRollupTotal?: number;
   /** Active rounding rule key (e.g. "dollar"). */
   roundingMode: string;
   /** Cent-level tie tolerance (exporter.RECONCILIATION_TOLERANCE). */
@@ -273,6 +279,7 @@ export function buildReconciliationModel({
   blockerCount,
   summary,
   modifierRollupTotal,
+  feeRollupTotal = 0,
   roundingMode,
   tolerance,
 }: BuildReconciliationArgs): ReconciliationModel {
@@ -286,7 +293,9 @@ export function buildReconciliationModel({
   };
 
   const totalEstimatedCost = summary.totalEstimatedCost;
-  const fullProcoreBudgetTotal = reconciliation.rollupTotal + modifierRollupTotal;
+  // Full Procore budget = scope rollup + the 7 %-modifiers + the mapped flat fee lines (Phase 5).
+  // With no fee lines feeRollupTotal is 0 and this is byte-identical to the pre-Phase-5 model.
+  const fullProcoreBudgetTotal = reconciliation.rollupTotal + modifierRollupTotal + feeRollupTotal;
   const grandDelta = totalEstimatedCost - fullProcoreBudgetTotal;
   const grandTolerance = roundingResidualBound(roundingMode) + tolerance;
   const grandOk = Math.abs(grandDelta) <= grandTolerance;

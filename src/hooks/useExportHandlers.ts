@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
-import { Project } from "@/types/db";
+import { Project, EstimateSectionLine } from "@/types/db";
 import { PersonnelCalcResult, SiteOpsCalcResult, computeLinkedDivisionTotals } from "@/lib/calculations";
 import {
   generateExcelPayload,
@@ -49,6 +49,10 @@ export function useExportHandlers(
   // generators so the exported numbers == the on-screen/saved numbers. `{}`
   // (the default) keeps every export byte-identical to pre-override behavior.
   activeOverrides: EstimateOverrideMap = {},
+  // Fee-block Phase 5: Division 60 markup fee lines, threaded into the gate + all three
+  // generators so a fee line shows in the printout, rolls up to its Procore BLI, and an
+  // unmapped one blocks the export. `[]` (default) keeps every export byte-identical.
+  markupLines: EstimateSectionLine[] = [],
 ): UseExportHandlersReturn {
   // Export state
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -83,17 +87,18 @@ export function useExportHandlers(
    * exportError. Remembers which export to retry after overrides are applied.
    */
   const runExportGate = (effectiveRows: ProcessedTakeoffRow[], kind: PendingExportKind): boolean => {
-    const readiness = validateExportReadiness(effectiveRows, gcCalcResult, siteOpsCalcResult);
+    const readiness = validateExportReadiness(effectiveRows, gcCalcResult, siteOpsCalcResult, undefined, markupLines);
     if (readiness.ok) {
       clearExportBlockers();
       return true;
     }
-    // Phase B5 (D1): one-off GC/Site-Ops lines without a valid Procore code can't be fixed by
-    // the takeoff-row override modal — they're coded on Step 2/3. Surface a clear, line-named
-    // message and prioritize them (the user fixes these first), so we never open the modal on
-    // a blocker it can't resolve.
+    // Phase B5 (D1) + fee-block Phase 5: one-off GC/Site-Ops lines (coded on Step 2/3) and
+    // Division 60 markup fee lines (coded in the fee block) without a valid Procore code can't be
+    // fixed by the takeoff-row override modal. Surface a clear, line-named message and prioritize
+    // them, so we never open the modal on a blocker it can't resolve.
     const oneOffBlockers = readiness.blockers.filter((b) => b.kind === "oneOff");
-    const takeoffBlockers = readiness.blockers.filter((b) => b.kind !== "oneOff");
+    const feeLineBlockers = readiness.blockers.filter((b) => b.kind === "feeLine");
+    const takeoffBlockers = readiness.blockers.filter((b) => b.kind !== "oneOff" && b.kind !== "feeLine");
     if (oneOffBlockers.length > 0) {
       const detail = oneOffBlockers
         .map((b) => `"${b.description}" ($${b.amount.toFixed(2)})`)
@@ -102,6 +107,15 @@ export function useExportHandlers(
         `Export blocked: ${oneOffBlockers.length} one-off line${oneOffBlockers.length === 1 ? "" : "s"} ` +
           `need${oneOffBlockers.length === 1 ? "s" : ""} a valid Procore code before export — ` +
           `assign it in the line's Code cell on Step 2/3: ${detail}.`
+      );
+    } else if (feeLineBlockers.length > 0) {
+      const detail = feeLineBlockers
+        .map((b) => `"${b.description}" ($${b.amount.toFixed(2)})`)
+        .join(", ");
+      setExportError(
+        `Export blocked: ${feeLineBlockers.length} fee line${feeLineBlockers.length === 1 ? "" : "s"} ` +
+          `need${feeLineBlockers.length === 1 ? "s" : ""} a valid Procore code before export — ` +
+          `assign it in the line's Code cell in the Division 60 fee block: ${detail}.`
       );
     } else if (takeoffBlockers.length > 0) {
       setPendingExportKind(kind);
@@ -132,7 +146,7 @@ export function useExportHandlers(
     // Linked division values keep the payload's rows + modifier basis in
     // step with the estimate page (gc-siteops Phase 5).
     const linkedTotals = computeLinkedDivisionTotals(gcCalcResult, siteOpsCalcResult);
-    const payload = generateExcelPayload(rows, columnDefs, project, linkedTotals, activeOverrides);
+    const payload = generateExcelPayload(rows, columnDefs, project, linkedTotals, activeOverrides, markupLines);
     downloadCSVFile(payload, `takeoff_excel_${projectId}.csv`);
   };
 
@@ -140,7 +154,7 @@ export function useExportHandlers(
     if (guardImported()) return;
     const effectiveRows = Array.isArray(overrideRows) ? overrideRows : rows;
     if (!runExportGate(effectiveRows, "procore")) return;
-    const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult, activeOverrides);
+    const payload = generateProcoreBudget(effectiveRows, project, gcCalcResult, siteOpsCalcResult, activeOverrides, markupLines);
     downloadCSVFile(payload, `procore_budget_${projectId}.csv`);
 
     // Export milestone snapshot (Phase 4): the exact version sent to Procore. Fire-and-
@@ -170,7 +184,7 @@ export function useExportHandlers(
       }
 
       // 2. Generate Excel workbook using the relative shifting engine
-      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer, gcCalcResult, siteOpsCalcResult, activeOverrides);
+      const blob = await generateExcelWorkbook(effectiveRows, project, columnDefs, config.configData, templateBuffer, gcCalcResult, siteOpsCalcResult, activeOverrides, markupLines);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);

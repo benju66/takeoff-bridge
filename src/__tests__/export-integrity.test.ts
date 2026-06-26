@@ -14,8 +14,10 @@ import {
 import { buildReconciliationModel } from "../lib/trustInspector";
 import { computePersonnelCosts, computeSiteOperations, computeLinkedDivisionTotals, computeTakeoffSummary } from "../lib/calculations";
 import { LINKED_DIVISION_ROWS } from "../lib/constants";
+import { newFeeLine } from "../lib/sectionLines/markup";
+import { validateOneOffCode } from "../lib/sectionLines/oneOff";
 import type { ProcessedTakeoffRow, ColumnDefinition, EstimateOverrideMap } from "@/types";
-import type { Project } from "@/types/db";
+import type { Project, EstimateSectionLine } from "@/types/db";
 import fs from "fs";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
@@ -1384,4 +1386,153 @@ describe("Export applies overrides (Phase 5 — INV-1)", () => {
     expect(model.hasDirectOverride).toBe(true);
     expect(model.scope.ok).toBe(true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Division 60 Fee-Block Addressability — Phase 5 export ($0.00 golden)
+// ---------------------------------------------------------------------------
+//
+// A flat markup fee line is written into the STEP 4 fee block (the empty spare row 340,
+// between the 7 modifiers and the grand total) via the same row-insertion the division
+// overflow uses. The grand-total SUM is rewritten to span the inserted fee row, so the
+// exported TOTAL ties to computeTakeoffSummary(...).totalEstimatedCost to the cent.
+
+describe("Division 60 fee block export (Phase 5)", () => {
+  const mockColumns: ColumnDefinition[] = [
+    { id: "costType", header: "TYPE", type: "default" },
+    { id: "itemId", header: "Code", type: "default" },
+    { id: "description", header: "Description", type: "default" },
+    { id: "matchedQty", header: "Quantity", type: "default" },
+    { id: "uom", header: "Unit", type: "default" },
+    { id: "unitPrice", header: "Rate", type: "default" },
+    { id: "total", header: "Total", type: "default" },
+  ];
+
+  const mockProject: Project = {
+    id: "project-fee",
+    name: "Phase 5 Fee Block Export",
+    location: "Minneapolis, MN",
+    squareFootage: 10000,
+    unitCount: 100,
+    bidDate: "2026-06-26",
+    createdAt: new Date().toISOString(),
+    constructionContingencyRate: 0,
+    designContingencyRate: 0,
+    buildersRiskRate: 0,
+    specialInsuranceRate: 0,
+    glInsuranceRate: 0.01,
+    bondRate: 0,
+    feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const summaryRates = {
+    constructionContingencyRate: 0, designContingencyRate: 0, buildersRiskRate: 0,
+    specialInsuranceRate: 0, glInsuranceRate: 0.01, bondRate: 0, feeRate: 0.05,
+    roundingRule: "none",
+  };
+
+  const baseRow = (over: Partial<ProcessedTakeoffRow>): ProcessedTakeoffRow => ({
+    id: "row-x", classification: "", itemId: "", procoreParentCode: "", procoreCode: "",
+    description: "", matchedQty: 0, uom: "LS", unitPrice: 0, total: 0,
+    isMapped: true, rawQuantities: [], costType: "M", customFields: {}, source: "template",
+    ...over,
+  });
+
+  // One mapped concrete row on a pre-existing template row (no insertions) → subtotal $10,000.
+  const rows = [
+    baseRow({
+      id: "row-03-0000.001", itemId: "03-0000.001",
+      procoreParentCode: "3-30000.000", procoreCode: "3-30000.000",
+      description: "Cast In-Place Concrete", matchedQty: 100, unitPrice: 100, uom: "CY",
+    }),
+  ];
+
+  // A MAPPED $2,500 fee line — code resolved through the one-off validator (never guessed).
+  const feeCheck = validateOneOffCode("1-10001.000");
+  const feeCostType = feeCheck.ok ? feeCheck.costType : "M";
+  const feeLine = (): EstimateSectionLine => ({
+    ...newFeeLine({ label: "Preconstruction Fee", amount: 2500, procoreCode: "1-10001.000" }),
+    id: "markup:fee:precon",
+    costType: feeCostType,
+  });
+
+  async function loadStep4(blob: Blob) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await blob.arrayBuffer()) as never);
+    return workbook.getWorksheet("STEP 4 - ESTIMATE")!;
+  }
+
+  it("writes the fee line into the spare row and the grand-total SUM spans it", async () => {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const blob = await generateExcelWorkbook(
+      rows, mockProject, mockColumns, mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer, zeroGcResult(), zeroSiteOpsResult(), undefined, [feeLine()],
+    );
+    const ws = await loadStep4(blob);
+
+    // Fee row lands on the spare row 340 (no division insertions in this fixture).
+    expect(ws.getCell("C340").value).toBe("1-10001.000");
+    expect(ws.getCell("D340").value).toBe("Preconstruction Fee");
+    expect(ws.getCell("G340").value).toBe("LS");
+    expect(ws.getCell("I340").value).toBe(2500);
+    expect(ws.getCell("A340").value).toBe(feeCostType);
+
+    // Subtotal unchanged; grand total shifted to 342 and its SUM spans the fee row (I341).
+    expect((ws.getCell("I331").value as { formula?: string }).formula).toBe("SUM(I10:I330)");
+    expect((ws.getCell("I342").value as { formula?: string }).formula).toBe("SUM(I331:I341)");
+    // Modifiers stay at 333–339 on the original $I$331 basis.
+    expect((ws.getCell("I339").value as { formula?: string }).formula).toBe("F339*$I$331");
+    // Recon shifts by the fee row (reconStartRow 346 → 347): "Contingency, Insurance and Fee"
+    // (row 348) now spans I332:I341, and the "Equals Totals from Column I" check (row 350) ties
+    // E349 to the shifted grand total I342.
+    expect((ws.getCell("E348").value as { formula?: string }).formula).toBe("SUM(I332:I341)");
+    expect((ws.getCell("E350").value as { formula?: string }).formula).toBe("E349=I342");
+
+    // Engine tie: the exported SUM(I331:I341) = subtotal + 7 modifiers + the $2,500 fee row,
+    // which is exactly the engine total (the spare-row insertion raises it by additionalFees).
+    const summary = computeTakeoffSummary(rows, 10000, 100, summaryRates, [], {}, [feeLine()]);
+    expect(summary.additionalFees).toBe(2500);
+    expect(summary.totalEstimatedCost).toBe(13100); // 10,000 + GL 100 + Fee 500 + 2,500
+
+    // No corruption: no shared formulas left in STEP 4, no #REF! anywhere.
+    let shared = 0;
+    ws.eachRow((row) => row.eachCell((cell) => {
+      const v = cell.value as { sharedFormula?: unknown } | null;
+      if (v && typeof v === "object" && v.sharedFormula !== undefined) shared++;
+    }));
+    expect(shared).toBe(0);
+    const outputZip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const step4Xml = await outputZip.file("xl/worksheets/sheet7.xml")!.async("string");
+    expect(step4Xml).not.toContain("#REF!");
+  }, 30000);
+
+  it("with an override active the grand-total VALUE ties to the on-screen total (incl. the fee)", async () => {
+    const ov: EstimateOverrideMap = { fee: 5000 };
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const blob = await generateExcelWorkbook(
+      rows, mockProject, mockColumns, mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer, zeroGcResult(), zeroSiteOpsResult(), ov, [feeLine()],
+    );
+    const ws = await loadStep4(blob);
+
+    // Override path writes VALUES; the grand total includes the $2,500 fee addend.
+    const onScreen = computeTakeoffSummary(rows, 10000, 100, summaryRates, [], ov, [feeLine()]).totalEstimatedCost;
+    expect(onScreen).toBe(17600); // 10,000 + Fee 5,000 + GL 100 + 2,500
+    expect(ws.getCell("I340").value).toBe(2500);   // fee row value
+    expect(ws.getCell("I342").value).toBe(17600);  // grand-total VALUE
+    expect(ws.getCell("I342").value).toBe(onScreen);
+  }, 30000);
+
+  it("no fee lines → fee block byte-identical (grand total stays SUM(I331:I340))", async () => {
+    const templateBuffer = fs.readFileSync(MASTER_TEMPLATE_PATH);
+    const blob = await generateExcelWorkbook(
+      rows, mockProject, mockColumns, mockLayoutConfig,
+      templateBuffer as unknown as ArrayBuffer, zeroGcResult(), zeroSiteOpsResult(), undefined, [],
+    );
+    const ws = await loadStep4(blob);
+    expect((ws.getCell("I341").value as { formula?: string }).formula).toBe("SUM(I331:I340)");
+    // Row 340 stays empty (no fee row written).
+    expect(ws.getCell("I340").value == null || ws.getCell("I340").value === "").toBe(true);
+  }, 30000);
 });

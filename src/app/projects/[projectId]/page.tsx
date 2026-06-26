@@ -27,7 +27,7 @@ import { isLinkedDivisionRow } from "@/lib/constants";
 import { sectionTotalsFromLinked } from "@/lib/importEstimate";
 import { synthesizeImportedSectionLines } from "@/lib/sectionLines/imported";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
-import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
+import { validateExportReadiness, rollupEffectiveModifiers, rollupMarkupLines, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
@@ -329,17 +329,26 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       rows,
       personnel.calcResult,
       infrastructure.calcResult,
-      project?.isImported ? { importedLinkedBasis: true } : undefined
+      project?.isImported ? { importedLinkedBasis: true } : undefined,
+      // Fee-block Phase 5: an unmapped fee line carrying dollars surfaces as a blocker here, so the
+      // chip flags it the same way the export gate does.
+      markupLines
     );
+    // The MAPPED fee dollars that ride the Procore CSV under their assigned BLI codes. Folding them
+    // into the full Procore budget closes the grand-total delta a fee line otherwise opens (Phase 5).
+    const feeRollupTotal = Object.values(
+      rollupMarkupLines(markupLines, summaryRates.roundingRule, activeOverrides)
+    ).reduce((s, v) => s + v, 0);
     return buildReconciliationModel({
       reconciliation: readiness.reconciliation,
       blockerCount: readiness.blockers.length,
       summary: fullTakeoffSummary,
       modifierRollupTotal: rollupEffectiveModifiers(fullTakeoffSummary),
+      feeRollupTotal,
       roundingMode: summaryRates.roundingRule,
       tolerance: RECONCILIATION_TOLERANCE,
     });
-  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates, project?.isImported]);
+  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates, project?.isImported, markupLines, activeOverrides]);
 
   // Phase 5 slice 4 — the override WRITE path. The Trust Inspector's editor builds the
   // payload (pure overrideSetter.ts); this records the immutable event and re-syncs the
