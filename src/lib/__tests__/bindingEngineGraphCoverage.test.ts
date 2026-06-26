@@ -9,7 +9,7 @@
  *      switch branch would emit nothing (caught); a namespace leak would be caught too.
  *   2. UNION COMPLETENESS — the `ALL_ENGINE_TIERS` node set is the disjoint union of the
  *      per-tier sets (no cross-tier id collision) and covers every engine-produced value:
- *      all 13 summary fields, every GC aggregate + one leaf-total per GC line, every Site-Ops
+ *      all 14 summary fields, every GC aggregate + one leaf-total per GC line, every Site-Ops
  *      aggregate + all 8 sections + one leaf-total per Site-Ops line, and one division total
  *      per present STEP 4 division.
  *   3. PERF — assembling + evaluating the full graph at the seam stays well under budget.
@@ -56,6 +56,7 @@ const ALL_SUMMARY_FIELDS = [
   "glInsurance",
   "bond",
   "fee",
+  "additionalFees",
   "totalEstimatedCost",
   "costPerSf",
   "costPerUnit",
@@ -157,7 +158,7 @@ describe("engine graph coverage — the union covers every engine-produced value
     expect(ids.size).toBe(full.length); // all ids unique
   });
 
-  it("covers all 13 summary fields", () => {
+  it("covers all 14 summary fields", () => {
     for (const f of ALL_SUMMARY_FIELDS) expect(ids.has(summaryNodeId(f))).toBe(true);
   });
 

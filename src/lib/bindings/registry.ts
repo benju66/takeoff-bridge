@@ -646,16 +646,17 @@ const SITE_OPS_LEAF_LABELS: Record<string, string> = (() => {
 })();
 
 /**
- * Friendly labels for the 13 `summary:<field>` nodes (Bucket B), so the Links view reads a
+ * Friendly labels for the 14 `summary:<field>` nodes (Bucket B), so the Links view reads a
  * STEP 4 summary value as e.g. "Summary · 60-4000.001 · Fee" or "Summary · Cost / SF" instead
  * of the raw internal field key. The 7 modifiers reuse `ESTIMATE_MODIFIERS` (label + STEP 4
- * code, drift-free); the computed rollups (subtotal / total / cost-per-metric) carry no single
- * cost code, so they show their friendly name only.
+ * code, drift-free); the computed rollups (subtotal / total / cost-per-metric / additional fees)
+ * carry no single cost code, so they show their friendly name only.
  */
 const SUMMARY_FIELD_LABELS: Record<string, string> = {
   takeoffSubtotal: "Takeoff subtotal",
   linkedDivisionsTotal: "Linked divisions total",
   subtotal: "Subtotal",
+  additionalFees: "Additional fees (Division 60)",
   totalEstimatedCost: "Total Estimated Cost",
   costPerSf: "Cost / SF",
   costPerUnit: "Cost / Unit",
