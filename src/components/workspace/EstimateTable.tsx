@@ -17,10 +17,11 @@ import type { Column } from "@tanstack/react-table";
 import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2, Layers } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
-import { Project, DivisionLayout } from "@/types/db";
+import { Project, DivisionLayout, EstimateSectionLine } from "@/types/db";
+import { feeLineAmount } from "@/lib/sectionLines/markup";
 import { ESTIMATE_MODIFIERS, isLinkedDivisionRow, DIVISION_LABELS } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
-import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
+import { getTerminalProgressBar, roundByRule, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
 import { GridShell } from "./GridShell";
 import type { GridShellConfig } from "./GridShell";
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
@@ -265,6 +266,15 @@ interface EstimateTableProps {
 
   // Summary data
   takeoffSummary: TakeoffSummary;
+
+  /**
+   * Division 60 Fee-Block Addressability Phase 3: the persisted `section: 'markup'`
+   * fee lines, rendered as real rows in the Division 60 block of the summary footer
+   * (alongside the 7 computed modifier rows). Display-only — their flat amount is
+   * already summed into `takeoffSummary.additionalFees` / `totalEstimatedCost` by the
+   * engine (Phase 2). `[]` until a fee line exists (the block renders as today).
+   */
+  markupLines: EstimateSectionLine[];
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
 
@@ -370,6 +380,7 @@ export function EstimateTable({
   handleExportProcore,
   isExportingExcel,
   takeoffSummary,
+  markupLines,
   divisionBreakdown,
   costTypeBreakdown,
   linkedDivisionTotals,
@@ -1006,6 +1017,56 @@ export function EstimateTable({
                         else if (column.id === "total") { content = <SummaryTraceCell valueStr={`$${modValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} onTrace={() => openTrust(mod.key)} onLinks={() => openTrust(mod.key, "links")} overridden={takeoffSummary.overrides?.[mod.key]} />; alignClass = "text-center text-foreground font-bold font-mono"; }
                         else if (column.id === "costPerUnit") { content = `$${(modValue / (unitCount || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
                         else if (column.id === "costPerSf") { content = `$${(modValue / (squareFootage || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; alignClass = "text-center font-mono"; }
+                        return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
+                      })}
+                      <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
+                    </tr>
+                  );
+                })}
+
+                {/* Division 60 markup fee lines (Fee-Block Phase 3) — estimator-authored flat
+                    dollars rendered BELOW the 7 computed modifiers and ABOVE the grand total,
+                    exactly where they sit in the engine (a below-subtotal, never-marked-up
+                    addend, Phase 2). Display-only here: amount comes straight from the stored
+                    line (`feeLineAmount`); insert/edit/delete + a Procore-code editor are Phase 4.
+                    An unassigned Procore code shows a "needs review" badge (never guessed). */}
+                {markupLines.map((line) => {
+                  // Round the displayed amount with the SAME rule the engine summed it (each
+                  // fee line is rounded independently into additionalFees) so the row ties to
+                  // the Total. Default "none" is the identity — exact in the common case.
+                  const amount = roundByRule(feeLineAmount(line), project.roundingRule ?? "none");
+                  const unmapped = !line.procoreCode;
+                  return (
+                    <tr key={line.id} className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
+                      {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left font-sans";
+                        if (column.id === "itemId") {
+                          content = unmapped
+                            ? <span className="text-amber-600 dark:text-amber-400" title="No Procore Budget Line Item assigned — assign one to export this fee">unmapped</span>
+                            : line.procoreCode;
+                          alignClass = "text-center font-mono";
+                        }
+                        else if (column.id === "costType") { content = "O"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "description") {
+                          content = (
+                            <span className="inline-flex items-center gap-2">
+                              <span>{line.label || "Fee"}</span>
+                              {unmapped && (
+                                <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded px-1.5 py-0.5" title="No Procore Budget Line Item assigned (needs review)">
+                                  <Flag size={9} /> needs review
+                                </span>
+                              )}
+                            </span>
+                          );
+                          alignClass = "text-left font-sans";
+                        }
+                        else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "unitPrice") { content = fmtUSD(amount); alignClass = "text-center font-mono"; }
+                        else if (column.id === "total") { content = fmtUSD(amount); alignClass = "text-center text-foreground font-bold font-mono"; }
+                        else if (column.id === "costPerUnit") { content = fmtUSD(amount / (unitCount || 1)); alignClass = "text-center font-mono"; }
+                        else if (column.id === "costPerSf") { content = fmtUSD(amount / (squareFootage || 1)); alignClass = "text-center font-mono"; }
                         return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
                       })}
                       <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />

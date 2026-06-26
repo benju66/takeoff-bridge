@@ -563,6 +563,21 @@ export const OVERRIDABLE_SUMMARY_FIELDS = [
 export type OverridableSummaryField = (typeof OVERRIDABLE_SUMMARY_FIELDS)[number];
 
 /**
+ * Rounds a dollar value per a project's `roundingRule` — the SINGLE rounding authority
+ * shared by `computeTakeoffSummary` (which rounds each component independently for visual-
+ * sum alignment) and any UI that must DISPLAY a component at the same precision the engine
+ * summed it (e.g. the Division 60 fee-block rows, so a displayed line ties to the total).
+ * "none" (the template-faithful default) is the identity. Centralizing it keeps the
+ * calc engine the sole place this math lives (AGENTS.md financial-write constraint).
+ */
+export function roundByRule(val: number, roundingRule: string): number {
+  if (roundingRule === "dollar") return Math.round(val);
+  if (roundingRule === "ten") return Math.round(val / 10) * 10;
+  if (roundingRule === "hundred") return Math.round(val / 100) * 100;
+  return val; // "none"
+}
+
+/**
  * Computes Step 4 takeoff summary totals.
  * 
  * AMENDMENT (BUG-1): Subtotal is computed as SUM(matchedQty × unitPrice)
@@ -644,17 +659,8 @@ export function computeTakeoffSummary(
   const rawBond = subtotal * bondRate;
   const rawFee = subtotal * feeRate;
 
-  // Helper function for rounding
-  const applyRounding = (val: number): number => {
-    if (roundingRule === "dollar") {
-      return Math.round(val);
-    } else if (roundingRule === "ten") {
-      return Math.round(val / 10) * 10;
-    } else if (roundingRule === "hundred") {
-      return Math.round(val / 100) * 100;
-    }
-    return val; // "none"
-  };
+  // Helper function for rounding (delegates to the shared single-authority helper).
+  const applyRounding = (val: number): number => roundByRule(val, roundingRule);
 
   // ── Computed component values (the engine's own math; always retained) ──
   // Each is rounded independently for visual sum alignment (Zero Budget Leaks).

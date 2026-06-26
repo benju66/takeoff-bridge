@@ -6,6 +6,7 @@ import { getProject, getProjectEstimate, getSectionLines, saveProject } from "@/
 import { getMonthsBetween } from "@/lib/calculations";
 import { deriveRemovedCodesFromLines, deriveOneOffsFromLines } from "@/lib/sectionLines/project";
 import { sectionLinesToBlobs } from "@/lib/sectionLines/synthesize";
+import { isMarkupLine } from "@/lib/sectionLines/markup";
 
 // ---------------------------------------------------------------------------
 // useProjectWorkspace — Project metadata loading, saving, and param changes
@@ -33,16 +34,28 @@ export interface UseProjectWorkspaceReturn {
    * imported projects, D4). Referentially stable (state) so the hooks' one-time apply fires once.
    */
   persistedOneOffLines: { gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] };
+  /**
+   * Division 60 Fee-Block Addressability Phase 3: the persisted `section: 'markup'`
+   * fee lines on this project, split out of the section-agnostic `getSectionLines`
+   * read at load. The page threads these into BOTH `computeTakeoffSummary` calls
+   * (the flat below-subtotal addend) and back into the persistence array so the
+   * full-replace `save_section_lines` RPC never deletes them. Provenance-agnostic
+   * (loaded for app-born AND imported — an imported fee line lands here in Phase 6).
+   * Referentially stable (stored in state) so the engine memos stay cache-friendly.
+   */
+  persistedMarkupLines: EstimateSectionLine[];
 }
 
 const NO_REMOVED_CODES: { gc: string[]; siteOps: string[] } = { gc: [], siteOps: [] };
 const NO_ONE_OFFS: { gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] } = { gc: [], siteOps: [] };
+const NO_MARKUP_LINES: EstimateSectionLine[] = [];
 
 export function useProjectWorkspace(projectId: string): UseProjectWorkspaceReturn {
   const [project, setProject] = useState<Project | null>(null);
   const [projectEstimate, setProjectEstimate] = useState<Omit<ProjectEstimate, "items"> | null>(null);
   const [persistedRemovedCodes, setPersistedRemovedCodes] = useState<{ gc: string[]; siteOps: string[] }>(NO_REMOVED_CODES);
   const [persistedOneOffLines, setPersistedOneOffLines] = useState<{ gc: EstimateSectionLine[]; siteOps: EstimateSectionLine[] }>(NO_ONE_OFFS);
+  const [persistedMarkupLines, setPersistedMarkupLines] = useState<EstimateSectionLine[]>(NO_MARKUP_LINES);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +70,7 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
       setProjectEstimate(null);
       setPersistedRemovedCodes(NO_REMOVED_CODES);
       setPersistedOneOffLines(NO_ONE_OFFS);
+      setPersistedMarkupLines(NO_MARKUP_LINES);
       setError(null);
     });
 
@@ -95,6 +109,12 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
           setPersistedOneOffLines(
             meta?.isImported ? NO_ONE_OFFS : deriveOneOffsFromLines(sectionLines)
           );
+          // Fee-Block Phase 3: the Division 60 `section: 'markup'` fee lines. Provenance-
+          // agnostic — UNLIKE removed-codes / one-offs (which are an APP-BORN catalog
+          // delta meaningless for an import, D4), a fee line is a self-contained flat
+          // lumpSum that loads the same for app-born and imported projects. Preserve
+          // array order (already `ORDER BY sort_order ASC`, AGENTS.md — no re-sort).
+          setPersistedMarkupLines(sectionLines.filter(isMarkupLine));
           setIsLoaded(true);
         }
       } catch (err) {
@@ -133,5 +153,6 @@ export function useProjectWorkspace(projectId: string): UseProjectWorkspaceRetur
     handleProjectParamChange,
     persistedRemovedCodes,
     persistedOneOffLines,
+    persistedMarkupLines,
   };
 }

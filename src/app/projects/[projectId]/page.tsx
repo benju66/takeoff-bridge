@@ -93,6 +93,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     handleProjectParamChange,
     persistedRemovedCodes,
     persistedOneOffLines,
+    persistedMarkupLines,
   } = useProjectWorkspace(projectId);
 
   const squareFootage: number = project ? project.squareFootage : 0;
@@ -274,9 +275,15 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     roundingRule: project?.roundingRule ?? "none",
   }), [project]);
 
+  // Fee-Block Phase 3: the Division 60 markup fee lines feed BOTH summaries as the flat
+  // below-subtotal addend (calc engine, Phase 2). Amendment F filters TAKEOFF ROWS only —
+  // a fee line is NOT a row (it lives below the subtotal and can't be searched/filtered),
+  // so the on-screen filtered summary adds the FULL fee-line set exactly like the unfiltered
+  // one. Passing the same `persistedMarkupLines` to both keeps the fee total stable under a
+  // grid filter (the modifiers/fees never partial-out — only the subtotal's visible rows do).
   const takeoffSummary = React.useMemo(
-    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides),
-    [filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides]
+    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, persistedMarkupLines),
+    [filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, persistedMarkupLines]
   );
 
   // Reconciliation (Phase 5 slice 3 — 5b): ALWAYS over the FULL unfiltered row set and
@@ -285,9 +292,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // only a search/filter forks a second full computation.
   const fullTakeoffSummary = React.useMemo(
     () => isFiltered
-      ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides)
+      ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, persistedMarkupLines)
       : takeoffSummary,
-    [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, takeoffSummary]
+    [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, persistedMarkupLines, takeoffSummary]
   );
 
   // Estimate Buyout Lens (Phase 4 follow-on) — Projected Profit for the buyout footer,
@@ -368,6 +375,21 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [project?.isImported, linkedDivisionTotals]
   );
 
+  // Fee-Block Phase 3: the array PERSISTED through `save_section_lines` is the GC/Site-Ops
+  // lines PLUS the Division 60 markup fee lines. The RPC is a FULL per-project replace across
+  // ALL sections, so the markup rows MUST ride along or the save would silently delete them.
+  // The fee lines are appended AFTER gc/site_ops (the gateway re-stamps `sort_order` from the
+  // array index, so this fixes their persisted position below the section lines).
+  //
+  // Deliberately SEPARATE from the `sectionLines` memo above: that one feeds the binding
+  // projection (`sectionBindingLines`), and a markup line (section neither 'gc' nor
+  // 'site_ops', code='') would project as a bogus zero-total graph node. Fee lines are not
+  // bindable graph nodes in Phase 3 — they only need to round-trip through persistence.
+  const persistedSectionLines = React.useMemo(
+    () => [...sectionLines, ...persistedMarkupLines],
+    [sectionLines, persistedMarkupLines]
+  );
+
   // The section lines (synthesized above, before the workbook so they can also feed the
   // binding engine — Phase A5) persist alongside the legacy blobs via the dual-write.
   const { saveStatus, saveError } = useEstimatePersistence(
@@ -380,7 +402,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     importedSectionTotals?.siteOperationsTotal ?? infrastructure.siteOperationsTotal,
     freezeRateCardSnapshot,
     isNewEstimate,
-    sectionLines
+    persistedSectionLines
   );
 
   // ---------------------------------------------------------------------------
@@ -676,6 +698,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             handleExportProcore={handleExportProcore}
             isExportingExcel={isExportingExcel}
             takeoffSummary={takeoffSummary}
+            markupLines={persistedMarkupLines}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
