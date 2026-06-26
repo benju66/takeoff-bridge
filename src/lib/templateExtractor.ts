@@ -27,9 +27,11 @@
 
 import ExcelJS from "exceljs";
 import type { ProcessedTakeoffRow } from "@/types";
+import type { EstimateSectionLine } from "@/types/db";
 import { getMonthsBetween } from "./calculations";
 import { ESTIMATE_MODIFIERS, LINKED_DIVISION_ROWS, isLinkedDivisionRow } from "./constants";
 import { RECONCILIATION_TOLERANCE } from "./exporter";
+import { newFeeLine } from "./sectionLines/markup";
 
 // ---------------------------------------------------------------------------
 // Sheet names (template-canonical)
@@ -196,6 +198,16 @@ export interface ExtractedEstimate {
    * finished bid's hand-typed lines are imported, never dropped.
    */
   adHocLineItems: ExtractedLineItem[];
+  /**
+   * Fee-Block Addressability Phase 6: hand-keyed Division 60 fee-block lines (below the
+   * STEP 4 SUBTOTAL) that are NOT one of the 7 computed modifiers — captured as markup
+   * section lines (`section='markup'`, `entry_kind='lumpSum'`, `source='csv_import'`,
+   * `procore_code=''` → needs-review). The import folds these into the engine total so a
+   * bid carrying a hand-keyed flat fee (e.g. "Preconstruction Fee") ties out to the cent;
+   * the estimator assigns each line's Procore BLI in the review. Empty for a bid whose fee
+   * block is the 7 modifiers only (every existing fixture/bid) — fully inert.
+   */
+  feeLines: EstimateSectionLine[];
   oracle: ExtractedOracleOutputs;
   /** STEP 2 line inputs (for future deep reconstruction / diagnostics). */
   step2Lines: ExtractedSheetLine[];
@@ -361,6 +373,7 @@ function extractInputs(wb: ExcelJS.Workbook): ExtractedProjectInputs {
 function extractStep4(wb: ExcelJS.Workbook): {
   lineItems: ExtractedLineItem[];
   adHocLineItems: ExtractedLineItem[];
+  feeLines: EstimateSectionLine[];
   oracle: Pick<
     ExtractedOracleOutputs,
     | "step4Subtotal"
@@ -437,10 +450,34 @@ function extractStep4(wb: ExcelJS.Workbook): {
   const step4Subtotal = num(s4, `I${subtotalRow}`);
   const modifierByBase = new Map(ESTIMATE_MODIFIERS.map((m) => [m.code.split(".")[0], m]));
   const modifierByKey = new Map<string, ExtractedModifierOutput>();
+  // Fee-Block Addressability Phase 6: fee-block rows that are NOT one of the 7 known
+  // modifiers but carry a dollar are hand-keyed flat fees (e.g. a $2,500 "Preconstruction
+  // Fee" typed in below the subtotal). They are captured as markup section lines so the
+  // import ties out — previously they were continue-skipped here, dropping the dollar and
+  // failing the tie-out by exactly the fee. Empty for a bid whose fee block is the 7
+  // modifiers only (every existing fixture/bid) → fully inert.
+  const feeLines: EstimateSectionLine[] = [];
   for (let r = subtotalRow + 1; r < totalRow; r++) {
     const code = text(s4, `C${r}`);
     const cfg = modifierCodes.get(code) ?? modifierByBase.get(code);
-    if (!cfg) continue;
+    if (!cfg) {
+      // Capture ONLY when the row carries a real dollar (col I cached amount) — title /
+      // blank separator rows in the fee block carry none and are skipped, the same
+      // "never drop a dollar / never capture a non-dollar" rule as the ad-hoc path above.
+      // The Procore code stays BLANK (needs-review — never guessed, AGENTS.md); the
+      // estimator assigns it in the import review.
+      const feeAmount = numOrNull(s4, `I${r}`);
+      if (feeAmount !== null && feeAmount !== 0) {
+        feeLines.push(
+          newFeeLine({
+            label: text(s4, `D${r}`) || code || "Imported Fee",
+            amount: feeAmount,
+            source: "csv_import",
+          })
+        );
+      }
+      continue;
+    }
     const rate = num(s4, `F${r}`);
     const total = numOrNull(s4, `I${r}`);
     modifierByKey.set(cfg.key, {
@@ -465,6 +502,7 @@ function extractStep4(wb: ExcelJS.Workbook): {
   return {
     lineItems,
     adHocLineItems,
+    feeLines,
     oracle: {
       step4Subtotal,
       step4SubtotalRow: subtotalRow,
@@ -591,7 +629,7 @@ export async function loadTemplateWorkbook(buffer: ArrayBuffer | Buffer): Promis
 /** Reads a template-format workbook into a typed ExtractedEstimate. */
 export function extractEstimate(wb: ExcelJS.Workbook): ExtractedEstimate {
   const inputs = extractInputs(wb);
-  const { lineItems, adHocLineItems, oracle: step4Oracle } = extractStep4(wb);
+  const { lineItems, adHocLineItems, feeLines, oracle: step4Oracle } = extractStep4(wb);
   const step23 = extractStep23(wb);
   const bli = extractBli(wb);
 
@@ -599,6 +637,7 @@ export function extractEstimate(wb: ExcelJS.Workbook): ExtractedEstimate {
     inputs,
     lineItems,
     adHocLineItems,
+    feeLines,
     step2Lines: step23.step2Lines,
     step3Lines: step23.step3Lines,
     oracle: {
