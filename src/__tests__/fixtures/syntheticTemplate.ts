@@ -568,3 +568,118 @@ export async function buildLegacyPastBidTemplateBuffer(): Promise<Buffer> {
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);
 }
+
+// ===========================================================================
+// FEE-BLOCK past-bid variant (Division 60 Fee-Block Addressability — Phase 6)
+// ===========================================================================
+//
+// The base synthetic shape (5 non-linked $50k + 10 linked $50k → subtotal $100k,
+// 7 rate-driven modifiers $8k) PLUS the case Phase 6 exists for: a HAND-KEYED flat
+// fee line typed into the Division 60 fee block, below the SUBTOTAL and between the
+// 7 modifiers and the TOTAL. The original's TOTAL cell ($110,500) INCLUDES it, but
+// the pre-Phase-6 extractor continue-skipped it — so the engine produced $108,000
+// and the import failed the tie-out by exactly the fee ($2,500). Capturing it as a
+// markup section line closes that gap to $0.00.
+//
+// The fee code (60-4000.002) is suffixed so it is NOT one of the 7 modifier rows
+// (matched on the bare base 60-4000 / the full .001 code) — proving the capture
+// fires on a real fee line and never swallows a computed modifier.
+
+/** The hand-keyed fee-block line: "Preconstruction Fee" = $2,500, Procore code blank. */
+const FEE_BLOCK_FEE = { code: "60-4000.002", label: "Preconstruction Fee", amount: 2_500 };
+
+const FEE_BLOCK_TOTAL = SUBTOTAL + MODIFIER_SUM + FEE_BLOCK_FEE.amount; // 110,500
+
+export const FEE_BLOCK_PAST_BID_ORACLE = {
+  subtotal: SUBTOTAL, // 100,000
+  modifierSum: MODIFIER_SUM, // 8,000
+  feeLineCode: FEE_BLOCK_FEE.code, // "60-4000.002"
+  feeLineLabel: FEE_BLOCK_FEE.label, // "Preconstruction Fee"
+  feeLineAmount: FEE_BLOCK_FEE.amount, // 2,500
+  totalEstimatedCost: FEE_BLOCK_TOTAL, // 110,500 (the original's TOTAL, fee included)
+  /** What the engine produced WITHOUT capturing the fee — the off-by-$2,500 bug. */
+  totalWithoutFee: SUBTOTAL + MODIFIER_SUM, // 108,000
+} as const;
+
+/** Builds the synthetic FEE-BLOCK past-bid workbook (.xlsx bytes) for the Phase 6 tests. */
+export async function buildFeeBlockPastBidTemplateBuffer(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+
+  // STEP 1 — identical inputs/rates to the base synthetic fixture.
+  const s1 = wb.addWorksheet(SHEET.step1);
+  s1.getCell("C1").value = "Project Name";
+  s1.getCell("D1").value = "Synthetic Fee-Block Bid";
+  s1.getCell("C2").value = "Gross SF";
+  s1.getCell("D2").value = SYNTHETIC_INPUTS.squareFootage;
+  s1.getCell("C3").value = "# of Units";
+  s1.getCell("D3").value = SYNTHETIC_INPUTS.unitCount;
+  s1.getCell("C4").value = "Expected Start";
+  s1.getCell("D4").value = SYNTHETIC_INPUTS.startDate;
+  s1.getCell("C5").value = "Expected Finish";
+  s1.getCell("D5").value = SYNTHETIC_INPUTS.finishDate;
+  ESTIMATE_MODIFIERS.forEach((m, i) => {
+    const r = 8 + i;
+    s1.getCell(`F${r}`).value = m.label;
+    s1.getCell(`G${r}`).value = SYNTHETIC_INPUTS.rates[m.key] ?? 0;
+  });
+
+  // STEP 2 / STEP 3 — section subtotals feeding the linked rows.
+  const s2 = wb.addWorksheet(SHEET.step2);
+  const s3 = wb.addWorksheet(SHEET.step3);
+  let s2Row = 1;
+  let s3Row = 1;
+  for (const link of LINKED_ROWS) {
+    const ws = link.sheet === "step2" ? s2 : s3;
+    const row = link.sheet === "step2" ? s2Row++ : s3Row++;
+    ws.getCell(`H${row}`).value = link.subtotalLabel;
+    ws.getCell(`I${row}`).value = link.value;
+  }
+
+  // STEP 4 — line items, SUBTOTAL, the 7 modifier rows, the HAND-KEYED FEE LINE, TOTAL.
+  const s4 = wb.addWorksheet(SHEET.step4);
+  s4.getCell("A1").value = "STEP 4 - ESTIMATE (synthetic fee-block bid)";
+  let row = 2;
+  for (const it of NON_LINKED_ITEMS) {
+    s4.getCell(`C${row}`).value = it.itemId;
+    s4.getCell(`D${row}`).value = it.description;
+    s4.getCell(`F${row}`).value = it.qty;
+    s4.getCell(`H${row}`).value = it.unitPrice;
+    row++;
+  }
+  for (const link of LINKED_ROWS) {
+    s4.getCell(`C${row}`).value = link.itemId;
+    s4.getCell(`D${row}`).value = link.description;
+    s4.getCell(`F${row}`).value = 1;
+    s4.getCell(`H${row}`).value = link.value;
+    row++;
+  }
+
+  const subtotalRow = row;
+  s4.getCell(`H${subtotalRow}`).value = "SUBTOTAL";
+  s4.getCell(`I${subtotalRow}`).value = SUBTOTAL;
+  row++;
+
+  // The 7 rate-driven modifier rows (60-xxxx code, rate in col F, dollar in col I).
+  for (const m of ESTIMATE_MODIFIERS) {
+    s4.getCell(`C${row}`).value = m.code;
+    s4.getCell(`D${row}`).value = m.label;
+    s4.getCell(`F${row}`).value = SYNTHETIC_INPUTS.rates[m.key] ?? 0;
+    s4.getCell(`I${row}`).value = MODIFIER_VALUES[m.key];
+    row++;
+  }
+
+  // The hand-keyed flat fee line — suffixed code (NOT a modifier), label in col D,
+  // dollar typed straight into col I (no rate). The TOTAL below includes it.
+  s4.getCell(`C${row}`).value = FEE_BLOCK_FEE.code;
+  s4.getCell(`D${row}`).value = FEE_BLOCK_FEE.label;
+  s4.getCell(`I${row}`).value = FEE_BLOCK_FEE.amount;
+  row++;
+
+  const totalRow = row;
+  s4.getCell(`H${totalRow}`).value = "TOTAL";
+  s4.getCell(`I${totalRow}`).value = FEE_BLOCK_TOTAL;
+  s4.getCell(`J${totalRow}`).value = FEE_BLOCK_TOTAL / SYNTHETIC_INPUTS.unitCount;
+
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out);
+}

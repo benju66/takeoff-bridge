@@ -22,7 +22,9 @@ import { SelectCellInput } from "@/components/workspace/SelectCellInput";
 import { RowProvenanceGlyph } from "@/components/workspace/RowProvenanceGlyph";
 import { PendingImport } from "./useFileIngestion";
 import { ArchParamSuggestion } from "@/lib/archParamDetector";
-import { Project, DivisionLayout, CatalogAddition, CatalogCostTypeOverride, ProcoreCostCode } from "@/types/db";
+import { Project, DivisionLayout, CatalogAddition, CatalogCostTypeOverride, ProcoreCostCode, EstimateSectionLine } from "@/types/db";
+import { newFeeLine } from "@/lib/sectionLines/markup";
+import { buildFeeLineEdit } from "@/lib/sectionLines/markupCommands";
 import {
   getEstimateLineItems,
   getProjectRegistry,
@@ -174,6 +176,15 @@ export interface UseTakeoffWorkbookReturn {
   /** Clear the binding on a row's total (undoable; no-op when unbound). */
   clearBindingForRow: (rowId: string) => void;
 
+  // Division 60 Fee-Block Addressability (Phase 4) — insert / delete / edit fee lines,
+  // each undoable on the shared workbook stack (single Ctrl+Z).
+  /** Insert a blank flat fee line (`source: 'manual'`, code blank) below existing fee lines. */
+  insertFeeLine: () => void;
+  /** Delete a fee line by id (undoable — re-inserts at its prior index on undo). */
+  deleteFeeLine: (id: string) => void;
+  /** Edit a fee line's label / amount / Procore code (a shallow field patch; no-op edits dropped). */
+  editFeeLine: (id: string, patch: Partial<EstimateSectionLine>) => void;
+
   // Import modal
   pendingImport: PendingImport | null;
   confirmImport: (archParams: ArchParamSuggestion[], overriddenRows?: ProcessedTakeoffRow[]) => void;
@@ -200,7 +211,13 @@ export function useTakeoffWorkbook(
   // GC/Site-Ops Addressability Phase A5: the projected GC/Site-Ops section lines
   // (app-born = engine totals; imported = frozen constants), folded into the binding
   // recompute so a binding may target/aggregate a section line. `[]` = inert.
-  sectionBindingLines: readonly BindingLine[] = []
+  sectionBindingLines: readonly BindingLine[] = [],
+  // Fee-Block Addressability Phase 4: the Division 60 markup fee lines (owned by
+  // useMarkupFeeLines in page.tsx) + their optimistic setter, so the INSERT/DELETE/
+  // EDIT_FEE_LINE creators below share the workbook's undo history (single Ctrl+Z).
+  // `[]` = inert (no fee lines; the block renders as today).
+  markupLines: EstimateSectionLine[] = [],
+  setMarkupLines: React.Dispatch<React.SetStateAction<EstimateSectionLine[]>> = () => {}
 ): UseTakeoffWorkbookReturn {
   const unitCount = project?.unitCount ?? 0;
   const squareFootage = project?.squareFootage ?? 0;
@@ -353,7 +370,7 @@ export function useTakeoffWorkbook(
     isExportingExcel, exportError, setExportError,
     exportBlockers, pendingExportKind, clearExportBlockers,
     handleExportExcel, handleExportProcore, handleExportExcelWorkbook,
-  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult, activeOverrides);
+  } = useExportHandlers(rows, columnDefs, project, projectId, gcCalcResult, siteOpsCalcResult, activeOverrides, markupLines);
 
   // ---------------------------------------------------------------------------
   // Export override — assign granular Procore codes to blocker rows.
@@ -397,6 +414,7 @@ export function useTakeoffWorkbook(
     setColumnDefs, setLockedCells, setUnmappedTakeoffClassifications,
     globalRegistry, setBindings,
     buyout, setLensView,
+    setMarkupLines,
   );
 
   // ---------------------------------------------------------------------------
@@ -802,7 +820,9 @@ export function useTakeoffWorkbook(
   // gate (§6 stable id) lives in authoring.ts and is enforced by the panel/context menu.
   // ---------------------------------------------------------------------------
 
-  const pushBindingCommand = (cmd: WorkbookCommand) => {
+  // Shared "push then apply forward" path (AGENTS.md history rule) — used by the binding
+  // creators (SET/CLEAR_BINDING) AND the Fee-Block Phase 4 fee-line creators below.
+  const pushCommandThenForward = (cmd: WorkbookCommand) => {
     commandHistory.pushCommand(cmd);
     applyCommandForward(cmd);
   };
@@ -814,7 +834,7 @@ export function useTakeoffWorkbook(
    * Routed through the existing command path — never a second write path (LD-4 / AGENTS.md).
    */
   const commitBinding = (nextBinding: Binding) => {
-    pushBindingCommand({
+    pushCommandThenForward({
       type: "SET_BINDING",
       targetNodeId: nextBinding.targetNodeId,
       prevBinding: findBindingByTarget(bindings, nextBinding.targetNodeId) ?? null,
@@ -827,7 +847,40 @@ export function useTakeoffWorkbook(
     const targetNodeId = lineFieldNodeId(rowId, "total");
     const prev = findBindingByTarget(bindings, targetNodeId);
     if (!prev) return;
-    pushBindingCommand({ type: "CLEAR_BINDING", targetNodeId, prevBinding: prev });
+    pushCommandThenForward({ type: "CLEAR_BINDING", targetNodeId, prevBinding: prev });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Division 60 Fee-Block Addressability (Phase 4) — insert / delete / edit creators.
+  // Each pushes a command BEFORE the execution boundary (applyCommandForward), one
+  // shared path for the live edit and (via the stack) redo (AGENTS.md history rule).
+  // They mutate the page-owned markup store through the dispatcher's setMarkupLines,
+  // so the change re-feeds the engine total and rides the full-replace save. `markupLines`
+  // is a live prop → these closures read the current array (no stale snapshot).
+  // ---------------------------------------------------------------------------
+
+  /** Insert a blank flat fee line (`source: 'manual'`, code BLANK) below the existing
+   *  fee lines. The estimator fills in the label/amount/code afterward (each undoable). */
+  const insertFeeLine = () => {
+    const line = newFeeLine({ label: "", amount: 0 });
+    pushCommandThenForward({ type: "INSERT_FEE_LINE", line, index: markupLines.length });
+  };
+
+  /** Delete a fee line (undoable — the full line + its index are captured for re-insert). */
+  const deleteFeeLine = (id: string) => {
+    const index = markupLines.findIndex((l) => l.id === id);
+    if (index === -1) return;
+    pushCommandThenForward({ type: "DELETE_FEE_LINE", line: markupLines[index], index });
+  };
+
+  /** Edit a fee line's label / amount / Procore code (a shallow field patch). No-op edits
+   *  are dropped (buildFeeLineEdit returns null) so they never land on the undo stack. */
+  const editFeeLine = (id: string, patch: Partial<EstimateSectionLine>) => {
+    const line = markupLines.find((l) => l.id === id);
+    if (!line) return;
+    const cmd = buildFeeLineEdit(line, patch);
+    if (!cmd) return;
+    pushCommandThenForward(cmd);
   };
 
   // ---------------------------------------------------------------------------
@@ -1863,5 +1916,8 @@ export function useTakeoffWorkbook(
     boundRowIds,
     commitBinding,
     clearBindingForRow,
+    insertFeeLine,
+    deleteFeeLine,
+    editFeeLine,
   };
 }

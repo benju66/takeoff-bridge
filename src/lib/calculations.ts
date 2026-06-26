@@ -4,6 +4,7 @@
  */
 
 import { ProcessedTakeoffRow, DivisionAggregation, CostTypeAggregation, EstimateOverrideMap } from "@/types";
+import type { EstimateSectionLine } from "@/types/db";
 import { getDivisionCode } from "./division";
 import {
   gcStaffLineId,
@@ -13,7 +14,9 @@ import {
   siteOpsDynamicLineId,
   siteOpsManualLineId,
   sectionLineFieldOverrideKey,
+  sectionLineTotalOverrideKey,
 } from "./sectionLines/ids";
+import { feeLineAmount, isMarkupLine } from "./sectionLines/markup";
 import {
   STAFF_ROLE_DEFAULTS,
   OPERATIONAL_EXPENSE_DEFAULTS,
@@ -519,6 +522,14 @@ export interface TakeoffSummary {
   glInsurance: number;
   bond: number;
   fee: number;
+  /**
+   * Phase 2 (Division 60 fee-block addressability): Σ of the flat markup fee lines'
+   * amounts — each rounded per the rounding rule (visual-sum alignment) and then any
+   * per-line `line:<id>:total` type-over applied, then summed. A flat addend applied
+   * AFTER subtotal + the 7 modifiers, so it NEVER enters the markup base (no
+   * compounding). `0` when no markup lines are supplied — fully inert (the default).
+   */
+  additionalFees: number;
   totalEstimatedCost: number;
   costPerSf: number;
   costPerUnit: number;
@@ -552,6 +563,21 @@ export const OVERRIDABLE_SUMMARY_FIELDS = [
 export type OverridableSummaryField = (typeof OVERRIDABLE_SUMMARY_FIELDS)[number];
 
 /**
+ * Rounds a dollar value per a project's `roundingRule` — the SINGLE rounding authority
+ * shared by `computeTakeoffSummary` (which rounds each component independently for visual-
+ * sum alignment) and any UI that must DISPLAY a component at the same precision the engine
+ * summed it (e.g. the Division 60 fee-block rows, so a displayed line ties to the total).
+ * "none" (the template-faithful default) is the identity. Centralizing it keeps the
+ * calc engine the sole place this math lives (AGENTS.md financial-write constraint).
+ */
+export function roundByRule(val: number, roundingRule: string): number {
+  if (roundingRule === "dollar") return Math.round(val);
+  if (roundingRule === "ten") return Math.round(val / 10) * 10;
+  if (roundingRule === "hundred") return Math.round(val / 100) * 100;
+  return val; // "none"
+}
+
+/**
  * Computes Step 4 takeoff summary totals.
  * 
  * AMENDMENT (BUG-1): Subtotal is computed as SUM(matchedQty × unitPrice)
@@ -568,6 +594,12 @@ export type OverridableSummaryField = (typeof OVERRIDABLE_SUMMARY_FIELDS)[number
  * display-only: their typed qty×price NEVER counts (double-count trap
  * closure); each contributes its linked value instead, and only while the row
  * is present in `rows` (so Amendment-F filtered views stay coherent).
+ *
+ * MARKUP FEE LINES (Phase 2 — Division 60 fee-block addressability): the optional
+ * `markupLines` (estimate_section_lines with section='markup') contribute a FLAT
+ * `additionalFees` addend applied AFTER subtotal + the 7 modifiers. Their dollars
+ * never enter the markup base (no compounding) and never touch the subtotal — they
+ * are below-subtotal, never-marked-up lines. Omitted/empty → fully inert.
  */
 export function computeTakeoffSummary(
   rows: ProcessedTakeoffRow[],
@@ -584,7 +616,8 @@ export function computeTakeoffSummary(
     roundingRule: string;
   },
   linkedTotals?: LinkedDivisionTotal[],
-  overrides?: EstimateOverrideMap
+  overrides?: EstimateOverrideMap,
+  markupLines?: EstimateSectionLine[]
 ): TakeoffSummary {
   const linkedByItemId = new Map((linkedTotals ?? []).map((l) => [l.itemId, l.total]));
   let takeoffSubtotal = 0;
@@ -626,17 +659,8 @@ export function computeTakeoffSummary(
   const rawBond = subtotal * bondRate;
   const rawFee = subtotal * feeRate;
 
-  // Helper function for rounding
-  const applyRounding = (val: number): number => {
-    if (roundingRule === "dollar") {
-      return Math.round(val);
-    } else if (roundingRule === "ten") {
-      return Math.round(val / 10) * 10;
-    } else if (roundingRule === "hundred") {
-      return Math.round(val / 100) * 100;
-    }
-    return val; // "none"
-  };
+  // Helper function for rounding (delegates to the shared single-authority helper).
+  const applyRounding = (val: number): number => roundByRule(val, roundingRule);
 
   // ── Computed component values (the engine's own math; always retained) ──
   // Each is rounded independently for visual sum alignment (Zero Budget Leaks).
@@ -648,9 +672,22 @@ export function computeTakeoffSummary(
   const computedGL = applyRounding(rawGL);
   const computedBond = applyRounding(rawBond);
   const computedFee = applyRounding(rawFee);
+
+  // ── Division 60 markup fee lines (flat, below-subtotal, never marked up) ──
+  // Each fee line's flat dollar (inputs.amount) is rounded INDEPENDENTLY — exactly like
+  // the 7 modifiers above (visual-sum alignment, Zero Budget Leaks). The amounts are summed
+  // AFTER the subtotal + modifiers; they NEVER feed any raw* (subtotal × rate) computation,
+  // so a fee line is flat and below-subtotal by construction (locked decision). isMarkupLine
+  // filters defensively so a stray gc/site_ops line passed here cannot leak into the total.
+  // With no markup lines this is fully inert: computedAdditionalFees === 0.
+  const computedFeeLineAmounts = (markupLines ?? [])
+    .filter(isMarkupLine)
+    .map((line) => ({ id: line.id, amount: applyRounding(feeLineAmount(line)) }));
+  const computedAdditionalFees = computedFeeLineAmounts.reduce((s, m) => s + m.amount, 0);
+
   // Computed Total = exact sum of the rounded computed components (the pre-override total).
   const computedTotal = computedSubtotal + computedCC + computedDC + computedBR
-    + computedSI + computedGL + computedBond + computedFee;
+    + computedSI + computedGL + computedBond + computedFee + computedAdditionalFees;
 
   // ── Override layer (Phase 4 — Override + Audit Model) ───────────────────
   // An override is an INPUT layered over the computed value (override ?? computed), never
@@ -678,12 +715,23 @@ export function computeTakeoffSummary(
   const bond = eff("bond", computedBond);
   const fee = eff("fee", computedFee);
 
+  // Each fee line's rounded amount may be type-over'd via its `line:<id>:total` key —
+  // mirroring exactly how GC/Site-Ops one-off line totals are attributed. Routing through
+  // the same `eff` closure records each computed→override pair into `summary.overrides`
+  // (Trust Inspector attribution). The aggregate `additionalFees` is itself a derived sum,
+  // NOT a single overridable component (so there is no double-override path). Inert when
+  // there is no override / no fee lines: additionalFees === computedAdditionalFees / 0.
+  let additionalFees = 0;
+  for (const m of computedFeeLineAmounts) {
+    additionalFees += eff(sectionLineTotalOverrideKey(m.id), m.amount);
+  }
+
   // Total: a DIRECT total override wins; otherwise the sum of the EFFECTIVE components, so
-  // overriding a component still reconciles into the total (INV-4 holds). A direct total
-  // override is the one deliberate exception (surfaced as "overridden" in Phase 5).
+  // overriding a component (or a fee line) still reconciles into the total (INV-4 holds). A
+  // direct total override is the one deliberate exception (surfaced as "overridden" in Phase 5).
   // Overriding the subtotal does NOT recompute the modifiers (no compounding — AGENTS.md).
   const effectiveComponentTotal = subtotalOut + constructionContingency + designContingency
-    + buildersRisk + specialInsurance + glInsurance + bond + fee;
+    + buildersRisk + specialInsurance + glInsurance + bond + fee + additionalFees;
   let totalEstimatedCost: number;
   if (Object.prototype.hasOwnProperty.call(ov, "totalEstimatedCost") && typeof ov["totalEstimatedCost"] === "number") {
     overridden["totalEstimatedCost"] = { computedValue: computedTotal, overrideValue: ov["totalEstimatedCost"] };
@@ -706,6 +754,7 @@ export function computeTakeoffSummary(
     glInsurance,
     bond,
     fee,
+    additionalFees,
     totalEstimatedCost,
     costPerSf,
     costPerUnit,

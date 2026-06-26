@@ -131,8 +131,11 @@ export interface ImportedStep23Lines {
  * Closed, CHECK-enforced discriminator on estimate_section_lines.section.
  *   'gc'       — Step 2 (GC Personnel)
  *   'site_ops' — Step 3 (Site Operations)
+ *   'markup'   — Division 60 fee/markup block (flat fee lines — Fee-Block
+ *                Addressability Phase 1). A markup line is an estimator-authored
+ *                flat dollar amount (entry_kind='lumpSum'), NOT a Step 2/3 line.
  */
-export type SectionDiscriminator = 'gc' | 'site_ops';
+export type SectionDiscriminator = 'gc' | 'site_ops' | 'markup';
 
 /**
  * One addressable GC/Site-Ops line (a row of the estimate_section_lines table —

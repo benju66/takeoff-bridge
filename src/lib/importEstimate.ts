@@ -25,7 +25,7 @@
  */
 
 import type { ProcessedTakeoffRow, EstimateOverrideMap, InternalEstimateItem } from "@/types";
-import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines, ImportedSheetLine } from "@/types/db";
+import type { Project, ProjectEstimate, CostCodeMapEntry, ImportedStep23Lines, ImportedSheetLine, EstimateSectionLine } from "@/types/db";
 // TYPE-ONLY: templateExtractor pulls in ExcelJS at runtime. importEstimate uses
 // only its interfaces, so `import type` keeps ExcelJS OUT of this module's graph —
 // otherwise the workspace page (which imports the pure linkedTotalsFromRows) would
@@ -581,6 +581,31 @@ export function applyAcceptedMappings(
       row = { ...row, dataFidelity: "macro_lump_sum" };
     }
     return row;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Division 60 fee-block lines (Fee-Block Addressability Phase 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies the estimator's import-review Procore assignments to the captured fee-block
+ * lines (`extracted.feeLines`), returning the markup section lines the engine + the
+ * full-replace `save_section_lines` write consume. The assignment map (fee-line id →
+ * `{ procoreCode, costType }`, resolved through `validateOneOffCode` so a code is never
+ * guessed) is the same revertible escape hatch as `applyAcceptedMappings`: the originals
+ * are never mutated, so withdrawing an assignment (deleting the map entry) restores the
+ * unmapped line. The `inputs.amount` is NEVER touched — a Procore assignment moves no
+ * dollar, so the import tie-out cannot move. With no assignments this is the identity
+ * (every line stays unmapped, `procoreCode=''`).
+ */
+export function applyFeeLineMappings(
+  feeLines: readonly EstimateSectionLine[],
+  assignments: ReadonlyMap<string, { procoreCode: string; costType: string }>
+): EstimateSectionLine[] {
+  return feeLines.map((line) => {
+    const a = assignments.get(line.id);
+    return a ? { ...line, procoreCode: a.procoreCode, costType: a.costType } : line;
   });
 }
 

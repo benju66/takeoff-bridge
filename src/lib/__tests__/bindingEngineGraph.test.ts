@@ -8,7 +8,7 @@
  *     engine's EFFECTIVE value, never re-derive the math — re-derivation would diverge
  *     from an overridden subtotal/component).
  *   - EDGE STRUCTURE: each node declares exactly the authored inputs (the depends-on view).
- *   - COMPLETENESS: the descriptor emits exactly the 13 summary fields, no more, no less.
+ *   - COMPLETENESS: the descriptor emits exactly the 14 summary fields, no more, no less.
  *   - NO CYCLES: the authored edge set is acyclic.
  *   - END TO END: evaluated through the real kind-blind graph engine, every node resolves
  *     to the engine value.
@@ -89,6 +89,7 @@ const ALL_SUMMARY_FIELDS: readonly SummaryNodeField[] = [
   "glInsurance",
   "bond",
   "fee",
+  "additionalFees",
   "totalEstimatedCost",
   "costPerSf",
   "costPerUnit",
@@ -236,11 +237,16 @@ describe("engineGraph — authored edges (the depends-on / used-by wiring)", () 
     }
   });
 
-  it("totalEstimatedCost reads subtotal + all 7 modifiers", () => {
+  it("totalEstimatedCost reads subtotal + all 7 modifiers + additionalFees", () => {
     expect(nodeFor(nodes, "totalEstimatedCost").inputs).toEqual([
       summaryNodeId("subtotal"),
       ...MODIFIER_FIELDS.map((f) => summaryNodeId(f)),
+      summaryNodeId("additionalFees"),
     ]);
+  });
+
+  it("additionalFees is a cross-page leaf with no inputs in the summary tier", () => {
+    expect(nodeFor(nodes, "additionalFees").inputs).toEqual([]);
   });
 
   it("cost-per-metric nodes read totalEstimatedCost", () => {
@@ -261,7 +267,7 @@ describe("engineGraph — authored edges (the depends-on / used-by wiring)", () 
 // ---------------------------------------------------------------------------
 
 describe("engineGraph — node set, basis, and acyclicity", () => {
-  it("emits exactly the 13 summary fields, no more, no less", () => {
+  it("emits exactly the 14 summary fields, no more, no less", () => {
     const ids = populated.nodes.map((n) => n.id).sort();
     const expected = ALL_SUMMARY_FIELDS.map((f) => summaryNodeId(f)).sort();
     expect(ids).toEqual(expected);

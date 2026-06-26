@@ -124,19 +124,21 @@ function echoSummaryNode(
  *
  *   takeoffSubtotal ─┐
  *                    ├─► subtotal ─► each of 7 modifiers ─┐
- *   linkedDivisionsTotal ─┘     └────────────────────────┴─► totalEstimatedCost ─► costPerSf
- *                                                                                └► costPerUnit
+ *   linkedDivisionsTotal ─┘     └────────────────────────┼─► totalEstimatedCost ─► costPerSf
+ *   additionalFees ─────────────────────────────────────┘                        └► costPerUnit
  *
  * `takeoffSubtotal` and `linkedDivisionsTotal` are the cross-page leaves (the linked GC /
  * Site-Ops division values feed `linkedDivisionsTotal`); `subtotal` sums them; each
- * modifier reads `subtotal`; the grand total reads `subtotal` + all 7 modifiers (the
- * effective-component sum); the two cost-per-metric nodes read the grand total. Every
- * value is the engine's own — the edges only describe the wiring.
+ * modifier reads `subtotal`; `additionalFees` is a below-subtotal flat addend (the Division
+ * 60 markup fee lines — Phase 2); the grand total reads `subtotal` + all 7 modifiers +
+ * `additionalFees` (the effective-component sum); the two cost-per-metric nodes read the
+ * grand total. Every value is the engine's own — the edges only describe the wiring.
  */
 function describeSummaryNodes(summary: TakeoffSummary): GraphNode[] {
   const takeoffSubtotalId = summaryNodeId("takeoffSubtotal");
   const linkedDivisionsTotalId = summaryNodeId("linkedDivisionsTotal");
   const subtotalId = summaryNodeId("subtotal");
+  const additionalFeesId = summaryNodeId("additionalFees");
   const totalId = summaryNodeId("totalEstimatedCost");
   const modifierIds = SUMMARY_MODIFIER_FIELDS.map((f) => summaryNodeId(f));
 
@@ -159,12 +161,17 @@ function describeSummaryNodes(summary: TakeoffSummary): GraphNode[] {
     nodes.push(echoSummaryNode(field, summary[field], [subtotalId], "currency"));
   }
 
-  // totalEstimatedCost = subtotal + Σ(7 modifiers) (the effective-component sum).
+  // additionalFees = Σ Division 60 markup fee lines (flat, below-subtotal). A cross-page
+  // leaf in THIS tier (no inputs) — its per-fee-line decomposition lands in a later tier,
+  // exactly like linkedDivisionsTotal's GC/Site-Ops trees do.
+  nodes.push(echoSummaryNode("additionalFees", summary.additionalFees, [], "currency"));
+
+  // totalEstimatedCost = subtotal + Σ(7 modifiers) + additionalFees (effective-component sum).
   nodes.push(
     echoSummaryNode(
       "totalEstimatedCost",
       summary.totalEstimatedCost,
-      [subtotalId, ...modifierIds],
+      [subtotalId, ...modifierIds, additionalFeesId],
       "currency"
     )
   );

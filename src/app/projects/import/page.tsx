@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowLeft, Loader2, Building2, MapPin, Calendar, Flag,
-  Link2, Sparkles, Wand2, ScrollText, History, HardHat, ChevronDown, ChevronRight, PlusCircle,
+  Link2, Sparkles, Wand2, ScrollText, History, HardHat, ChevronDown, ChevronRight, PlusCircle, Receipt,
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { MARKET_SECTORS, BID_OUTCOMES, DELIVERY_METHODS, MASTER_TEMPLATE_NAME, isLinkedDivisionRow } from "@/lib/constants";
@@ -18,9 +18,11 @@ import {
   applyAcceptedMappings, linkedMappingConflict, lumpOverridesFromExtract, overrideMapFromIntents,
   catalogCostCodeEntries, step23LinesForImport, uomMismatch,
   applyStep23Corrections, step23LineKey, step23ReviewStats,
-  findLikelyDuplicateImports, suggestionSignalsForSave,
+  findLikelyDuplicateImports, suggestionSignalsForSave, applyFeeLineMappings,
   type MappingSuggestion, type LumpOverrideIntent,
 } from "@/lib/importEstimate";
+import { feeLineAmount } from "@/lib/sectionLines/markup";
+import { OneOffAssignPopover, type OneOffAssignTarget } from "@/components/workspace/OneOffAssignPopover";
 import {
   resolveStep23Line, suggestNextStep23Code, activeStep23Defs, isBuiltInStep23Code,
   type Step23LineDef,
@@ -40,6 +42,7 @@ import {
   getClassificationHistoryBulk, getCustomStep23LineDefs, createCustomStep23LineDef,
   getCatalogAdditions,
   getCatalogCostTypeOverrides,
+  saveSectionLines,
 } from "@/lib/db";
 import type { ProcessedTakeoffRow } from "@/types";
 import type { Project, BidOutcome, DeliveryMethod, CustomStep23LineDef, ImportedSheetLine } from "@/types/db";
@@ -91,6 +94,25 @@ export default function ImportPastEstimatePage() {
   const rows = useMemo(
     () => (parsed ? applyAcceptedMappings(parsed.rows, accepted, uomOverrides, lumpMarks) : []),
     [parsed, accepted, uomOverrides, lumpMarks]
+  );
+
+  /**
+   * Fee-Block Addressability Phase 6: the estimator's Procore assignments for the
+   * captured Division 60 fee-block lines — feeLineId → { procoreCode, costType }, resolved
+   * through `validateOneOffCode` (never guessed). Same revertible escape hatch as
+   * `accepted`: clearing an entry restores the unmapped line. The assign popover's target.
+   */
+  const [feeAssignments, setFeeAssignments] = useState<Map<string, { procoreCode: string; costType: string }>>(new Map());
+  const [feeAssign, setFeeAssign] = useState<OneOffAssignTarget | null>(null);
+  /**
+   * The captured fee-block lines with the estimator's assignments applied — fed BOTH to
+   * `computeTakeoffSummary` (the flat below-subtotal addend that makes the tie-out tie) and,
+   * on save, to the full-replace `save_section_lines` write. An assignment moves no dollar,
+   * so the tie-out never moves. Empty for a bid whose fee block is the 7 modifiers only.
+   */
+  const markupLines = useMemo(
+    () => (parsed ? applyFeeLineMappings(parsed.extracted.feeLines, feeAssignments) : []),
+    [parsed, feeAssignments]
   );
 
   /**
@@ -209,9 +231,12 @@ export default function ImportPastEstimatePage() {
       parsed.extracted.inputs.unitCount,
       importSummaryRates(parsed.extracted.inputs),
       linkedTotalsFromRows(rows),
-      overrideMap
+      overrideMap,
+      // Phase 6: a hand-keyed fee-block line raises the total by its flat amount (below the
+      // subtotal, never marked up) — closing the off-by-the-fee tie-out gap.
+      markupLines
     );
-  }, [parsed, rows, overrideMap]);
+  }, [parsed, rows, overrideMap, markupLines]);
   const tieOut = useMemo(
     () => (parsed && summary ? checkImportTieOut(summary, parsed.extracted.oracle) : null),
     [parsed, summary]
@@ -225,6 +250,8 @@ export default function ImportPastEstimatePage() {
     setAccepted(new Map());
     setUomOverrides(new Map());
     setLumpMarks(new Set());
+    setFeeAssignments(new Map());
+    setFeeAssign(null);
     setStep23Uom(new Map());
     setStep23Assignments(new Map());
     setMintForKey(null);
@@ -477,6 +504,17 @@ export default function ImportPastEstimatePage() {
       const estimate = estimateTotalsForImport(id, summary, rows);
       await saveEstimate(estimate, rows);
 
+      // Captured Division 60 fee-block lines → the markup section lines (Phase 6). Persisted
+      // via the same full-replace `save_section_lines` path the workspace's GC/Site-Ops +
+      // manual fee lines use; on reload `useProjectWorkspace` loads them back via
+      // getSectionLines().filter(isMarkupLine). AWAITED + throws on failure: these fee
+      // dollars are part of the tie-out, so a bid whose fee line fails to persist must not
+      // look saved-and-tied (mirrors the lump-override write below). Skipped when there is
+      // no fee line so the RPC's full-replace never runs needlessly on an ordinary import.
+      if (markupLines.length > 0) {
+        await saveSectionLines(id, markupLines);
+      }
+
       // Lump-sum modifiers → APPEND-ONLY audit records. Financial intent: these
       // MUST persist (db.ts throws on failure), so they are awaited — a legacy
       // bid whose lumps fail to record must not look saved-and-tied.
@@ -657,6 +695,60 @@ export default function ImportPastEstimatePage() {
                       <span className="font-bold text-foreground whitespace-nowrap">{money(l.overrideValue)}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Fee block (Division 60) — hand-keyed flat fees captured from the original's
+                modifier zone (Phase 6). Each is imported with its dollar intact; the estimator
+                assigns a Procore code here (never guessed), an unmapped one still imports. */}
+            {markupLines.length > 0 && (
+              <div className="bg-card border border-grid-border rounded-xl p-5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-3 flex items-center gap-2">
+                  <Receipt size={13} className="text-blue-500" /> Fee block (Division 60) — imported flat fees
+                </h3>
+                <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                  These hand-keyed lines sit below the subtotal in the original&apos;s fee block — flat amounts that
+                  are NOT marked up. Each is imported with its dollar intact and ties the total to the cent. Assign a
+                  Procore Budget Line Item to each (we never guess one); an unmapped line still imports and stays
+                  flagged in the workspace.
+                </p>
+                <div className="max-h-72 overflow-y-auto border border-grid-border rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
+                        <th className="px-3 py-2 font-bold">Fee line</th>
+                        <th className="px-3 py-2 font-bold text-right">Amount</th>
+                        <th className="px-3 py-2 font-bold">Procore code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {markupLines.map((line) => (
+                        <tr key={line.id} className="border-t border-grid-border">
+                          <td className="px-3 py-2 text-foreground">{line.label}</td>
+                          <td className="px-3 py-2 text-right font-mono text-foreground">{money(feeLineAmount(line))}</td>
+                          <td className="px-3 py-2">
+                            <button
+                              onClick={(e) => setFeeAssign({ line, x: e.clientX, y: e.clientY })}
+                              disabled={saving}
+                              className="font-mono text-[11px] cursor-pointer hover:underline decoration-dotted underline-offset-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={line.procoreCode ? `Procore ${line.procoreCode} — click to reassign` : "Assign a Procore Budget Line Item"}
+                            >
+                              {line.procoreCode ? (
+                                <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
+                                  <CheckCircle2 size={11} /> {line.procoreCode}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                  <Flag size={10} /> unmapped — assign
+                                </span>
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
@@ -962,6 +1054,17 @@ export default function ImportPastEstimatePage() {
             </div>
           </>
         )}
+
+        {/* Procore-code assign popover for the captured fee-block lines (Phase 6) — the SAME
+            validated control the live fee block uses (validateOneOffCode, never a guess).
+            Re-assignment prefills the current code; the assignment moves no dollar. */}
+        <OneOffAssignPopover
+          target={feeAssign}
+          onAssign={(line, code, costType) =>
+            setFeeAssignments((prev) => new Map(prev).set(line.id, { procoreCode: code, costType }))
+          }
+          onClose={() => setFeeAssign(null)}
+        />
       </div>
     </ProtectedRoute>
   );

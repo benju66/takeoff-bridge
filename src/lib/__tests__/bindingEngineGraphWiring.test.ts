@@ -6,7 +6,7 @@
  *     and the result is the pre-Bucket-B assembly - the export goldens hold.
  *   - includeEngineGraph REQUIRES a summary to ECHO (the echo-staleness guard, plan section 6):
  *     the flag alone is a no-op.
- *   - ON: the 13 summary:* nodes are present and, evaluated through the kind-blind graph,
+ *   - ON: the 14 summary:* nodes are present and, evaluated through the kind-blind graph,
  *     equal computeTakeoffSummary to the cent (echo === engine at the wiring site, LD-B2).
  *   - PRECEDENCE user binding > engine > source: a user binding targeting summary:subtotal
  *     SHADOWS the engine node (no duplicate-id throw; the user binding's inputs win), and no
@@ -108,6 +108,7 @@ const ALL_SUMMARY_FIELDS: readonly SummaryNodeField[] = [
   "glInsurance",
   "bond",
   "fee",
+  "additionalFees",
   "totalEstimatedCost",
   "costPerSf",
   "costPerUnit",
@@ -141,7 +142,7 @@ describe("assembleBindingGraphNodes - engine fold ON (the Links tab)", () => {
     summary,
   });
 
-  it("folds in exactly the 13 summary:* engine nodes", () => {
+  it("folds in exactly the 14 summary:* engine nodes", () => {
     const summaryIds = folded
       .filter((n) => n.id.startsWith("summary:"))
       .map((n) => n.id)

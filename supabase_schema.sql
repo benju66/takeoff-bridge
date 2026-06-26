@@ -32,7 +32,17 @@
 -- live database; that file↔DB drift was reconciled 2026-06-08 by rewriting this
 -- file to the deployed inline form (file-only change, no live DDL).
 --
--- Last updated: 2026-06-24 (Actuals Cost-History & Project Budget Snapshots
+-- Last updated: 2026-06-26 (Division 60 Fee-Block Addressability Phase 1 — storage
+-- foundation: extended the estimate_section_lines.section CHECK to a THIRD value
+-- 'markup' (the Division 60 fee/markup block) alongside 'gc'/'site_ops'. A markup
+-- row is a flat fee line (entry_kind='lumpSum', inputs={amount}, optional
+-- procore_code, source defaults 'manual'). The save_section_lines RPC + db.ts
+-- gateway are section-agnostic (section passes straight through the JSONB payload),
+-- so NO RPC change was needed — only the CHECK widened. The live change was a
+-- DROP + re-ADD of estimate_section_lines_section_check. No consumer reads markup
+-- rows yet (Phase 1 lays the pipe; calc/render/edit/export/import land in Phases
+-- 2-6).
+-- Earlier — 2026-06-24 (Actuals Cost-History & Project Budget Snapshots
 -- Phase 2 — storage spine: three new tables modeled on estimate_versions. Tables
 -- 23/24/25 = budget_snapshots (immutable header; freeze-guard trigger lets only the
 -- is_final/finalized_at promotion pair change; partial-unique "one FINAL per
@@ -1835,8 +1845,9 @@ CREATE TRIGGER estimate_bindings_touch_updated_at_trg
 -- table yet — Phase A2 lays the pipe + db gateway; Phase A3 wires the pages.
 --
 --   section    — closed structural discriminator: 'gc' (Step 2) | 'site_ops'
---                (Step 3). CHECK-enforced (a fixed 2-value set, unlike the
---                open binding `kind`).
+--                (Step 3) | 'markup' (Division 60 fee/markup block — flat fee
+--                lines, Fee-Block Addressability Phase 1). CHECK-enforced (a
+--                fixed 3-value set, unlike the open binding `kind`).
 --   entry_kind — OPEN line-kind discriminator (free TEXT, NO CHECK; mirrors
 --                estimate_bindings.kind). The DB stays blind to the kind
 --                vocabulary; A3 synthesis narrows it. Avoids baking a premature
@@ -1853,7 +1864,7 @@ CREATE TRIGGER estimate_bindings_touch_updated_at_trg
 CREATE TABLE estimate_section_lines (
   id           TEXT NOT NULL,
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  section      TEXT NOT NULL CHECK (section IN ('gc', 'site_ops')),
+  section      TEXT NOT NULL CHECK (section IN ('gc', 'site_ops', 'markup')),
   code         TEXT NOT NULL DEFAULT '',
   procore_code TEXT NOT NULL DEFAULT '',
   cost_type    TEXT NOT NULL DEFAULT '',

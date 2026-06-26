@@ -183,6 +183,7 @@ export type SummaryNodeField =
   | "glInsurance"
   | "bond"
   | "fee"
+  | "additionalFees"
   | "totalEstimatedCost"
   | "costPerSf"
   | "costPerUnit";

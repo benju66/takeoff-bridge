@@ -39,13 +39,19 @@ export const oneOffUnit = (line: EstimateSectionLine): string =>
 
 /**
  * The single one-off detector, shared by the grid, the synthesis split, and the load
- * reconstruction: a section line authored by the estimator (NOT a catalog seed, which is
- * `'template'`, nor an imported frozen line, which is on its own read-only path). Belt and
- * braces: also require a manual entry kind so a stray non-manual `'manual'`-sourced row can
- * never be treated as a one-off.
+ * reconstruction: a GC/Site-Ops section line authored by the estimator (NOT a catalog seed,
+ * which is `'template'`, nor an imported frozen line, which is on its own read-only path).
+ * Belt and braces: also require a manual entry kind so a stray non-manual `'manual'`-sourced
+ * row can never be treated as a one-off, and require a GC/Site-Ops section so a Division 60
+ * markup fee line (also `source: 'manual'` + `lumpSum`) is never misread as a one-off (it
+ * belongs to the separate `'markup'` section — Fee-Block Addressability Phase 1).
  */
 export function isOneOffLine(line: EstimateSectionLine): boolean {
-  return line.source === "manual" && isManualEntryKind(line.entryKind);
+  return (
+    (line.section === "gc" || line.section === "site_ops") &&
+    line.source === "manual" &&
+    isManualEntryKind(line.entryKind)
+  );
 }
 
 /** Reverse of {@link ESTIMATE_TO_PROCORE_TYPE}: Procore type → estimate cost type (L/M/S/E). */

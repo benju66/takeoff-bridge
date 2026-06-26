@@ -10,17 +10,21 @@
    eslint-disable-next-line — narrowed from B1a's whole-file disable so the rest of the file stays
    linted. Addressing them "for real" would mean restructuring correct, stable code for no gain. */
 
-import React, { useRef, useMemo, useEffect, useCallback } from "react";
+import React, { useRef, useState, useMemo, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useReactTable } from "@tanstack/react-table";
 import type { Column } from "@tanstack/react-table";
-import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2, Layers } from "lucide-react";
+import { Upload, AlertTriangle, Activity, RotateCcw, RotateCw, FileDown, ChevronDown, Search, Flag, Link2, Layers, Plus } from "lucide-react";
 import { getCatalogItems } from "@/lib/catalog";
 import { ProcessedTakeoffRow, ColumnDefinition, ContextMenuState, GridSelectionState, EstimateOverrideRecord } from "@/types";
-import { Project, DivisionLayout } from "@/types/db";
+import { Project, DivisionLayout, EstimateSectionLine } from "@/types/db";
+import { feeLineAmount } from "@/lib/sectionLines/markup";
+import { NumberCellInput } from "./NumberCellInput";
+import { StringCellInput } from "./StringCellInput";
+import { OneOffAssignPopover, type OneOffAssignTarget } from "./OneOffAssignPopover";
 import { ESTIMATE_MODIFIERS, isLinkedDivisionRow, DIVISION_LABELS } from "@/lib/constants";
 import { getDivisionCode } from "@/lib/division";
-import { getTerminalProgressBar, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
+import { getTerminalProgressBar, roundByRule, TakeoffSummary, LinkedDivisionTotal } from "@/lib/calculations";
 import { GridShell } from "./GridShell";
 import type { GridShellConfig } from "./GridShell";
 import type { PersonnelCalcResult, SiteOpsCalcResult } from "@/lib/calculations";
@@ -44,6 +48,12 @@ import { ArchParamSuggestion } from "@/lib/archParamDetector";
 
 const fmtUSD = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Fee-block context-menu button styling (mirrors ContextMenuPortal so the two menus match).
+const feeMenuBtnClass =
+  "w-full text-left px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer";
+const feeMenuDestructiveClass =
+  "w-full text-left px-3 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded font-sans text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer";
 
 // Step-4 grid column sets fed to GridShell's host config (B1b). These were inline arrays
 // inside the shell before generalization; they live here now because they are Step-4-specific.
@@ -265,6 +275,21 @@ interface EstimateTableProps {
 
   // Summary data
   takeoffSummary: TakeoffSummary;
+
+  /**
+   * Division 60 Fee-Block Addressability Phase 3: the persisted `section: 'markup'`
+   * fee lines, rendered as real rows in the Division 60 block of the summary footer
+   * (alongside the 7 computed modifier rows). Display-only — their flat amount is
+   * already summed into `takeoffSummary.additionalFees` / `totalEstimatedCost` by the
+   * engine (Phase 2). `[]` until a fee line exists (the block renders as today).
+   */
+  markupLines: EstimateSectionLine[];
+  /** Insert a blank flat fee line below existing fee lines (Phase 4 — undoable). */
+  insertFeeLine: () => void;
+  /** Delete a fee line by id (Phase 4 — undoable). */
+  deleteFeeLine: (id: string) => void;
+  /** Edit a fee line's label / amount / Procore code, a shallow field patch (Phase 4 — undoable). */
+  editFeeLine: (id: string, patch: Partial<EstimateSectionLine>) => void;
   divisionBreakdown: DivisionAggregation[];
   costTypeBreakdown: CostTypeAggregation[];
 
@@ -370,6 +395,10 @@ export function EstimateTable({
   handleExportProcore,
   isExportingExcel,
   takeoffSummary,
+  markupLines,
+  insertFeeLine,
+  deleteFeeLine,
+  editFeeLine,
   divisionBreakdown,
   costTypeBreakdown,
   linkedDivisionTotals,
@@ -440,6 +469,28 @@ export function EstimateTable({
     setTrustOpen(true);
     setTrustSeq((s) => s + 1);
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Division 60 Fee-Block edit affordances (Phase 4). The fee block renders in the
+  // static <tfoot> (not the virtualized grid row model), so it carries its OWN
+  // lightweight inline-edit + context-menu + Procore-assign state here — small enough
+  // not to warrant the full TanStack selection machinery. Every mutation routes through
+  // the undoable workbook creators (insertFeeLine / deleteFeeLine / editFeeLine).
+  //   - feeEdit:    which fee line + field is being inline-edited (label | amount).
+  //   - feeCtxMenu: the right-click menu (Insert below / Delete) over a fee row.
+  //   - feeAssign:  the validated Procore-code assign popover target (reused from one-offs).
+  // ---------------------------------------------------------------------------
+  const [feeEdit, setFeeEdit] = useState<{ id: string; field: "label" | "amount" } | null>(null);
+  const [feeCtxMenu, setFeeCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [feeAssign, setFeeAssign] = useState<OneOffAssignTarget | null>(null);
+
+  // Dismiss the fee context menu on any outside click (mirrors the grid menu's dismiss).
+  useEffect(() => {
+    if (!feeCtxMenu) return;
+    const close = () => setFeeCtxMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [feeCtxMenu]);
 
   // Phase 5: the grid's 🔗 binding badge dispatches "tb:inspect-binding" to open Trust on
   // the Links tab focused on that cell's total node — decoupled from the cell renderer
@@ -1013,6 +1064,141 @@ export function EstimateTable({
                   );
                 })}
 
+                {/* Division 60 markup fee lines (Fee-Block Phase 3/4) — estimator-authored flat
+                    dollars rendered BELOW the 7 computed modifiers and ABOVE the grand total,
+                    exactly where they sit in the engine (a below-subtotal, never-marked-up
+                    addend, Phase 2). Phase 4 makes them EDITABLE: click the label / amount to
+                    inline-edit, click the code cell to assign a validated Procore BLI, right-click
+                    the row to insert or delete — each undoable via the workbook creators. An
+                    unassigned Procore code shows a "needs review" badge (never guessed). */}
+                {markupLines.map((line) => {
+                  // Round the displayed amount with the SAME rule the engine summed it (each
+                  // fee line is rounded independently into additionalFees) so the row ties to
+                  // the Total. Default "none" is the identity — exact in the common case. The
+                  // INLINE editor edits the RAW `inputs.amount` (feeLineAmount), not the rounded
+                  // display, so the stored input stays exact.
+                  const rawAmount = feeLineAmount(line);
+                  const amount = roundByRule(rawAmount, project.roundingRule ?? "none");
+                  const unmapped = !line.procoreCode;
+                  const editingLabel = feeEdit?.id === line.id && feeEdit.field === "label";
+                  const editingAmount = feeEdit?.id === line.id && feeEdit.field === "amount";
+                  return (
+                    <tr
+                      key={line.id}
+                      className="bg-background/80 dark:bg-slate-900/30 text-xs font-bold text-slate-600 dark:text-slate-400 font-sans border-l-4 border-l-transparent"
+                      style={{ display: "flex", minWidth: "100%" }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setFeeCtxMenu({ x: e.clientX, y: e.clientY, id: line.id });
+                      }}
+                    >
+                      {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
+                        let content: React.ReactNode = "";
+                        let alignClass = "text-left font-sans";
+                        if (column.id === "itemId") {
+                          // Click → the validated Procore-code assign popover (reused from one-offs).
+                          content = (
+                            <button
+                              type="button"
+                              onClick={(e) => setFeeAssign({ line, x: e.clientX, y: e.clientY })}
+                              className="cursor-pointer hover:underline decoration-dotted underline-offset-2"
+                              title={unmapped ? "Assign a Procore Budget Line Item" : `Procore ${line.procoreCode} — click to reassign`}
+                            >
+                              {unmapped
+                                ? <span className="text-amber-600 dark:text-amber-400">unmapped</span>
+                                : line.procoreCode}
+                            </button>
+                          );
+                          alignClass = "text-center font-mono";
+                        }
+                        else if (column.id === "costType") { content = line.costType || "O"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "description") {
+                          content = editingLabel ? (
+                            <div className="w-full" onBlur={() => setFeeEdit(null)}>
+                              <StringCellInput
+                                id={`fee-label-${line.id}`}
+                                value={line.label}
+                                className="w-full px-1.5 py-1 text-xs font-sans border border-blue-400 dark:border-blue-600 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                                onCommit={(v) => editFeeLine(line.id, { label: v })}
+                                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              />
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setFeeEdit({ id: line.id, field: "label" })}
+                                className="cursor-text hover:underline decoration-dotted underline-offset-2 text-left"
+                                title="Click to rename this fee line"
+                              >
+                                {line.label || <span className="italic text-slate-400 dark:text-slate-500">Unnamed fee</span>}
+                              </button>
+                              {unmapped && (
+                                <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded px-1.5 py-0.5" title="No Procore Budget Line Item assigned (needs review)">
+                                  <Flag size={9} /> needs review
+                                </span>
+                              )}
+                            </span>
+                          );
+                          alignClass = "text-left font-sans";
+                        }
+                        else if (column.id === "matchedQty") { content = "1.00"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "uom") { content = "LS"; alignClass = "text-center font-mono"; }
+                        else if (column.id === "unitPrice") { content = fmtUSD(amount); alignClass = "text-center font-mono"; }
+                        else if (column.id === "total") {
+                          content = editingAmount ? (
+                            <div className="w-full" onBlur={() => setFeeEdit(null)}>
+                              <NumberCellInput
+                                id={`fee-amount-${line.id}`}
+                                value={rawAmount}
+                                className="w-full px-1.5 py-1 text-xs font-mono text-center border border-blue-400 dark:border-blue-600 rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                                onCommit={(v) => editFeeLine(line.id, { inputs: { amount: v } })}
+                                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setFeeEdit({ id: line.id, field: "amount" })}
+                              className="cursor-text hover:underline decoration-dotted underline-offset-2"
+                              title="Click to edit this fee amount"
+                            >
+                              {fmtUSD(amount)}
+                            </button>
+                          );
+                          alignClass = "text-center text-foreground font-bold font-mono";
+                        }
+                        else if (column.id === "costPerUnit") { content = fmtUSD(amount / (unitCount || 1)); alignClass = "text-center font-mono"; }
+                        else if (column.id === "costPerSf") { content = fmtUSD(amount / (squareFootage || 1)); alignClass = "text-center font-mono"; }
+                        return (<td key={column.id} className={`p-3 border-r border-b border-grid-border ${alignClass}`} style={{ width: column.getSize(), flex: "none" }}>{content}</td>);
+                      })}
+                      <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
+                    </tr>
+                  );
+                })}
+
+                {/* + Add fee line (Phase 4) — a clear user action (AGENTS.md) covering the empty
+                    state + discoverability; right-clicking an existing fee row also offers
+                    Insert / Delete. Insert always APPENDS (fee lines are a flat unordered set). */}
+                <tr className="bg-background/50 dark:bg-slate-900/20 border-l-4 border-l-transparent" style={{ display: "flex", minWidth: "100%" }}>
+                  {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => (
+                    <td key={column.id} className="p-3 border-r border-b border-grid-border text-left" style={{ width: column.getSize(), flex: "none" }}>
+                      {column.id === "description" && (
+                        <button
+                          type="button"
+                          onClick={insertFeeLine}
+                          className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer"
+                          title="Add a flat fee line to the Division 60 fee block"
+                        >
+                          <Plus size={12} /> Add fee line
+                        </button>
+                      )}
+                    </td>
+                  ))}
+                  <td className="border-b border-grid-border" style={{ flex: "1 1 auto", minWidth: 0 }} />
+                </tr>
+
                 {/* Total Estimated Cost Row */}
                 <tr className="border-t border-double border-l-4 border-l-transparent border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/15 text-xs font-black text-emerald-600 dark:text-emerald-400 font-sans" style={{ display: "flex", minWidth: "100%" }}>
                   {table.getVisibleFlatColumns().map((column: Column<ProcessedTakeoffRow>) => {
@@ -1117,6 +1303,41 @@ export function EstimateTable({
         onViewTakeoffRows={handleViewTakeoffRows}
         isFiltered={isFiltered}
         onSaveOverride={onSaveOverride}
+      />
+
+      {/* Division 60 fee-block context menu (Phase 4) — right-click a fee row → insert /
+          delete, both undoable. Fixed-positioned; an outside click dismisses it (effect above). */}
+      {feeCtxMenu && (
+        <div
+          className="fixed bg-card border border-grid-border p-1.5 shadow-2xl rounded-lg z-50 flex flex-col gap-1 min-w-[170px] text-card-foreground"
+          style={{ top: feeCtxMenu.y, left: feeCtxMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className={feeMenuBtnClass}
+            onClick={() => { insertFeeLine(); setFeeCtxMenu(null); }}
+          >
+            + Insert fee line
+          </button>
+          <div className="border-t border-grid-border my-1" />
+          <button
+            type="button"
+            className={feeMenuDestructiveClass}
+            onClick={() => { deleteFeeLine(feeCtxMenu.id); setFeeCtxMenu(null); }}
+          >
+            🗑️ Delete fee line
+          </button>
+        </div>
+      )}
+
+      {/* Procore-code assign popover (Phase 4) — reused from the GC/Site-Ops one-off escape
+          hatch: validates a free-entry code against the Procore authority (`validateOneOffCode`)
+          and assigns the resolved code + cost type via the undoable editFeeLine. Never guesses. */}
+      <OneOffAssignPopover
+        target={feeAssign}
+        onAssign={(line, code, costType) => editFeeLine(line.id, { procoreCode: code, costType })}
+        onClose={() => setFeeAssign(null)}
       />
     </>
   );

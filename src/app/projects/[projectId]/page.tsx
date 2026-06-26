@@ -27,7 +27,7 @@ import { isLinkedDivisionRow } from "@/lib/constants";
 import { sectionTotalsFromLinked } from "@/lib/importEstimate";
 import { synthesizeImportedSectionLines } from "@/lib/sectionLines/imported";
 import { ImportedStep23Panel } from "@/components/workspace/ImportedStep23Panel";
-import { validateExportReadiness, rollupEffectiveModifiers, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
+import { validateExportReadiness, rollupEffectiveModifiers, rollupMarkupLines, RECONCILIATION_TOLERANCE } from "@/lib/exporter";
 import { buildReconciliationModel } from "@/lib/trustInspector";
 import { recordEstimateOverride } from "@/lib/db";
 import type { OverridePayload } from "@/lib/overrideSetter";
@@ -40,6 +40,7 @@ import { useEstimatePersistence } from "@/hooks/useEstimatePersistence";
 import { useRateCardSnapshot } from "@/hooks/useRateCardSnapshot";
 import { useEstimateOverrides } from "@/hooks/useEstimateOverrides";
 import { useEstimateBindings } from "@/hooks/useEstimateBindings";
+import { useMarkupFeeLines } from "@/hooks/useMarkupFeeLines";
 
 import { ArchitecturalParametersStep } from "@/components/workspace/ArchitecturalParametersStep";
 import { DataHealthStrip } from "@/components/workspace/DataHealthStrip";
@@ -93,6 +94,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     handleProjectParamChange,
     persistedRemovedCodes,
     persistedOneOffLines,
+    persistedMarkupLines,
   } = useProjectWorkspace(projectId);
 
   const squareFootage: number = project ? project.squareFootage : 0;
@@ -113,6 +115,12 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // into the workbook so SET_BINDING / CLEAR_BINDING share its undo history. `[]` =
   // inert (no bound cells; summary + export untouched → goldens tie $0.00).
   const { bindings, setBindings } = useEstimateBindings(projectId, isLoaded);
+
+  // Fee-Block Addressability Phase 4: the MUTABLE Division 60 markup fee lines, seeded
+  // from the read-only `persistedMarkupLines` load. Owned here and threaded into the
+  // workbook so INSERT/DELETE/EDIT_FEE_LINE share its undo history; `markupLines` (not the
+  // read-only seed) feeds the engine summaries, the save memo, and the EstimateTable below.
+  const { markupLines, setMarkupLines } = useMarkupFeeLines(persistedMarkupLines);
 
   // A brand-new estimate (no persisted project_estimates row yet) gets a one-time
   // "Estimate created" milestone snapshot on its first save (Phase 4 audit wiring).
@@ -186,7 +194,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
 
   // Step 4: Takeoff Workbook (GC + Site Ops calc results thread through to the
   // export handlers — gc-siteops Phase 3)
-  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings, sectionBindingLines);
+  const workbook = useTakeoffWorkbook(projectId, isLoaded, project, personnel.calcResult, infrastructure.calcResult, activeOverrides, bindings, setBindings, sectionBindingLines, markupLines, setMarkupLines);
   const {
     rows, columnDefs, lockedCells, layoutConfig, table,
     dragActive, appendData, setAppendData,
@@ -209,6 +217,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     scrollToRowRef,
     selection,
     boundRowIds, commitBinding, clearBindingForRow,
+    insertFeeLine, deleteFeeLine, editFeeLine,
   } = workbook;
 
   // Linked Values Phase 5: the "Define link…" authoring panel target (a row id) or null.
@@ -274,9 +283,16 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     roundingRule: project?.roundingRule ?? "none",
   }), [project]);
 
+  // Fee-Block Phase 3/4: the Division 60 markup fee lines feed BOTH summaries as the flat
+  // below-subtotal addend (calc engine, Phase 2). Amendment F filters TAKEOFF ROWS only —
+  // a fee line is NOT a row (it lives below the subtotal and can't be searched/filtered),
+  // so the on-screen filtered summary adds the FULL fee-line set exactly like the unfiltered
+  // one. Passing the same `markupLines` to both keeps the fee total stable under a grid
+  // filter (the modifiers/fees never partial-out — only the subtotal's visible rows do).
+  // Phase 4: `markupLines` is now the MUTABLE store, so an insert/delete/edit re-feeds here.
   const takeoffSummary = React.useMemo(
-    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides),
-    [filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides]
+    () => computeTakeoffSummary(filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, markupLines),
+    [filteredRows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, markupLines]
   );
 
   // Reconciliation (Phase 5 slice 3 — 5b): ALWAYS over the FULL unfiltered row set and
@@ -285,9 +301,9 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
   // only a search/filter forks a second full computation.
   const fullTakeoffSummary = React.useMemo(
     () => isFiltered
-      ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides)
+      ? computeTakeoffSummary(rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, markupLines)
       : takeoffSummary,
-    [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, takeoffSummary]
+    [isFiltered, rows, squareFootage, unitCount, summaryRates, linkedDivisionTotals, activeOverrides, markupLines, takeoffSummary]
   );
 
   // Estimate Buyout Lens (Phase 4 follow-on) — Projected Profit for the buyout footer,
@@ -313,17 +329,26 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
       rows,
       personnel.calcResult,
       infrastructure.calcResult,
-      project?.isImported ? { importedLinkedBasis: true } : undefined
+      project?.isImported ? { importedLinkedBasis: true } : undefined,
+      // Fee-block Phase 5: an unmapped fee line carrying dollars surfaces as a blocker here, so the
+      // chip flags it the same way the export gate does.
+      markupLines
     );
+    // The MAPPED fee dollars that ride the Procore CSV under their assigned BLI codes. Folding them
+    // into the full Procore budget closes the grand-total delta a fee line otherwise opens (Phase 5).
+    const feeRollupTotal = Object.values(
+      rollupMarkupLines(markupLines, summaryRates.roundingRule, activeOverrides)
+    ).reduce((s, v) => s + v, 0);
     return buildReconciliationModel({
       reconciliation: readiness.reconciliation,
       blockerCount: readiness.blockers.length,
       summary: fullTakeoffSummary,
       modifierRollupTotal: rollupEffectiveModifiers(fullTakeoffSummary),
+      feeRollupTotal,
       roundingMode: summaryRates.roundingRule,
       tolerance: RECONCILIATION_TOLERANCE,
     });
-  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates, project?.isImported]);
+  }, [rows, personnel.calcResult, infrastructure.calcResult, fullTakeoffSummary, summaryRates, project?.isImported, markupLines, activeOverrides]);
 
   // Phase 5 slice 4 — the override WRITE path. The Trust Inspector's editor builds the
   // payload (pure overrideSetter.ts); this records the immutable event and re-syncs the
@@ -368,6 +393,23 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     [project?.isImported, linkedDivisionTotals]
   );
 
+  // Fee-Block Phase 3/4: the array PERSISTED through `save_section_lines` is the GC/Site-Ops
+  // lines PLUS the Division 60 markup fee lines. The RPC is a FULL per-project replace across
+  // ALL sections, so the markup rows MUST ride along or the save would silently delete them.
+  // The fee lines are appended AFTER gc/site_ops (the gateway re-stamps `sort_order` from the
+  // array index, so this fixes their persisted position below the section lines). Phase 4:
+  // reads the MUTABLE `markupLines` so an insert/delete/edit re-saves (a stale snapshot would
+  // drop the change) — this memo is the single choke point the save path consumes.
+  //
+  // Deliberately SEPARATE from the `sectionLines` memo above: that one feeds the binding
+  // projection (`sectionBindingLines`), and a markup line (section neither 'gc' nor
+  // 'site_ops', code='') would project as a bogus zero-total graph node. Fee lines are not
+  // bindable graph nodes — they only need to round-trip through persistence.
+  const persistedSectionLines = React.useMemo(
+    () => [...sectionLines, ...markupLines],
+    [sectionLines, markupLines]
+  );
+
   // The section lines (synthesized above, before the workbook so they can also feed the
   // binding engine — Phase A5) persist alongside the legacy blobs via the dual-write.
   const { saveStatus, saveError } = useEstimatePersistence(
@@ -380,7 +422,7 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
     importedSectionTotals?.siteOperationsTotal ?? infrastructure.siteOperationsTotal,
     freezeRateCardSnapshot,
     isNewEstimate,
-    sectionLines
+    persistedSectionLines
   );
 
   // ---------------------------------------------------------------------------
@@ -676,6 +718,10 @@ function WorkspaceInner({ projectId }: { projectId: string }) {
             handleExportProcore={handleExportProcore}
             isExportingExcel={isExportingExcel}
             takeoffSummary={takeoffSummary}
+            markupLines={markupLines}
+            insertFeeLine={insertFeeLine}
+            deleteFeeLine={deleteFeeLine}
+            editFeeLine={editFeeLine}
             divisionBreakdown={divisionBreakdown}
             costTypeBreakdown={costTypeBreakdown}
             linkedDivisionTotals={linkedDivisionTotals}
