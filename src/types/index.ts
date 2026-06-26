@@ -315,6 +315,60 @@ export interface ClearBindingCommand {
   prevBinding: Binding;
 }
 
+// ---------------------------------------------------------------------------
+// Division 60 Fee-Block Addressability (Phase 4) — undoable edits to the markup
+// fee lines. These are `estimate_section_lines` rows (section='markup'), NOT
+// ProcessedTakeoffRow grid rows, so they carry their own variants here rather than
+// reusing EDIT_CELL / INSERT_ROW / DELETE_ROW (typed to ProcessedTakeoffRow) or the
+// separate SectionGridCommand union (consumed by useSectionLineGrid, which the
+// fee block does not use). They ride the SAME shared workbook undo stack as STEP 4
+// edits — exactly like EDIT_BUYOUT_CELL (a localStorage store) and SET_BINDING /
+// CLEAR_BINDING (a page-owned store) — so a single Ctrl+Z interleaves a fee edit
+// with estimate edits in chronological order. The dispatcher (useCommandDispatch)
+// mutates the page-owned markup-line store via setMarkupLines; each command holds
+// full inverse data (AGENTS.md compounding-history): the whole inserted/deleted line
+// (+ its array index) and the prev/next field patch for an edit.
+// ---------------------------------------------------------------------------
+
+/**
+ * Insert a new flat fee line into the Division 60 markup block (Phase 4). Carries the
+ * FULL new line (`source: 'manual'`, `section: 'markup'`, `entry_kind: 'lumpSum'`,
+ * dollar in `inputs.amount`, Procore code BLANK) + its array `index`, so undo removes
+ * exactly that line and redo re-inserts it identically (id preserved).
+ */
+export interface InsertFeeLineCommand {
+  type: "INSERT_FEE_LINE";
+  line: EstimateSectionLine;
+  index: number;
+}
+
+/**
+ * Delete a fee line from the markup block (Phase 4) — the inverse of INSERT. The full
+ * line snapshot + original `index` let undo re-insert it at its prior position with its
+ * label/amount/code intact (AGENTS.md compounding-history).
+ */
+export interface DeleteFeeLineCommand {
+  type: "DELETE_FEE_LINE";
+  line: EstimateSectionLine;
+  index: number;
+}
+
+/**
+ * Edit a fee line's label / amount / Procore code (Phase 4). `prev` and `next` are the
+ * CHANGED fields only (a shallow patch merged onto the line) — e.g. `{ label }`,
+ * `{ inputs: { amount } }`, or `{ procoreCode, costType }` — so one Ctrl+Z restores the
+ * exact prior field values. An amount edit mutates the `inputs.amount` INPUT directly
+ * (not a `line:<id>:total` override — that audited type-over stays a separate Phase-2
+ * mechanism). A code is validated against the Procore authority BEFORE this command is
+ * pushed, so an invalid code never reaches the undo stack.
+ */
+export interface EditFeeLineCommand {
+  type: "EDIT_FEE_LINE";
+  id: string;
+  prev: Partial<EstimateSectionLine>;
+  next: Partial<EstimateSectionLine>;
+}
+
 export type WorkbookCommand =
   | EditCellCommand
   | EditCustomCellCommand
@@ -328,7 +382,10 @@ export type WorkbookCommand =
   | MergeTakeoffDataCommand
   | UpdateColumnCommand
   | SetBindingCommand
-  | ClearBindingCommand;
+  | ClearBindingCommand
+  | InsertFeeLineCommand
+  | DeleteFeeLineCommand
+  | EditFeeLineCommand;
 
 // ---------------------------------------------------------------------------
 // SectionGridCommand — the Step-2 / Step-3 (GC Personnel / Site Operations) grid

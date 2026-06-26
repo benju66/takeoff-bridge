@@ -14,6 +14,8 @@ import { applyMergeForward, applyMergeInverse } from "@/lib/mergeTakeoff";
 import type { Binding } from "@/lib/bindings/types";
 import { upsertBinding, removeBinding } from "@/lib/bindings/store";
 import { applyBuyoutCommandValue, type BuyoutStore, type LensView } from "@/lib/buyout";
+import type { EstimateSectionLine } from "@/types/db";
+import { applyFeeLineForward, applyFeeLineInverse } from "@/lib/sectionLines/markupCommands";
 
 // ---------------------------------------------------------------------------
 // UseCommandDispatchReturn — Public API surface for the dispatch hook
@@ -46,6 +48,10 @@ export function useCommandDispatch(
   // (localStorage only — never rows/DB), plus the lens setter for the D-A auto-flip.
   buyout: BuyoutStore,
   setLensView: (next: LensView) => void,
+  // Fee-Block Addressability Phase 4: the page-owned markup fee-line store the
+  // INSERT_FEE_LINE / DELETE_FEE_LINE / EDIT_FEE_LINE commands flip optimistically for
+  // undo/redo (owned by useMarkupFeeLines; persisted via the full-replace save_section_lines).
+  setMarkupLines: React.Dispatch<React.SetStateAction<EstimateSectionLine[]>> = () => {},
 ): UseCommandDispatchReturn {
 
   // Persist a binding write (fire-and-forget, mirrors the registry-delta pattern):
@@ -240,8 +246,16 @@ export function useCommandDispatch(
         persistBinding(null, cmd.targetNodeId);
         break;
       }
+      case "INSERT_FEE_LINE":
+      case "DELETE_FEE_LINE":
+      case "EDIT_FEE_LINE": {
+        // Forward (live-edit / redo) → mutate the page-owned markup store (Fee-Block Phase 4).
+        // The pure reducer holds the inverse data; the debounced save_section_lines persists.
+        setMarkupLines((prev) => applyFeeLineForward(prev, cmd));
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout, setMarkupLines]);
 
   // ---------------------------------------------------------------------------
   // applyCommandInverse — Execute a command's INVERSE (prev) effect on state
@@ -445,8 +459,16 @@ export function useCommandDispatch(
         persistBinding(cmd.prevBinding, cmd.targetNodeId);
         break;
       }
+      case "INSERT_FEE_LINE":
+      case "DELETE_FEE_LINE":
+      case "EDIT_FEE_LINE": {
+        // Undo → reverse the fee-line mutation (insert↔delete at the captured index,
+        // edit restores the prev field patch) — a single Ctrl+Z, atomically (Fee-Block Phase 4).
+        setMarkupLines((prev) => applyFeeLineInverse(prev, cmd));
+        break;
+      }
     }
-  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout]);
+  }, [projectId, setColumnDefs, setLockedCells, setRows, setUserRegistry, setGlobalRegistry, setUnmappedTakeoffClassifications, globalRegistry, setBindings, persistBinding, buyout, setMarkupLines]);
 
   // A buyout edit reverted/replayed while the Estimate lens is active targets a hidden cell —
   // flip to the Buyout lens so the change is visible (D-A). Browser-local; never touches the DB.
