@@ -1,0 +1,10 @@
+Change Event Types:
+
+Allowance, FP Contingency/Buyout, No Cost, Original Budget, Owner Contingency
+
+Change Event Reasons:
+
+AHJ, Allowance, Arch/Eng FP Construction, Internal (DO NOT SEND TO SUB), Owner Request, Winter Conditions
+
+Change Event Scope:
+In Scope, Out of Scope
