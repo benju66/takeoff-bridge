@@ -49,10 +49,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         let session = await getSession();
         if (cancelled) return;
 
-        // Auto-login for local development
+        // Auto-login for LOCAL DEVELOPMENT ONLY. This must never run in a production build
+        // (e.g. Vercel): shipping the DEV_* env vars there would auto-sign-in every anonymous
+        // visitor as that user and embed the password in the public client bundle. NODE_ENV is
+        // "production" in `next build`, so this guard hard-disables it regardless of which env
+        // vars are present. (Playwright runs the dev server, so e2e auto-login is unaffected.)
+        const devAutoLoginAllowed = process.env.NODE_ENV !== "production";
         const devEmail = process.env.NEXT_PUBLIC_DEV_EMAIL;
         const devPassword = process.env.NEXT_PUBLIC_DEV_PASSWORD;
-        if (!session && devEmail && devPassword) {
+        if (!session && devAutoLoginAllowed && devEmail && devPassword) {
           try {
             console.log("Developer Auto-Login triggered...");
             await signIn(devEmail, devPassword);
